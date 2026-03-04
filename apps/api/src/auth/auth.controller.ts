@@ -5,6 +5,7 @@ import {
   Get,
   HttpCode,
   HttpStatus,
+  Query,
   Param,
   Post,
   Req,
@@ -24,6 +25,7 @@ import {
 import type { Request } from 'express';
 import { AuthService } from './auth.service';
 import { AuthResponseDto } from './dto/auth-response.dto';
+import { ListSessionsQueryDto } from './dto/list-sessions-query.dto';
 import { LoginDto } from './dto/login.dto';
 import { RefreshTokenDto } from './dto/refresh-token.dto';
 import { RegisterDto } from './dto/register.dto';
@@ -96,8 +98,11 @@ export class AuthController {
   @ApiOperation({ summary: 'List user sessions/devices' })
   @ApiOkResponse({ type: SessionDto, isArray: true })
   @ApiUnauthorizedResponse({ description: 'Missing or invalid access token' })
-  sessions(@Req() req: AuthenticatedRequest) {
-    return this.authService.listSessions(req.user.sub);
+  sessions(
+    @Req() req: AuthenticatedRequest,
+    @Query() query: ListSessionsQueryDto,
+  ) {
+    return this.authService.listSessions(req.user.sub, query);
   }
 
   @UseGuards(JwtAuthGuard)

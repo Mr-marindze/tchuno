@@ -4,10 +4,11 @@ import {
   UnauthorizedException,
 } from '@nestjs/common';
 import { JwtService } from '@nestjs/jwt';
-import { Session, User } from '@prisma/client';
+import { Prisma, Session, User } from '@prisma/client';
 import * as bcrypt from 'bcryptjs';
 import { createHash, randomUUID } from 'crypto';
 import { PrismaService } from '../prisma/prisma.service';
+import { ListSessionsQueryDto } from './dto/list-sessions-query.dto';
 import { LoginDto } from './dto/login.dto';
 import { RegisterDto } from './dto/register.dto';
 import { AuthResponse, SessionClientInfo } from './types';
@@ -131,9 +132,27 @@ export class AuthService {
     });
   }
 
-  async listSessions(userId: string) {
+  async listSessions(userId: string, query: ListSessionsQueryDto) {
+    const status = query.status ?? 'active';
+    const limit = query.limit ?? 20;
+    const offset = query.offset ?? 0;
+    const sort = query.sort ?? 'lastUsedAt:desc';
+
+    const [sortField, sortDirection] = sort.split(':') as [
+      'lastUsedAt' | 'createdAt',
+      'asc' | 'desc',
+    ];
+
+    const where: Prisma.SessionWhereInput = { userId };
+
+    if (status === 'active') {
+      where.revokedAt = null;
+    } else if (status === 'revoked') {
+      where.revokedAt = { not: null };
+    }
+
     return this.prisma.session.findMany({
-      where: { userId },
+      where,
       select: {
         id: true,
         deviceId: true,
@@ -143,7 +162,9 @@ export class AuthService {
         lastUsedAt: true,
         revokedAt: true,
       },
-      orderBy: [{ revokedAt: 'asc' }, { lastUsedAt: 'desc' }],
+      orderBy: [{ [sortField]: sortDirection }],
+      take: limit,
+      skip: offset,
     });
   }
 
