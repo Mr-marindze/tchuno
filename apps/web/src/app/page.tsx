@@ -2,7 +2,7 @@
 
 import Link from "next/link";
 import { FormEvent, useMemo, useState } from "react";
-import { AuthResponse, API_URL, login, logout, refresh, register, saveTokens, clearTokens } from "@/lib/auth";
+import { AuthResponse, API_URL, login, logout, refresh, register } from "@/lib/auth";
 
 type Mode = "login" | "register";
 
@@ -32,7 +32,6 @@ export default function Home() {
           : await register({ email, password, name: name.trim() || undefined });
 
       setResult(auth);
-      saveTokens(auth);
       setMessage(`${mode === "login" ? "Login" : "Registo"} com sucesso.`);
     } catch (error) {
       setMessage(error instanceof Error ? error.message : "Erro inesperado");
@@ -42,7 +41,7 @@ export default function Home() {
   }
 
   async function onRefresh() {
-    const refreshToken = result?.refreshToken ?? localStorage.getItem("tchuno_refresh_token");
+    const refreshToken = result?.refreshToken;
 
     if (!refreshToken) {
       setMessage("Nenhum refresh token disponível.");
@@ -55,7 +54,6 @@ export default function Home() {
     try {
       const auth = await refresh(refreshToken);
       setResult(auth);
-      saveTokens(auth);
       setMessage("Sessão renovada.");
     } catch (error) {
       setMessage(error instanceof Error ? error.message : "Erro inesperado");
@@ -65,7 +63,7 @@ export default function Home() {
   }
 
   async function onLogout() {
-    const refreshToken = result?.refreshToken ?? localStorage.getItem("tchuno_refresh_token");
+    const refreshToken = result?.refreshToken;
 
     setIsSubmitting(true);
     setMessage("A terminar sessão...");
@@ -73,9 +71,10 @@ export default function Home() {
     try {
       if (refreshToken) {
         await logout(refreshToken);
+      } else {
+        await logout();
       }
       setResult(null);
-      clearTokens();
       setMessage("Sessão terminada.");
     } catch (error) {
       setMessage(error instanceof Error ? error.message : "Erro inesperado");

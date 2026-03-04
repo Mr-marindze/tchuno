@@ -9,18 +9,8 @@ import * as bcrypt from 'bcryptjs';
 import { createHash, randomUUID } from 'crypto';
 import { PrismaService } from '../prisma/prisma.service';
 import { LoginDto } from './dto/login.dto';
-import { RefreshTokenDto } from './dto/refresh-token.dto';
 import { RegisterDto } from './dto/register.dto';
-
-type AuthResponse = {
-  user: {
-    id: string;
-    email: string;
-    name: string | null;
-  };
-  accessToken: string;
-  refreshToken: string;
-};
+import { AuthResponse } from './types';
 
 type RefreshTokenPayload = {
   sub: string;
@@ -86,9 +76,9 @@ export class AuthService {
     return this.issueTokens(user);
   }
 
-  async refresh(dto: RefreshTokenDto): Promise<AuthResponse> {
-    const payload = this.verifyRefreshToken(dto.refreshToken);
-    const tokenHash = this.hashToken(dto.refreshToken);
+  async refresh(refreshToken: string): Promise<AuthResponse> {
+    const payload = this.verifyRefreshToken(refreshToken);
+    const tokenHash = this.hashToken(refreshToken);
 
     const persistedToken = await this.prisma.refreshToken.findUnique({
       where: { tokenHash },
@@ -118,8 +108,12 @@ export class AuthService {
     return this.issueTokens(persistedToken.user);
   }
 
-  async logout(dto: RefreshTokenDto): Promise<void> {
-    const tokenHash = this.hashToken(dto.refreshToken);
+  async logout(refreshToken?: string): Promise<void> {
+    if (!refreshToken) {
+      return;
+    }
+
+    const tokenHash = this.hashToken(refreshToken);
 
     await this.prisma.refreshToken.updateMany({
       where: { tokenHash, revokedAt: null },
