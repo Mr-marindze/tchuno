@@ -1,7 +1,6 @@
-import { IsJWT, IsOptional } from 'class-validator';
+import { IsJWT } from 'class-validator';
 
 export class RefreshTokenDto {
-  @IsOptional()
   @IsJWT()
-  refreshToken?: string;
+  refreshToken!: string;
 }

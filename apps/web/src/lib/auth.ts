@@ -14,6 +14,8 @@ export type SessionState = {
 };
 
 const API_URL = process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:3001";
+const ACCESS_TOKEN_KEY = "tchuno_access_token";
+const REFRESH_TOKEN_KEY = "tchuno_refresh_token";
 
 type ApiErrorBody = {
   message?: string | string[];
@@ -36,14 +38,13 @@ async function readError(response: Response): Promise<string> {
   return detail;
 }
 
-async function postJson<T>(path: string, payload?: unknown): Promise<T> {
+async function postJson<T>(path: string, payload: unknown): Promise<T> {
   const response = await fetch(`${API_URL}${path}`, {
     method: "POST",
     headers: {
       "Content-Type": "application/json",
     },
-    credentials: "include",
-    body: payload ? JSON.stringify(payload) : undefined,
+    body: JSON.stringify(payload),
   });
 
   if (!response.ok) {
@@ -59,7 +60,6 @@ async function postJson<T>(path: string, payload?: unknown): Promise<T> {
 
 async function getJson<T>(path: string, accessToken: string): Promise<T> {
   const response = await fetch(`${API_URL}${path}`, {
-    credentials: "include",
     headers: {
       Authorization: `Bearer ${accessToken}`,
     },
@@ -70,6 +70,30 @@ async function getJson<T>(path: string, accessToken: string): Promise<T> {
   }
 
   return (await response.json()) as T;
+}
+
+export function getStoredTokens(): {
+  accessToken: string | null;
+  refreshToken: string | null;
+} {
+  if (typeof window === "undefined") {
+    return { accessToken: null, refreshToken: null };
+  }
+
+  return {
+    accessToken: localStorage.getItem(ACCESS_TOKEN_KEY),
+    refreshToken: localStorage.getItem(REFRESH_TOKEN_KEY),
+  };
+}
+
+export function saveTokens(auth: AuthResponse): void {
+  localStorage.setItem(ACCESS_TOKEN_KEY, auth.accessToken);
+  localStorage.setItem(REFRESH_TOKEN_KEY, auth.refreshToken);
+}
+
+export function clearTokens(): void {
+  localStorage.removeItem(ACCESS_TOKEN_KEY);
+  localStorage.removeItem(REFRESH_TOKEN_KEY);
 }
 
 export async function register(input: {
@@ -87,21 +111,12 @@ export async function login(input: {
   return postJson<AuthResponse>("/auth/login", input);
 }
 
-export async function refresh(refreshToken?: string): Promise<AuthResponse> {
-  if (refreshToken) {
-    return postJson<AuthResponse>("/auth/refresh", { refreshToken });
-  }
-
-  return postJson<AuthResponse>("/auth/refresh", {});
+export async function refresh(refreshToken: string): Promise<AuthResponse> {
+  return postJson<AuthResponse>("/auth/refresh", { refreshToken });
 }
 
-export async function logout(refreshToken?: string): Promise<void> {
-  if (refreshToken) {
-    await postJson<void>("/auth/logout", { refreshToken });
-    return;
-  }
-
-  await postJson<void>("/auth/logout", {});
+export async function logout(refreshToken: string): Promise<void> {
+  await postJson<void>("/auth/logout", { refreshToken });
 }
 
 export async function getMe(accessToken: string): Promise<unknown> {
@@ -109,22 +124,61 @@ export async function getMe(accessToken: string): Promise<unknown> {
 }
 
 export async function ensureSession(): Promise<SessionState | null> {
+  const { accessToken, refreshToken } = getStoredTokens();
+
+  if (!accessToken && !refreshToken) {
+    return null;
+  }
+
+  if (accessToken) {
+    try {
+      const me = await getMe(accessToken);
+      return {
+        auth: {
+          user: (me as { user?: AuthResponse["user"] }).user ?? {
+            id: "",
+            email: "",
+            name: null,
+          },
+          accessToken,
+          refreshToken: refreshToken ?? "",
+        },
+        me,
+      };
+    } catch {
+      // Fallback to refresh flow.
+    }
+  }
+
+  if (!refreshToken) {
+    clearTokens();
+    return null;
+  }
+
   try {
-    const auth = await refresh();
+    const auth = await refresh(refreshToken);
+    saveTokens(auth);
     const me = await getMe(auth.accessToken);
     return { auth, me };
   } catch {
+    clearTokens();
     return null;
   }
 }
 
 export function startAutoRefresh(onSuccess?: (auth: AuthResponse) => void): () => void {
   const timer = window.setInterval(async () => {
+    const { refreshToken } = getStoredTokens();
+    if (!refreshToken) {
+      return;
+    }
+
     try {
-      const auth = await refresh();
+      const auth = await refresh(refreshToken);
+      saveTokens(auth);
       onSuccess?.(auth);
     } catch {
-      // Ignore transient refresh failures; dashboard handles invalid sessions.
+      clearTokens();
     }
   }, 10 * 60 * 1000);
 

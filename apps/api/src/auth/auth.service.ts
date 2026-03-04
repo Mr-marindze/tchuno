@@ -121,6 +121,13 @@ export class AuthService {
     });
   }
 
+  async logoutAll(userId: string): Promise<void> {
+    await this.prisma.refreshToken.updateMany({
+      where: { userId, revokedAt: null },
+      data: { revokedAt: new Date() },
+    });
+  }
+
   async validateUserById(userId: string): Promise<User | null> {
     return this.prisma.user.findUnique({
       where: { id: userId },

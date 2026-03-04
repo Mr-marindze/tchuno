@@ -6,7 +6,6 @@ import {
   HttpStatus,
   Post,
   Req,
-  Res,
   UseGuards,
 } from '@nestjs/common';
 import {
@@ -19,20 +18,16 @@ import {
   ApiTags,
   ApiUnauthorizedResponse,
 } from '@nestjs/swagger';
-import type { Request, Response } from 'express';
-import {
-  ACCESS_TOKEN_COOKIE,
-  ACCESS_TOKEN_TTL_MS,
-  REFRESH_TOKEN_COOKIE,
-  REFRESH_TOKEN_TTL_MS,
-} from './auth.constants';
 import { AuthService } from './auth.service';
 import { AuthResponseDto } from './dto/auth-response.dto';
 import { LoginDto } from './dto/login.dto';
 import { RefreshTokenDto } from './dto/refresh-token.dto';
 import { RegisterDto } from './dto/register.dto';
 import { JwtAuthGuard } from './guards/jwt-auth.guard';
-import { AuthResponse } from './types';
+
+type AuthenticatedRequest = {
+  user: { sub: string; email: string };
+};
 
 @ApiTags('auth')
 @Controller('auth')
@@ -43,13 +38,8 @@ export class AuthController {
   @ApiOperation({ summary: 'Register a new user' })
   @ApiCreatedResponse({ type: AuthResponseDto })
   @ApiResponse({ status: 409, description: 'Email already in use' })
-  async register(
-    @Body() dto: RegisterDto,
-    @Res({ passthrough: true }) res: Response,
-  ) {
-    const auth = await this.authService.register(dto);
-    this.writeAuthCookies(res, auth);
-    return auth;
+  register(@Body() dto: RegisterDto) {
+    return this.authService.register(dto);
   }
 
   @Post('login')
@@ -57,48 +47,37 @@ export class AuthController {
   @ApiOperation({ summary: 'Login user' })
   @ApiOkResponse({ type: AuthResponseDto })
   @ApiUnauthorizedResponse({ description: 'Invalid credentials' })
-  async login(
-    @Body() dto: LoginDto,
-    @Res({ passthrough: true }) res: Response,
-  ) {
-    const auth = await this.authService.login(dto);
-    this.writeAuthCookies(res, auth);
-    return auth;
+  login(@Body() dto: LoginDto) {
+    return this.authService.login(dto);
   }
 
   @Post('refresh')
   @HttpCode(HttpStatus.OK)
   @ApiOperation({ summary: 'Refresh access and refresh tokens' })
-  @ApiBody({ type: RefreshTokenDto, required: false })
+  @ApiBody({ type: RefreshTokenDto })
   @ApiOkResponse({ type: AuthResponseDto })
   @ApiUnauthorizedResponse({ description: 'Invalid refresh token' })
-  async refresh(
-    @Body() dto: RefreshTokenDto,
-    @Req() req: Request,
-    @Res({ passthrough: true }) res: Response,
-  ) {
-    const refreshToken = this.resolveRefreshToken(dto, req);
-    const auth = await this.authService.refresh(refreshToken ?? '');
-    this.writeAuthCookies(res, auth);
-    return auth;
+  refresh(@Body() dto: RefreshTokenDto) {
+    return this.authService.refresh(dto.refreshToken);
   }
 
   @Post('logout')
   @HttpCode(HttpStatus.NO_CONTENT)
   @ApiOperation({ summary: 'Logout by revoking refresh token' })
-  @ApiBody({ type: RefreshTokenDto, required: false })
+  @ApiBody({ type: RefreshTokenDto })
   @ApiNoContentResponse({ description: 'Successfully logged out' })
-  async logout(
-    @Body() dto: RefreshTokenDto,
-    @Req() req: Request,
-    @Res({ passthrough: true }) res: Response,
-  ) {
-    const refreshToken = this.resolveRefreshToken(dto, req);
-    await this.authService.logout(refreshToken);
+  logout(@Body() dto: RefreshTokenDto) {
+    return this.authService.logout(dto.refreshToken);
+  }
 
-    const cookieOptions = this.getCookieOptions();
-    res.clearCookie(ACCESS_TOKEN_COOKIE, cookieOptions);
-    res.clearCookie(REFRESH_TOKEN_COOKIE, cookieOptions);
+  @Post('logout-all')
+  @UseGuards(JwtAuthGuard)
+  @HttpCode(HttpStatus.NO_CONTENT)
+  @ApiOperation({ summary: 'Logout all devices by revoking all refresh tokens' })
+  @ApiNoContentResponse({ description: 'All sessions revoked' })
+  @ApiUnauthorizedResponse({ description: 'Missing or invalid access token' })
+  logoutAll(@Req() req: AuthenticatedRequest) {
+    return this.authService.logoutAll(req.user.sub);
   }
 
   @UseGuards(JwtAuthGuard)
@@ -106,41 +85,7 @@ export class AuthController {
   @ApiOperation({ summary: 'Get current user payload from access token' })
   @ApiOkResponse({ description: 'Current user payload' })
   @ApiUnauthorizedResponse({ description: 'Missing or invalid access token' })
-  me(@Req() req: { user: { sub: string; email: string } }) {
+  me(@Req() req: AuthenticatedRequest) {
     return req.user;
-  }
-
-  private writeAuthCookies(res: Response, auth: AuthResponse): void {
-    const cookieOptions = this.getCookieOptions();
-
-    res.cookie(ACCESS_TOKEN_COOKIE, auth.accessToken, {
-      ...cookieOptions,
-      maxAge: ACCESS_TOKEN_TTL_MS,
-    });
-
-    res.cookie(REFRESH_TOKEN_COOKIE, auth.refreshToken, {
-      ...cookieOptions,
-      maxAge: REFRESH_TOKEN_TTL_MS,
-    });
-  }
-
-  private getCookieOptions() {
-    return {
-      httpOnly: true,
-      secure: process.env.NODE_ENV === 'production',
-      sameSite: 'lax' as const,
-      path: '/',
-    };
-  }
-
-  private resolveRefreshToken(
-    dto: RefreshTokenDto,
-    req: Request,
-  ): string | undefined {
-    const cookies = req.cookies as Record<string, unknown> | undefined;
-    const cookieValue = cookies?.[REFRESH_TOKEN_COOKIE];
-    const cookieToken =
-      typeof cookieValue === 'string' ? cookieValue : undefined;
-    return dto.refreshToken ?? cookieToken;
   }
 }
