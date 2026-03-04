@@ -1,8 +1,11 @@
 {
   "name": "tchuno",
   "private": true,
-  "packageManager": "yarn@stable",
-  "workspaces": ["apps/*", "packages/*"],
+  "packageManager": "yarn@4.13.0",
+  "workspaces": [
+    "apps/*",
+    "packages/*"
+  ],
   "scripts": {
     "dev": "yarn -s dev:api & yarn -s dev:web",
     "dev:api": "yarn workspace @tchuno/api start:dev",
