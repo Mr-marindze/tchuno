@@ -12,7 +12,7 @@
     "dev:web": "yarn workspace @tchuno/web dev",
     "db:migrate": "yarn workspace @tchuno/database prisma migrate dev",
     "db:seed": "yarn workspace @tchuno/database prisma db seed",
-    "lint": "yarn workspaces foreach -pt run lint || true",
-    "test": "yarn workspaces foreach -pt run test || true"
+    "lint": "yarn workspaces foreach -Apt run lint || true",
+    "test": "yarn workspaces foreach -Apt run test || true"
   }
 }
