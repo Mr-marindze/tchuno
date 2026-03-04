@@ -8,6 +8,7 @@ import {
   clearTokens,
   login,
   logout,
+  logoutAll,
   refresh,
   register,
   saveTokens,
@@ -93,6 +94,29 @@ export default function Home() {
     }
   }
 
+  async function onLogoutAll() {
+    const accessToken = result?.accessToken ?? localStorage.getItem("tchuno_access_token");
+
+    if (!accessToken) {
+      setMessage("Access token ausente.");
+      return;
+    }
+
+    setIsSubmitting(true);
+    setMessage("A terminar todas as sessões...");
+
+    try {
+      await logoutAll(accessToken);
+      setResult(null);
+      clearTokens();
+      setMessage("Todas as sessões foram terminadas.");
+    } catch (error) {
+      setMessage(error instanceof Error ? error.message : "Erro inesperado");
+    } finally {
+      setIsSubmitting(false);
+    }
+  }
+
   return (
     <main className="shell">
       <section className="card">
@@ -164,6 +188,9 @@ export default function Home() {
           </button>
           <button type="button" onClick={onLogout} disabled={isSubmitting}>
             Logout
+          </button>
+          <button type="button" onClick={onLogoutAll} disabled={isSubmitting}>
+            Logout All
           </button>
         </div>
 

@@ -9,6 +9,7 @@ import {
   ensureSession,
   getStoredTokens,
   logout,
+  logoutAll,
   refresh,
   saveTokens,
   startAutoRefresh,
@@ -104,6 +105,23 @@ export default function DashboardPage() {
     }
   }
 
+  async function handleLogoutAll() {
+    const { accessToken } = getStoredTokens();
+
+    if (!accessToken) {
+      setStatus("Access token ausente.");
+      return;
+    }
+
+    try {
+      await logoutAll(accessToken);
+    } finally {
+      clearTokens();
+      setStatus("Todas as sessões foram terminadas.");
+      router.replace("/");
+    }
+  }
+
   if (loading) {
     return (
       <main className="shell">
@@ -134,6 +152,9 @@ export default function DashboardPage() {
           </button>
           <button type="button" onClick={handleLogout}>
             Logout
+          </button>
+          <button type="button" onClick={handleLogoutAll}>
+            Logout All
           </button>
         </div>
 
