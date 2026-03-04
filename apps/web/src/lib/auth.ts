@@ -13,6 +13,16 @@ export type SessionState = {
   me: unknown;
 };
 
+export type DeviceSession = {
+  id: string;
+  deviceId: string;
+  ip: string | null;
+  userAgent: string | null;
+  createdAt: string;
+  lastUsedAt: string;
+  revokedAt: string | null;
+};
+
 const API_URL = process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:3001";
 const ACCESS_TOKEN_KEY = "tchuno_access_token";
 const REFRESH_TOKEN_KEY = "tchuno_refresh_token";
@@ -136,6 +146,26 @@ export async function logoutAll(accessToken: string): Promise<void> {
 
 export async function getMe(accessToken: string): Promise<unknown> {
   return getJson<unknown>("/auth/me", accessToken);
+}
+
+export async function listSessions(accessToken: string): Promise<DeviceSession[]> {
+  return getJson<DeviceSession[]>("/auth/sessions", accessToken);
+}
+
+export async function revokeSession(
+  accessToken: string,
+  sessionId: string,
+): Promise<void> {
+  const response = await fetch(`${API_URL}/auth/sessions/${sessionId}`, {
+    method: "DELETE",
+    headers: {
+      Authorization: `Bearer ${accessToken}`,
+    },
+  });
+
+  if (!response.ok) {
+    throw new Error(await readError(response));
+  }
 }
 
 export async function ensureSession(): Promise<SessionState | null> {

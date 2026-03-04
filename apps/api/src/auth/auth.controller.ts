@@ -64,7 +64,10 @@ export class AuthController {
   @ApiOkResponse({ type: AuthResponseDto })
   @ApiUnauthorizedResponse({ description: 'Invalid refresh token' })
   refresh(@Body() dto: RefreshTokenDto, @Req() req: Request) {
-    return this.authService.refresh(dto.refreshToken, this.extractClientInfo(req));
+    return this.authService.refresh(
+      dto.refreshToken,
+      this.extractClientInfo(req),
+    );
   }
 
   @Post('logout')
@@ -79,7 +82,9 @@ export class AuthController {
   @Post('logout-all')
   @UseGuards(JwtAuthGuard)
   @HttpCode(HttpStatus.NO_CONTENT)
-  @ApiOperation({ summary: 'Logout all devices by revoking all refresh tokens' })
+  @ApiOperation({
+    summary: 'Logout all devices by revoking all refresh tokens',
+  })
   @ApiNoContentResponse({ description: 'All sessions revoked' })
   @ApiUnauthorizedResponse({ description: 'Missing or invalid access token' })
   logoutAll(@Req() req: AuthenticatedRequest) {
@@ -129,7 +134,8 @@ export class AuthController {
     const userAgent =
       typeof userAgentHeader === 'string'
         ? userAgentHeader
-        : Array.isArray(userAgentHeader) && typeof userAgentHeader[0] === 'string'
+        : Array.isArray(userAgentHeader) &&
+            typeof userAgentHeader[0] === 'string'
           ? userAgentHeader[0]
           : null;
 
