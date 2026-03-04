@@ -6,8 +6,10 @@ import {
 import { JwtService } from '@nestjs/jwt';
 import { User } from '@prisma/client';
 import * as bcrypt from 'bcryptjs';
+import { createHash, randomUUID } from 'crypto';
 import { PrismaService } from '../prisma/prisma.service';
 import { LoginDto } from './dto/login.dto';
+import { RefreshTokenDto } from './dto/refresh-token.dto';
 import { RegisterDto } from './dto/register.dto';
 
 type AuthResponse = {
@@ -20,8 +22,22 @@ type AuthResponse = {
   refreshToken: string;
 };
 
+type RefreshTokenPayload = {
+  sub: string;
+  email: string;
+  type: 'refresh';
+  jti: string;
+  exp: number;
+  iat: number;
+};
+
 @Injectable()
 export class AuthService {
+  private readonly accessSecret =
+    process.env.JWT_ACCESS_SECRET || 'change-me-access';
+  private readonly refreshSecret =
+    process.env.JWT_REFRESH_SECRET || 'change-me-refresh';
+
   constructor(
     private readonly prisma: PrismaService,
     private readonly jwtService: JwtService,
@@ -46,7 +62,7 @@ export class AuthService {
       },
     });
 
-    return this.buildAuthResponse(user);
+    return this.issueTokens(user);
   }
 
   async login(dto: LoginDto): Promise<AuthResponse> {
@@ -67,7 +83,48 @@ export class AuthService {
       throw new UnauthorizedException('Invalid credentials');
     }
 
-    return this.buildAuthResponse(user);
+    return this.issueTokens(user);
+  }
+
+  async refresh(dto: RefreshTokenDto): Promise<AuthResponse> {
+    const payload = this.verifyRefreshToken(dto.refreshToken);
+    const tokenHash = this.hashToken(dto.refreshToken);
+
+    const persistedToken = await this.prisma.refreshToken.findUnique({
+      where: { tokenHash },
+      include: { user: true },
+    });
+
+    if (
+      !persistedToken ||
+      persistedToken.revokedAt ||
+      persistedToken.expiresAt < new Date()
+    ) {
+      throw new UnauthorizedException('Invalid refresh token');
+    }
+
+    if (
+      persistedToken.userId !== payload.sub ||
+      !persistedToken.user.isActive
+    ) {
+      throw new UnauthorizedException('Invalid refresh token');
+    }
+
+    await this.prisma.refreshToken.update({
+      where: { id: persistedToken.id },
+      data: { revokedAt: new Date() },
+    });
+
+    return this.issueTokens(persistedToken.user);
+  }
+
+  async logout(dto: RefreshTokenDto): Promise<void> {
+    const tokenHash = this.hashToken(dto.refreshToken);
+
+    await this.prisma.refreshToken.updateMany({
+      where: { tokenHash, revokedAt: null },
+      data: { revokedAt: new Date() },
+    });
   }
 
   async validateUserById(userId: string): Promise<User | null> {
@@ -76,22 +133,32 @@ export class AuthService {
     });
   }
 
-  private buildAuthResponse(user: User): AuthResponse {
+  private async issueTokens(user: User): Promise<AuthResponse> {
     const accessToken = this.jwtService.sign(
       { sub: user.id, email: user.email },
       {
-        secret: process.env.JWT_ACCESS_SECRET || 'change-me-access',
+        secret: this.accessSecret,
         expiresIn: '15m',
       },
     );
 
     const refreshToken = this.jwtService.sign(
-      { sub: user.id, email: user.email, type: 'refresh' },
+      { sub: user.id, email: user.email, type: 'refresh', jti: randomUUID() },
       {
-        secret: process.env.JWT_REFRESH_SECRET || 'change-me-refresh',
+        secret: this.refreshSecret,
         expiresIn: '7d',
       },
     );
+
+    const expiresAt = new Date(Date.now() + 7 * 24 * 60 * 60 * 1000);
+
+    await this.prisma.refreshToken.create({
+      data: {
+        tokenHash: this.hashToken(refreshToken),
+        expiresAt,
+        userId: user.id,
+      },
+    });
 
     return {
       user: {
@@ -102,5 +169,28 @@ export class AuthService {
       accessToken,
       refreshToken,
     };
+  }
+
+  private verifyRefreshToken(refreshToken: string): RefreshTokenPayload {
+    try {
+      const payload = this.jwtService.verify<RefreshTokenPayload>(
+        refreshToken,
+        {
+          secret: this.refreshSecret,
+        },
+      );
+
+      if (payload.type !== 'refresh') {
+        throw new UnauthorizedException('Invalid refresh token');
+      }
+
+      return payload;
+    } catch {
+      throw new UnauthorizedException('Invalid refresh token');
+    }
+  }
+
+  private hashToken(token: string): string {
+    return createHash('sha256').update(token).digest('hex');
   }
 }
