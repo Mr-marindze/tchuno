@@ -119,6 +119,21 @@ export async function logout(refreshToken: string): Promise<void> {
   await postJson<void>("/auth/logout", { refreshToken });
 }
 
+export async function logoutAll(accessToken: string): Promise<void> {
+  const response = await fetch(`${API_URL}/auth/logout-all`, {
+    method: "POST",
+    headers: {
+      Authorization: `Bearer ${accessToken}`,
+      "Content-Type": "application/json",
+    },
+    body: JSON.stringify({}),
+  });
+
+  if (!response.ok) {
+    throw new Error(await readError(response));
+  }
+}
+
 export async function getMe(accessToken: string): Promise<unknown> {
   return getJson<unknown>("/auth/me", accessToken);
 }

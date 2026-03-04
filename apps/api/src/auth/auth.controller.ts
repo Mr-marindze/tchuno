@@ -73,7 +73,9 @@ export class AuthController {
   @Post('logout-all')
   @UseGuards(JwtAuthGuard)
   @HttpCode(HttpStatus.NO_CONTENT)
-  @ApiOperation({ summary: 'Logout all devices by revoking all refresh tokens' })
+  @ApiOperation({
+    summary: 'Logout all devices by revoking all refresh tokens',
+  })
   @ApiNoContentResponse({ description: 'All sessions revoked' })
   @ApiUnauthorizedResponse({ description: 'Missing or invalid access token' })
   logoutAll(@Req() req: AuthenticatedRequest) {
