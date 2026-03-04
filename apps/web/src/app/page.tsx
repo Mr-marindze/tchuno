@@ -1,65 +1,185 @@
-import Image from "next/image";
+"use client";
+
+import Link from "next/link";
+import { FormEvent, useMemo, useState } from "react";
+import { AuthResponse, API_URL, login, logout, refresh, register, saveTokens, clearTokens } from "@/lib/auth";
+
+type Mode = "login" | "register";
 
 export default function Home() {
+  const [mode, setMode] = useState<Mode>("login");
+  const [email, setEmail] = useState("user1@tchuno.local");
+  const [password, setPassword] = useState("12345678");
+  const [name, setName] = useState("User 1");
+  const [isSubmitting, setIsSubmitting] = useState(false);
+  const [result, setResult] = useState<AuthResponse | null>(null);
+  const [message, setMessage] = useState("Ready");
+
+  const title = useMemo(
+    () => (mode === "login" ? "Entrar no Tchuno" : "Criar conta no Tchuno"),
+    [mode],
+  );
+
+  async function onSubmit(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    setIsSubmitting(true);
+    setMessage("A processar...");
+
+    try {
+      const auth =
+        mode === "login"
+          ? await login({ email, password })
+          : await register({ email, password, name: name.trim() || undefined });
+
+      setResult(auth);
+      saveTokens(auth);
+      setMessage(`${mode === "login" ? "Login" : "Registo"} com sucesso.`);
+    } catch (error) {
+      setMessage(error instanceof Error ? error.message : "Erro inesperado");
+    } finally {
+      setIsSubmitting(false);
+    }
+  }
+
+  async function onRefresh() {
+    const refreshToken = result?.refreshToken ?? localStorage.getItem("tchuno_refresh_token");
+
+    if (!refreshToken) {
+      setMessage("Nenhum refresh token disponível.");
+      return;
+    }
+
+    setIsSubmitting(true);
+    setMessage("A renovar sessão...");
+
+    try {
+      const auth = await refresh(refreshToken);
+      setResult(auth);
+      saveTokens(auth);
+      setMessage("Sessão renovada.");
+    } catch (error) {
+      setMessage(error instanceof Error ? error.message : "Erro inesperado");
+    } finally {
+      setIsSubmitting(false);
+    }
+  }
+
+  async function onLogout() {
+    const refreshToken = result?.refreshToken ?? localStorage.getItem("tchuno_refresh_token");
+
+    setIsSubmitting(true);
+    setMessage("A terminar sessão...");
+
+    try {
+      if (refreshToken) {
+        await logout(refreshToken);
+      }
+      setResult(null);
+      clearTokens();
+      setMessage("Sessão terminada.");
+    } catch (error) {
+      setMessage(error instanceof Error ? error.message : "Erro inesperado");
+    } finally {
+      setIsSubmitting(false);
+    }
+  }
+
   return (
-    <div className="flex min-h-screen items-center justify-center bg-zinc-50 font-sans dark:bg-black">
-      <main className="flex min-h-screen w-full max-w-3xl flex-col items-center justify-between py-32 px-16 bg-white dark:bg-black sm:items-start">
-        <Image
-          className="dark:invert"
-          src="/next.svg"
-          alt="Next.js logo"
-          width={100}
-          height={20}
-          priority
-        />
-        <div className="flex flex-col items-center gap-6 text-center sm:items-start sm:text-left">
-          <h1 className="max-w-xs text-3xl font-semibold leading-10 tracking-tight text-black dark:text-zinc-50">
-            To get started, edit the page.tsx file.
-          </h1>
-          <p className="max-w-md text-lg leading-8 text-zinc-600 dark:text-zinc-400">
-            Looking for a starting point or more instructions? Head over to{" "}
-            <a
-              href="https://vercel.com/templates?framework=next.js&utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-              className="font-medium text-zinc-950 dark:text-zinc-50"
-            >
-              Templates
-            </a>{" "}
-            or the{" "}
-            <a
-              href="https://nextjs.org/learn?utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-              className="font-medium text-zinc-950 dark:text-zinc-50"
-            >
-              Learning
-            </a>{" "}
-            center.
-          </p>
-        </div>
-        <div className="flex flex-col gap-4 text-base font-medium sm:flex-row">
-          <a
-            className="flex h-12 w-full items-center justify-center gap-2 rounded-full bg-foreground px-5 text-background transition-colors hover:bg-[#383838] dark:hover:bg-[#ccc] md:w-[158px]"
-            href="https://vercel.com/new?utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-            target="_blank"
-            rel="noopener noreferrer"
+    <main className="shell">
+      <section className="card">
+        <header className="header">
+          <p className="kicker">Tchuno Auth</p>
+          <h1>{title}</h1>
+          <p className="subtitle">API alvo: {API_URL}</p>
+        </header>
+
+        <div className="mode-switch">
+          <button
+            type="button"
+            className={mode === "login" ? "active" : ""}
+            onClick={() => setMode("login")}
           >
-            <Image
-              className="dark:invert"
-              src="/vercel.svg"
-              alt="Vercel logomark"
-              width={16}
-              height={16}
+            Login
+          </button>
+          <button
+            type="button"
+            className={mode === "register" ? "active" : ""}
+            onClick={() => setMode("register")}
+          >
+            Register
+          </button>
+        </div>
+
+        <form onSubmit={onSubmit} className="form">
+          <label>
+            Email
+            <input
+              type="email"
+              value={email}
+              onChange={(event) => setEmail(event.target.value)}
+              required
             />
-            Deploy Now
-          </a>
-          <a
-            className="flex h-12 w-full items-center justify-center rounded-full border border-solid border-black/[.08] px-5 transition-colors hover:border-transparent hover:bg-black/[.04] dark:border-white/[.145] dark:hover:bg-[#1a1a1a] md:w-[158px]"
-            href="https://nextjs.org/docs?utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-            target="_blank"
-            rel="noopener noreferrer"
-          >
-            Documentation
-          </a>
+          </label>
+
+          <label>
+            Password
+            <input
+              type="password"
+              value={password}
+              onChange={(event) => setPassword(event.target.value)}
+              minLength={8}
+              required
+            />
+          </label>
+
+          {mode === "register" ? (
+            <label>
+              Name
+              <input
+                type="text"
+                value={name}
+                onChange={(event) => setName(event.target.value)}
+                maxLength={80}
+              />
+            </label>
+          ) : null}
+
+          <button type="submit" disabled={isSubmitting} className="primary">
+            {isSubmitting ? "Aguarda..." : mode === "login" ? "Entrar" : "Criar conta"}
+          </button>
+        </form>
+
+        <div className="actions">
+          <button type="button" onClick={onRefresh} disabled={isSubmitting}>
+            Refresh
+          </button>
+          <button type="button" onClick={onLogout} disabled={isSubmitting}>
+            Logout
+          </button>
         </div>
-      </main>
-    </div>
+
+        <p className="status">Status: {message}</p>
+
+        <pre className="result">
+          {result
+            ? JSON.stringify(
+                {
+                  user: result.user,
+                  accessToken: `${result.accessToken.slice(0, 24)}...`,
+                  refreshToken: `${result.refreshToken.slice(0, 24)}...`,
+                },
+                null,
+                2,
+              )
+            : "Sem sessão ativa"}
+        </pre>
+
+        <p className="status">
+          <Link href="/dashboard" className="nav-link">
+            Ir para dashboard protegido
+          </Link>
+        </p>
+      </section>
+    </main>
   );
 }
