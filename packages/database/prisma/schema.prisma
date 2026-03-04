@@ -8,26 +8,31 @@ datasource db {
 }
 
 model User {
-  id           String         @id @default(cuid())
-  email        String         @unique
+  id           String    @id @default(cuid())
+  email        String    @unique
   name         String?
   passwordHash String
-  isActive     Boolean        @default(true)
-  createdAt    DateTime       @default(now())
-  updatedAt    DateTime       @updatedAt
-  refreshTokens RefreshToken[]
+  isActive     Boolean   @default(true)
+  createdAt    DateTime  @default(now())
+  updatedAt    DateTime  @updatedAt
+  sessions     Session[]
 }
 
-model RefreshToken {
-  id        String   @id @default(cuid())
-  tokenHash String   @unique
-  expiresAt DateTime
-  revokedAt DateTime?
-  createdAt DateTime @default(now())
+model Session {
+  id               String   @id @default(cuid())
+  userId           String
+  deviceId         String
+  refreshTokenHash String   @unique
+  createdAt        DateTime @default(now())
+  lastUsedAt       DateTime @default(now())
+  revokedAt        DateTime?
+  ip               String?
+  userAgent        String?
 
-  userId String
-  user   User @relation(fields: [userId], references: [id], onDelete: Cascade)
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
 
   @@index([userId])
-  @@index([expiresAt])
+  @@index([deviceId])
+  @@index([lastUsedAt])
+  @@index([revokedAt])
 }

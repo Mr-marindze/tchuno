@@ -4,18 +4,20 @@ import {
   UnauthorizedException,
 } from '@nestjs/common';
 import { JwtService } from '@nestjs/jwt';
-import { User } from '@prisma/client';
+import { Session, User } from '@prisma/client';
 import * as bcrypt from 'bcryptjs';
 import { createHash, randomUUID } from 'crypto';
 import { PrismaService } from '../prisma/prisma.service';
 import { LoginDto } from './dto/login.dto';
 import { RegisterDto } from './dto/register.dto';
-import { AuthResponse } from './types';
+import { AuthResponse, SessionClientInfo } from './types';
 
 type RefreshTokenPayload = {
   sub: string;
   email: string;
   type: 'refresh';
+  sid: string;
+  did: string;
   jti: string;
   exp: number;
   iat: number;
@@ -33,7 +35,10 @@ export class AuthService {
     private readonly jwtService: JwtService,
   ) {}
 
-  async register(dto: RegisterDto): Promise<AuthResponse> {
+  async register(
+    dto: RegisterDto,
+    clientInfo?: SessionClientInfo,
+  ): Promise<AuthResponse> {
     const existingUser = await this.prisma.user.findUnique({
       where: { email: dto.email },
     });
@@ -52,10 +57,13 @@ export class AuthService {
       },
     });
 
-    return this.issueTokens(user);
+    return this.issueTokens(user, clientInfo);
   }
 
-  async login(dto: LoginDto): Promise<AuthResponse> {
+  async login(
+    dto: LoginDto,
+    clientInfo?: SessionClientInfo,
+  ): Promise<AuthResponse> {
     const user = await this.prisma.user.findUnique({
       where: { email: dto.email },
     });
@@ -73,39 +81,34 @@ export class AuthService {
       throw new UnauthorizedException('Invalid credentials');
     }
 
-    return this.issueTokens(user);
+    return this.issueTokens(user, clientInfo);
   }
 
-  async refresh(refreshToken: string): Promise<AuthResponse> {
+  async refresh(
+    refreshToken: string,
+    clientInfo?: SessionClientInfo,
+  ): Promise<AuthResponse> {
     const payload = this.verifyRefreshToken(refreshToken);
-    const tokenHash = this.hashToken(refreshToken);
+    const refreshTokenHash = this.hashToken(refreshToken);
 
-    const persistedToken = await this.prisma.refreshToken.findUnique({
-      where: { tokenHash },
+    const session = await this.prisma.session.findUnique({
+      where: { refreshTokenHash },
       include: { user: true },
     });
 
-    if (
-      !persistedToken ||
-      persistedToken.revokedAt ||
-      persistedToken.expiresAt < new Date()
-    ) {
+    if (!session || session.revokedAt) {
       throw new UnauthorizedException('Invalid refresh token');
     }
 
-    if (
-      persistedToken.userId !== payload.sub ||
-      !persistedToken.user.isActive
-    ) {
+    if (!session.user.isActive || session.userId !== payload.sub) {
       throw new UnauthorizedException('Invalid refresh token');
     }
 
-    await this.prisma.refreshToken.update({
-      where: { id: persistedToken.id },
-      data: { revokedAt: new Date() },
-    });
+    if (payload.sid !== session.id || payload.did !== session.deviceId) {
+      throw new UnauthorizedException('Invalid refresh token');
+    }
 
-    return this.issueTokens(persistedToken.user);
+    return this.issueTokens(session.user, clientInfo, session);
   }
 
   async logout(refreshToken?: string): Promise<void> {
@@ -113,17 +116,40 @@ export class AuthService {
       return;
     }
 
-    const tokenHash = this.hashToken(refreshToken);
+    const refreshTokenHash = this.hashToken(refreshToken);
 
-    await this.prisma.refreshToken.updateMany({
-      where: { tokenHash, revokedAt: null },
+    await this.prisma.session.updateMany({
+      where: { refreshTokenHash, revokedAt: null },
       data: { revokedAt: new Date() },
     });
   }
 
   async logoutAll(userId: string): Promise<void> {
-    await this.prisma.refreshToken.updateMany({
+    await this.prisma.session.updateMany({
       where: { userId, revokedAt: null },
+      data: { revokedAt: new Date() },
+    });
+  }
+
+  async listSessions(userId: string) {
+    return this.prisma.session.findMany({
+      where: { userId },
+      select: {
+        id: true,
+        deviceId: true,
+        ip: true,
+        userAgent: true,
+        createdAt: true,
+        lastUsedAt: true,
+        revokedAt: true,
+      },
+      orderBy: [{ revokedAt: 'asc' }, { lastUsedAt: 'desc' }],
+    });
+  }
+
+  async revokeSession(userId: string, sessionId: string): Promise<void> {
+    await this.prisma.session.updateMany({
+      where: { id: sessionId, userId, revokedAt: null },
       data: { revokedAt: new Date() },
     });
   }
@@ -134,7 +160,23 @@ export class AuthService {
     });
   }
 
-  private async issueTokens(user: User): Promise<AuthResponse> {
+  private async issueTokens(
+    user: User,
+    clientInfo?: SessionClientInfo,
+    existingSession?: Session,
+  ): Promise<AuthResponse> {
+    const session =
+      existingSession ??
+      (await this.prisma.session.create({
+        data: {
+          userId: user.id,
+          deviceId: clientInfo?.deviceId || randomUUID(),
+          refreshTokenHash: this.hashToken(randomUUID()),
+          ip: clientInfo?.ip ?? null,
+          userAgent: clientInfo?.userAgent ?? null,
+        },
+      }));
+
     const accessToken = this.jwtService.sign(
       { sub: user.id, email: user.email },
       {
@@ -144,20 +186,28 @@ export class AuthService {
     );
 
     const refreshToken = this.jwtService.sign(
-      { sub: user.id, email: user.email, type: 'refresh', jti: randomUUID() },
+      {
+        sub: user.id,
+        email: user.email,
+        type: 'refresh',
+        sid: session.id,
+        did: session.deviceId,
+        jti: randomUUID(),
+      },
       {
         secret: this.refreshSecret,
         expiresIn: '7d',
       },
     );
 
-    const expiresAt = new Date(Date.now() + 7 * 24 * 60 * 60 * 1000);
-
-    await this.prisma.refreshToken.create({
+    await this.prisma.session.update({
+      where: { id: session.id },
       data: {
-        tokenHash: this.hashToken(refreshToken),
-        expiresAt,
-        userId: user.id,
+        refreshTokenHash: this.hashToken(refreshToken),
+        lastUsedAt: new Date(),
+        revokedAt: null,
+        ip: clientInfo?.ip ?? session.ip,
+        userAgent: clientInfo?.userAgent ?? session.userAgent,
       },
     });
 

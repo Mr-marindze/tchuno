@@ -7,3 +7,9 @@ export type AuthResponse = {
   accessToken: string;
   refreshToken: string;
 };
+
+export type SessionClientInfo = {
+  deviceId?: string | null;
+  ip?: string | null;
+  userAgent?: string | null;
+};
