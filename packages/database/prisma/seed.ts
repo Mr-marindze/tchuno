@@ -50,6 +50,51 @@ async function main() {
     });
   }
 
+  const admin = await prisma.user.findUniqueOrThrow({
+    where: { email: adminEmail },
+    select: { id: true },
+  });
+
+  const eletricidade = await prisma.category.findUnique({
+    where: { slug: 'eletricidade' },
+    select: { id: true },
+  });
+
+  if (eletricidade) {
+    const profile = await prisma.workerProfile.upsert({
+      where: { userId: admin.id },
+      update: {
+        bio: 'Tecnico de manutencao geral para pequenos servicos.',
+        location: 'Maputo',
+        hourlyRate: 800,
+        experienceYears: 5,
+        isAvailable: true,
+      },
+      create: {
+        userId: admin.id,
+        bio: 'Tecnico de manutencao geral para pequenos servicos.',
+        location: 'Maputo',
+        hourlyRate: 800,
+        experienceYears: 5,
+        isAvailable: true,
+      },
+    });
+
+    await prisma.workerProfileCategory.upsert({
+      where: {
+        workerProfileId_categoryId: {
+          workerProfileId: profile.id,
+          categoryId: eletricidade.id,
+        },
+      },
+      update: {},
+      create: {
+        workerProfileId: profile.id,
+        categoryId: eletricidade.id,
+      },
+    });
+  }
+
   console.log(
     `Seed completed: ${adminEmail} + ${defaultCategories.length} categories`,
   );
