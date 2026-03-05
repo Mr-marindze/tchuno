@@ -1,12 +1,20 @@
-import { Module } from '@nestjs/common';
+import {
+  MiddlewareConsumer,
+  Module,
+  NestModule,
+  RequestMethod,
+} from '@nestjs/common';
 import { ConfigModule } from '@nestjs/config';
-import { APP_GUARD } from '@nestjs/core';
+import { APP_GUARD, APP_INTERCEPTOR } from '@nestjs/core';
 import { ThrottlerGuard, ThrottlerModule } from '@nestjs/throttler';
 import { AppController } from './app.controller';
 import { AppService } from './app.service';
 import { AuthModule } from './auth/auth.module';
 import { CategoriesModule } from './categories/categories.module';
+import { HttpLoggingInterceptor } from './common/interceptors/http-logging.interceptor';
+import { RequestIdMiddleware } from './common/middleware/request-id.middleware';
 import { JobsModule } from './jobs/jobs.module';
+import { ObservabilityModule } from './observability/observability.module';
 import { PrismaModule } from './prisma/prisma.module';
 import { ReviewsModule } from './reviews/reviews.module';
 import { WorkerProfileModule } from './worker-profile/worker-profile.module';
@@ -24,6 +32,7 @@ import { WorkerProfileModule } from './worker-profile/worker-profile.module';
     AuthModule,
     CategoriesModule,
     JobsModule,
+    ObservabilityModule,
     ReviewsModule,
     WorkerProfileModule,
   ],
@@ -34,6 +43,17 @@ import { WorkerProfileModule } from './worker-profile/worker-profile.module';
       provide: APP_GUARD,
       useClass: ThrottlerGuard,
     },
+    {
+      provide: APP_INTERCEPTOR,
+      useClass: HttpLoggingInterceptor,
+    },
   ],
 })
-export class AppModule {}
+export class AppModule implements NestModule {
+  configure(consumer: MiddlewareConsumer) {
+    consumer.apply(RequestIdMiddleware).forRoutes({
+      path: '*',
+      method: RequestMethod.ALL,
+    });
+  }
+}
