@@ -48,6 +48,7 @@ export type SessionListResponse = {
 const API_URL = process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:3001";
 const ACCESS_TOKEN_KEY = "tchuno_access_token";
 const REFRESH_TOKEN_KEY = "tchuno_refresh_token";
+const DEVICE_ID_KEY = "tchuno_device_id";
 
 type ApiErrorBody = {
   message?: string | string[];
@@ -71,11 +72,17 @@ async function readError(response: Response): Promise<string> {
 }
 
 async function postJson<T>(path: string, payload: unknown): Promise<T> {
+  const headers: Record<string, string> = {
+    "Content-Type": "application/json",
+  };
+
+  if (typeof window !== "undefined") {
+    headers["x-device-id"] = getOrCreateDeviceId();
+  }
+
   const response = await fetch(`${API_URL}${path}`, {
     method: "POST",
-    headers: {
-      "Content-Type": "application/json",
-    },
+    headers,
     body: JSON.stringify(payload),
   });
 
@@ -126,6 +133,31 @@ export function saveTokens(auth: AuthResponse): void {
 export function clearTokens(): void {
   localStorage.removeItem(ACCESS_TOKEN_KEY);
   localStorage.removeItem(REFRESH_TOKEN_KEY);
+}
+
+function createFallbackDeviceId(): string {
+  const ts = Date.now().toString(36);
+  const rand = Math.random().toString(36).slice(2, 10);
+  return `web-${ts}-${rand}`;
+}
+
+export function getOrCreateDeviceId(): string {
+  if (typeof window === "undefined") {
+    return "server";
+  }
+
+  const existing = localStorage.getItem(DEVICE_ID_KEY);
+  if (existing && existing.trim().length > 0) {
+    return existing;
+  }
+
+  const generated =
+    typeof crypto !== "undefined" && typeof crypto.randomUUID === "function"
+      ? crypto.randomUUID()
+      : createFallbackDeviceId();
+
+  localStorage.setItem(DEVICE_ID_KEY, generated);
+  return generated;
 }
 
 export async function register(input: {

@@ -2,12 +2,13 @@
 
 import Link from "next/link";
 import { useRouter } from "next/navigation";
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import {
   AuthResponse,
   clearTokens,
   DeviceSession,
   ensureSession,
+  getOrCreateDeviceId,
   getStoredTokens,
   listSessions,
   logout,
@@ -27,6 +28,7 @@ type DashboardState = {
 
 export default function DashboardPage() {
   const router = useRouter();
+  const currentDeviceId = useMemo(() => getOrCreateDeviceId(), []);
   const [state, setState] = useState<DashboardState | null>(null);
   const [sessions, setSessions] = useState<DeviceSession[]>([]);
   const [sessionsMeta, setSessionsMeta] = useState<SessionListMeta | null>(null);
@@ -175,6 +177,18 @@ export default function DashboardPage() {
     }
   }
 
+  function formatDate(value: string): string {
+    const date = new Date(value);
+    if (Number.isNaN(date.getTime())) {
+      return value;
+    }
+
+    return new Intl.DateTimeFormat("pt-PT", {
+      dateStyle: "medium",
+      timeStyle: "short",
+    }).format(date);
+  }
+
   async function handleReloadSessions() {
     const { accessToken } = getStoredTokens();
 
@@ -302,21 +316,30 @@ export default function DashboardPage() {
           {sessions.length === 0 ? (
             <p>Sem sessões registadas.</p>
           ) : (
-            sessions.map((session) => (
-              <div key={session.id} style={{ marginBottom: "0.8rem", borderBottom: "1px solid rgba(186,230,253,0.2)", paddingBottom: "0.7rem" }}>
-                <p><strong>deviceId:</strong> {session.deviceId}</p>
-                <p><strong>ip:</strong> {session.ip ?? "n/a"}</p>
-                <p><strong>lastUsedAt:</strong> {session.lastUsedAt}</p>
-                <p><strong>status:</strong> {session.revokedAt ? "revogada" : "ativa"}</p>
-                <button
-                  type="button"
-                  onClick={() => handleRevokeSession(session.id)}
-                  disabled={Boolean(session.revokedAt)}
-                >
-                  Revogar sessão
-                </button>
-              </div>
-            ))
+            sessions.map((session) => {
+              const isCurrentDevice = session.deviceId === currentDeviceId;
+              const isRevoked = Boolean(session.revokedAt);
+
+              return (
+                <div key={session.id} style={{ marginBottom: "0.8rem", borderBottom: "1px solid rgba(186,230,253,0.2)", paddingBottom: "0.7rem" }}>
+                  <p>
+                    <strong>deviceId:</strong> {session.deviceId}{" "}
+                    {isCurrentDevice ? "(dispositivo atual)" : ""}
+                  </p>
+                  <p><strong>ip:</strong> {session.ip ?? "n/a"}</p>
+                  <p><strong>createdAt:</strong> {formatDate(session.createdAt)}</p>
+                  <p><strong>lastUsedAt:</strong> {formatDate(session.lastUsedAt)}</p>
+                  <p><strong>status:</strong> {isRevoked ? "revogada" : "ativa"}</p>
+                  <button
+                    type="button"
+                    onClick={() => handleRevokeSession(session.id)}
+                    disabled={isRevoked || isCurrentDevice}
+                  >
+                    {isCurrentDevice ? "Sessão atual" : "Revogar sessão"}
+                  </button>
+                </div>
+              );
+            })
           )}
         </div>
 

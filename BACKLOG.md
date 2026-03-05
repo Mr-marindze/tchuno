@@ -10,7 +10,7 @@
 
 ## After MVP
 
-1. CI pipeline completa
-2. Observabilidade
-3. Hardening extra
-4. UX de sessões
+1. [x] CI pipeline completa
+2. [x] Observabilidade
+3. [x] Hardening extra
+4. [x] UX de sessões
