@@ -28,10 +28,14 @@ type RefreshTokenPayload = {
 @Injectable()
 export class AuthService {
   private readonly logger = new Logger(AuthService.name);
-  private readonly accessSecret =
-    process.env.JWT_ACCESS_SECRET || 'change-me-access';
-  private readonly refreshSecret =
-    process.env.JWT_REFRESH_SECRET || 'change-me-refresh';
+  private readonly accessSecret = this.resolveSecret(
+    'JWT_ACCESS_SECRET',
+    'change-me-access',
+  );
+  private readonly refreshSecret = this.resolveSecret(
+    'JWT_REFRESH_SECRET',
+    'change-me-refresh',
+  );
 
   constructor(
     private readonly prisma: PrismaService,
@@ -387,6 +391,28 @@ export class AuthService {
 
   private hashToken(token: string): string {
     return createHash('sha256').update(token).digest('hex');
+  }
+
+  private resolveSecret(envName: string, fallback: string): string {
+    const secret = process.env[envName] || fallback;
+    const isDefaultValue =
+      secret === fallback || secret.startsWith('change-me');
+
+    if (process.env.NODE_ENV === 'production' && isDefaultValue) {
+      throw new Error(`${envName} must be configured with a strong secret`);
+    }
+
+    if (secret.length < 16) {
+      this.logger.warn(
+        JSON.stringify({
+          event: 'weak_secret_detected',
+          envName,
+          length: secret.length,
+        }),
+      );
+    }
+
+    return secret;
   }
 
   private audit(event: string, context: Record<string, unknown>): void {
