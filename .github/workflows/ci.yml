@@ -37,6 +37,40 @@ jobs:
       - name: Unit tests
         run: yarn test
 
+  coverage:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: yarn
+
+      - name: Enable Corepack
+        run: corepack enable
+
+      - name: Activate Yarn from packageManager
+        run: |
+          corepack prepare "$(node -p "require('./package.json').packageManager")" --activate
+          yarn --version
+
+      - name: Install dependencies
+        run: yarn install --immutable
+
+      - name: API coverage
+        run: yarn workspace @tchuno/api test:cov
+
+      - name: Upload API coverage artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: api-coverage
+          path: apps/api/coverage
+          if-no-files-found: error
+
   e2e:
     runs-on: ubuntu-latest
 
