@@ -2,25 +2,25 @@ import { ApiProperty } from '@nestjs/swagger';
 import { SessionDto } from './session.dto';
 
 export class SessionListMetaDto {
-  @ApiProperty()
+  @ApiProperty({ example: 42 })
   total!: number;
 
-  @ApiProperty()
+  @ApiProperty({ example: 20 })
   limit!: number;
 
-  @ApiProperty()
+  @ApiProperty({ example: 0 })
   offset!: number;
 
-  @ApiProperty()
+  @ApiProperty({ example: 1 })
   page!: number;
 
-  @ApiProperty()
+  @ApiProperty({ example: 3 })
   pageCount!: number;
 
-  @ApiProperty()
+  @ApiProperty({ example: true })
   hasNext!: boolean;
 
-  @ApiProperty()
+  @ApiProperty({ example: false })
   hasPrev!: boolean;
 }
 
