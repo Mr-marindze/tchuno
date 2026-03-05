@@ -1,5 +1,6 @@
 import { INestApplication, ValidationPipe } from '@nestjs/common';
 import { Test, TestingModule } from '@nestjs/testing';
+import { PrismaClient } from '@prisma/client';
 import { execSync } from 'node:child_process';
 import { randomUUID } from 'node:crypto';
 import { resolve } from 'node:path';
@@ -111,17 +112,18 @@ describe('Auth and Sessions (e2e)', () => {
     try {
       await app.close();
     } finally {
-      execSync(
-        `psql "${adminConnectionUrl}" -c 'DROP SCHEMA IF EXISTS "${schemaName}" CASCADE;'`,
-        {
-          cwd: rootDir,
-          stdio: 'pipe',
-          env: {
-            ...process.env,
-            DATABASE_URL: e2eDatabaseUrl,
+      const prismaAdmin = new PrismaClient({
+        datasources: {
+          db: {
+            url: adminConnectionUrl,
           },
         },
+      });
+
+      await prismaAdmin.$executeRawUnsafe(
+        `DROP SCHEMA IF EXISTS "${schemaName}" CASCADE`,
       );
+      await prismaAdmin.$disconnect();
 
       process.env.DATABASE_URL = originalDatabaseUrl;
     }
