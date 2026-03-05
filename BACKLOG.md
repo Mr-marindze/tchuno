@@ -2,11 +2,11 @@
 
 ## Priority Order
 
-1. Categories
-2. WorkerProfile
-3. Jobs
-4. Reviews
-5. E2E: client -> worker -> job status -> review flow
+1. [x] Categories
+2. [x] WorkerProfile
+3. [x] Jobs
+4. [x] Reviews
+5. [x] E2E: client -> worker -> job status -> review flow
 
 ## After MVP
 

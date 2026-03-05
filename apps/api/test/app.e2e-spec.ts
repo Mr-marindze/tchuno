@@ -34,6 +34,32 @@ type SessionListResponse = {
   };
 };
 
+type CategoryPayload = {
+  id: string;
+  name: string;
+  slug: string;
+};
+
+type WorkerProfilePayload = {
+  id: string;
+  userId: string;
+  ratingAvg: string;
+  ratingCount: number;
+};
+
+type JobPayload = {
+  id: string;
+  status: 'REQUESTED' | 'ACCEPTED' | 'IN_PROGRESS' | 'COMPLETED' | 'CANCELED';
+};
+
+type ReviewPayload = {
+  id: string;
+  jobId: string;
+  workerProfileId: string;
+  reviewerId: string;
+  rating: number;
+};
+
 describe('Auth and Sessions (e2e)', () => {
   let app: INestApplication<App>;
 
@@ -288,6 +314,117 @@ describe('Auth and Sessions (e2e)', () => {
       .set('x-device-id', 'reuse-device')
       .send({ refreshToken: firstRefreshBody.refreshToken })
       .expect(401);
+  });
+
+  it('client -> worker -> job status -> review flow', async () => {
+    const workerEmail = `flow_worker_${Date.now()}@tchuno.local`;
+    const clientEmail = `flow_client_${Date.now()}@tchuno.local`;
+    const password = 'abc12345';
+
+    const workerRegister = await request(app.getHttpServer())
+      .post('/auth/register')
+      .send({ email: workerEmail, password, name: 'Flow Worker' })
+      .expect(201);
+    const workerAuth = workerRegister.body as AuthPayload;
+
+    const clientRegister = await request(app.getHttpServer())
+      .post('/auth/register')
+      .send({ email: clientEmail, password, name: 'Flow Client' })
+      .expect(201);
+    const clientAuth = clientRegister.body as AuthPayload;
+
+    const categoryResponse = await request(app.getHttpServer())
+      .post('/categories')
+      .set('Authorization', `Bearer ${workerAuth.accessToken}`)
+      .send({
+        name: `Ar Condicionado ${Date.now()}`,
+        slug: `ar-condicionado-${Date.now()}`,
+        description: 'Instalacao e manutencao de ar condicionado',
+        sortOrder: 40,
+      })
+      .expect(201);
+    const category = categoryResponse.body as CategoryPayload;
+
+    const workerProfileResponse = await request(app.getHttpServer())
+      .put('/worker-profile/me')
+      .set('Authorization', `Bearer ${workerAuth.accessToken}`)
+      .send({
+        bio: 'Especialista em climatizacao',
+        location: 'Maputo',
+        hourlyRate: 1200,
+        experienceYears: 7,
+        isAvailable: true,
+        categoryIds: [category.id],
+      })
+      .expect(200);
+    const workerProfile = workerProfileResponse.body as WorkerProfilePayload;
+
+    const createJobResponse = await request(app.getHttpServer())
+      .post('/jobs')
+      .set('Authorization', `Bearer ${clientAuth.accessToken}`)
+      .send({
+        workerProfileId: workerProfile.id,
+        categoryId: category.id,
+        title: 'Instalar AC no quarto',
+        description:
+          'Preciso instalar um AC split de 12k BTU ainda esta semana.',
+        budget: 5000,
+      })
+      .expect(201);
+    const job = createJobResponse.body as JobPayload;
+
+    const workerJobsResponse = await request(app.getHttpServer())
+      .get('/jobs/me/worker')
+      .set('Authorization', `Bearer ${workerAuth.accessToken}`)
+      .expect(200);
+    const workerJobs = workerJobsResponse.body as JobPayload[];
+    expect(workerJobs.some((item) => item.id === job.id)).toBe(true);
+
+    await request(app.getHttpServer())
+      .patch(`/jobs/${job.id}/status`)
+      .set('Authorization', `Bearer ${workerAuth.accessToken}`)
+      .send({ status: 'ACCEPTED' })
+      .expect(200);
+
+    await request(app.getHttpServer())
+      .patch(`/jobs/${job.id}/status`)
+      .set('Authorization', `Bearer ${workerAuth.accessToken}`)
+      .send({ status: 'IN_PROGRESS' })
+      .expect(200);
+
+    await request(app.getHttpServer())
+      .patch(`/jobs/${job.id}/status`)
+      .set('Authorization', `Bearer ${workerAuth.accessToken}`)
+      .send({ status: 'COMPLETED' })
+      .expect(200);
+
+    const reviewResponse = await request(app.getHttpServer())
+      .post('/reviews')
+      .set('Authorization', `Bearer ${clientAuth.accessToken}`)
+      .send({
+        jobId: job.id,
+        rating: 5,
+        comment: 'Servico excelente, dentro do prazo.',
+      })
+      .expect(201);
+    const review = reviewResponse.body as ReviewPayload;
+    expect(review.jobId).toBe(job.id);
+    expect(review.rating).toBe(5);
+
+    const workerProfilePublicResponse = await request(app.getHttpServer())
+      .get(`/worker-profile/${workerAuth.user.id}`)
+      .expect(200);
+    const workerProfilePublic =
+      workerProfilePublicResponse.body as WorkerProfilePayload;
+    expect(workerProfilePublic.ratingCount).toBe(1);
+    expect(Number.parseFloat(workerProfilePublic.ratingAvg)).toBeCloseTo(5, 2);
+
+    const workerReviewsResponse = await request(app.getHttpServer())
+      .get(`/reviews/worker/${workerProfile.id}`)
+      .expect(200);
+    const workerReviews = workerReviewsResponse.body as ReviewPayload[];
+    expect(workerReviews.length).toBeGreaterThanOrEqual(1);
+    expect(workerReviews[0]?.jobId).toBe(job.id);
   });
 
   it('rate-limits repeated login attempts', async () => {
