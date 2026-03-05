@@ -12,19 +12,24 @@ import {
   UseGuards,
 } from '@nestjs/common';
 import {
+  ApiBadRequestResponse,
+  ApiBearerAuth,
   ApiBody,
+  ApiConflictResponse,
   ApiCreatedResponse,
   ApiNoContentResponse,
   ApiOkResponse,
   ApiOperation,
   ApiParam,
-  ApiResponse,
   ApiTags,
+  ApiTooManyRequestsResponse,
   ApiUnauthorizedResponse,
 } from '@nestjs/swagger';
+import { Throttle } from '@nestjs/throttler';
 import type { Request } from 'express';
 import { AuthService } from './auth.service';
 import { AuthResponseDto } from './dto/auth-response.dto';
+import { ErrorResponseDto } from './dto/error-response.dto';
 import { ListSessionsQueryDto } from './dto/list-sessions-query.dto';
 import { LoginDto } from './dto/login.dto';
 import { RefreshTokenDto } from './dto/refresh-token.dto';
@@ -43,28 +48,37 @@ export class AuthController {
   constructor(private readonly authService: AuthService) {}
 
   @Post('register')
+  @Throttle({ default: { limit: 10, ttl: 60_000 } })
   @ApiOperation({ summary: 'Register a new user' })
   @ApiCreatedResponse({ type: AuthResponseDto })
-  @ApiResponse({ status: 409, description: 'Email already in use' })
+  @ApiBadRequestResponse({ type: ErrorResponseDto })
+  @ApiConflictResponse({ type: ErrorResponseDto })
+  @ApiTooManyRequestsResponse({ type: ErrorResponseDto })
   register(@Body() dto: RegisterDto, @Req() req: Request) {
     return this.authService.register(dto, this.extractClientInfo(req));
   }
 
   @Post('login')
   @HttpCode(HttpStatus.OK)
+  @Throttle({ default: { limit: 10, ttl: 60_000 } })
   @ApiOperation({ summary: 'Login user' })
   @ApiOkResponse({ type: AuthResponseDto })
-  @ApiUnauthorizedResponse({ description: 'Invalid credentials' })
+  @ApiBadRequestResponse({ type: ErrorResponseDto })
+  @ApiUnauthorizedResponse({ type: ErrorResponseDto })
+  @ApiTooManyRequestsResponse({ type: ErrorResponseDto })
   login(@Body() dto: LoginDto, @Req() req: Request) {
     return this.authService.login(dto, this.extractClientInfo(req));
   }
 
   @Post('refresh')
   @HttpCode(HttpStatus.OK)
+  @Throttle({ default: { limit: 30, ttl: 60_000 } })
   @ApiOperation({ summary: 'Refresh access and refresh tokens' })
   @ApiBody({ type: RefreshTokenDto })
   @ApiOkResponse({ type: AuthResponseDto })
-  @ApiUnauthorizedResponse({ description: 'Invalid refresh token' })
+  @ApiBadRequestResponse({ type: ErrorResponseDto })
+  @ApiUnauthorizedResponse({ type: ErrorResponseDto })
+  @ApiTooManyRequestsResponse({ type: ErrorResponseDto })
   refresh(@Body() dto: RefreshTokenDto, @Req() req: Request) {
     return this.authService.refresh(
       dto.refreshToken,
@@ -77,27 +91,56 @@ export class AuthController {
   @ApiOperation({ summary: 'Logout by revoking refresh token' })
   @ApiBody({ type: RefreshTokenDto })
   @ApiNoContentResponse({ description: 'Successfully logged out' })
+  @ApiBadRequestResponse({ type: ErrorResponseDto })
   logout(@Body() dto: RefreshTokenDto) {
     return this.authService.logout(dto.refreshToken);
   }
 
   @Post('logout-all')
   @UseGuards(JwtAuthGuard)
+  @ApiBearerAuth()
   @HttpCode(HttpStatus.NO_CONTENT)
   @ApiOperation({
     summary: 'Logout all devices by revoking all refresh tokens',
   })
   @ApiNoContentResponse({ description: 'All sessions revoked' })
-  @ApiUnauthorizedResponse({ description: 'Missing or invalid access token' })
+  @ApiUnauthorizedResponse({ type: ErrorResponseDto })
   logoutAll(@Req() req: AuthenticatedRequest) {
     return this.authService.logoutAll(req.user.sub);
   }
 
   @UseGuards(JwtAuthGuard)
+  @ApiBearerAuth()
   @Get('sessions')
   @ApiOperation({ summary: 'List user sessions/devices' })
-  @ApiOkResponse({ type: SessionListResponseDto })
-  @ApiUnauthorizedResponse({ description: 'Missing or invalid access token' })
+  @ApiOkResponse({
+    type: SessionListResponseDto,
+    schema: {
+      example: {
+        data: [
+          {
+            id: 'cm8x8u3c10001x7k9apf4p6xv',
+            deviceId: 'device-android-01',
+            ip: '203.0.113.8',
+            userAgent: 'Mozilla/5.0',
+            createdAt: '2026-03-05T10:00:00.000Z',
+            lastUsedAt: '2026-03-05T10:10:00.000Z',
+            revokedAt: null,
+          },
+        ],
+        meta: {
+          total: 42,
+          limit: 20,
+          offset: 0,
+          page: 1,
+          pageCount: 3,
+          hasNext: true,
+          hasPrev: false,
+        },
+      },
+    },
+  })
+  @ApiUnauthorizedResponse({ type: ErrorResponseDto })
   sessions(
     @Req() req: AuthenticatedRequest,
     @Query() query: ListSessionsQueryDto,
@@ -106,21 +149,23 @@ export class AuthController {
   }
 
   @UseGuards(JwtAuthGuard)
+  @ApiBearerAuth()
   @Delete('sessions/:id')
   @HttpCode(HttpStatus.NO_CONTENT)
   @ApiOperation({ summary: 'Revoke one specific session/device' })
   @ApiParam({ name: 'id', type: String })
   @ApiNoContentResponse({ description: 'Session revoked' })
-  @ApiUnauthorizedResponse({ description: 'Missing or invalid access token' })
+  @ApiUnauthorizedResponse({ type: ErrorResponseDto })
   revokeSession(@Req() req: AuthenticatedRequest, @Param('id') id: string) {
     return this.authService.revokeSession(req.user.sub, id);
   }
 
   @UseGuards(JwtAuthGuard)
+  @ApiBearerAuth()
   @Get('me')
   @ApiOperation({ summary: 'Get current user payload from access token' })
   @ApiOkResponse({ description: 'Current user payload' })
-  @ApiUnauthorizedResponse({ description: 'Missing or invalid access token' })
+  @ApiUnauthorizedResponse({ type: ErrorResponseDto })
   me(@Req() req: AuthenticatedRequest) {
     return req.user;
   }
@@ -145,9 +190,25 @@ export class AuthController {
           : null;
 
     return {
-      deviceId,
-      ip: req.ip || null,
-      userAgent,
+      deviceId: this.sanitizeNullable(deviceId, 128),
+      ip: this.sanitizeNullable(req.ip || null, 64),
+      userAgent: this.sanitizeNullable(userAgent, 512),
     };
+  }
+
+  private sanitizeNullable(
+    value: string | null,
+    maxLength: number,
+  ): string | null {
+    if (!value) {
+      return null;
+    }
+
+    const normalized = value.trim();
+    if (!normalized) {
+      return null;
+    }
+
+    return normalized.slice(0, maxLength);
   }
 }

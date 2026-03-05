@@ -1,6 +1,7 @@
 import {
   ConflictException,
   Injectable,
+  Logger,
   UnauthorizedException,
 } from '@nestjs/common';
 import { JwtService } from '@nestjs/jwt';
@@ -26,6 +27,7 @@ type RefreshTokenPayload = {
 
 @Injectable()
 export class AuthService {
+  private readonly logger = new Logger(AuthService.name);
   private readonly accessSecret =
     process.env.JWT_ACCESS_SECRET || 'change-me-access';
   private readonly refreshSecret =
@@ -45,6 +47,10 @@ export class AuthService {
     });
 
     if (existingUser) {
+      this.auditWarn('register_conflict', {
+        email: dto.email.toLowerCase(),
+        ip: clientInfo?.ip ?? null,
+      });
       throw new ConflictException('Email is already in use');
     }
 
@@ -56,6 +62,12 @@ export class AuthService {
         name: dto.name,
         passwordHash,
       },
+    });
+
+    this.audit('register_success', {
+      userId: user.id,
+      ip: clientInfo?.ip ?? null,
+      deviceId: clientInfo?.deviceId ?? null,
     });
 
     return this.issueTokens(user, clientInfo);
@@ -70,6 +82,11 @@ export class AuthService {
     });
 
     if (!user) {
+      this.auditWarn('login_failed', {
+        reason: 'user_not_found',
+        email: dto.email.toLowerCase(),
+        ip: clientInfo?.ip ?? null,
+      });
       throw new UnauthorizedException('Invalid credentials');
     }
 
@@ -79,8 +96,19 @@ export class AuthService {
     );
 
     if (!isPasswordValid) {
+      this.auditWarn('login_failed', {
+        reason: 'invalid_password',
+        userId: user.id,
+        ip: clientInfo?.ip ?? null,
+      });
       throw new UnauthorizedException('Invalid credentials');
     }
+
+    this.audit('login_success', {
+      userId: user.id,
+      ip: clientInfo?.ip ?? null,
+      deviceId: clientInfo?.deviceId ?? null,
+    });
 
     return this.issueTokens(user, clientInfo);
   }
@@ -90,24 +118,71 @@ export class AuthService {
     clientInfo?: SessionClientInfo,
   ): Promise<AuthResponse> {
     const payload = this.verifyRefreshToken(refreshToken);
-    const refreshTokenHash = this.hashToken(refreshToken);
-
     const session = await this.prisma.session.findUnique({
-      where: { refreshTokenHash },
+      where: { id: payload.sid },
       include: { user: true },
     });
 
-    if (!session || session.revokedAt) {
+    if (!session) {
+      this.auditWarn('refresh_failed', {
+        reason: 'session_not_found',
+        sid: payload.sid,
+        sub: payload.sub,
+        ip: clientInfo?.ip ?? null,
+      });
+      throw new UnauthorizedException('Invalid refresh token');
+    }
+
+    if (session.revokedAt) {
+      this.auditWarn('refresh_failed', {
+        reason: 'session_revoked',
+        sessionId: session.id,
+        userId: session.userId,
+        ip: clientInfo?.ip ?? null,
+      });
       throw new UnauthorizedException('Invalid refresh token');
     }
 
     if (!session.user.isActive || session.userId !== payload.sub) {
+      this.auditWarn('refresh_failed', {
+        reason: 'subject_mismatch_or_inactive',
+        sessionId: session.id,
+        userId: session.userId,
+        sub: payload.sub,
+        ip: clientInfo?.ip ?? null,
+      });
       throw new UnauthorizedException('Invalid refresh token');
     }
 
     if (payload.sid !== session.id || payload.did !== session.deviceId) {
+      await this.revokeSessionChain(session.id, session.userId);
+      this.auditWarn('refresh_reuse_detected', {
+        reason: 'session_or_device_claim_mismatch',
+        sessionId: session.id,
+        userId: session.userId,
+        ip: clientInfo?.ip ?? null,
+      });
       throw new UnauthorizedException('Invalid refresh token');
     }
+
+    const refreshTokenHash = this.hashToken(refreshToken);
+    if (refreshTokenHash !== session.refreshTokenHash) {
+      await this.revokeSessionChain(session.id, session.userId);
+      this.auditWarn('refresh_reuse_detected', {
+        reason: 'rotated_token_reused',
+        sessionId: session.id,
+        userId: session.userId,
+        ip: clientInfo?.ip ?? null,
+      });
+      throw new UnauthorizedException('Invalid refresh token');
+    }
+
+    this.audit('refresh_success', {
+      sessionId: session.id,
+      userId: session.userId,
+      ip: clientInfo?.ip ?? null,
+      deviceId: clientInfo?.deviceId ?? null,
+    });
 
     return this.issueTokens(session.user, clientInfo, session);
   }
@@ -119,16 +194,25 @@ export class AuthService {
 
     const refreshTokenHash = this.hashToken(refreshToken);
 
-    await this.prisma.session.updateMany({
+    const result = await this.prisma.session.updateMany({
       where: { refreshTokenHash, revokedAt: null },
       data: { revokedAt: new Date() },
+    });
+
+    this.audit('logout', {
+      revokedSessions: result.count,
     });
   }
 
   async logoutAll(userId: string): Promise<void> {
-    await this.prisma.session.updateMany({
+    const result = await this.prisma.session.updateMany({
       where: { userId, revokedAt: null },
       data: { revokedAt: new Date() },
+    });
+
+    this.audit('logout_all', {
+      userId,
+      revokedSessions: result.count,
     });
   }
 
@@ -188,9 +272,15 @@ export class AuthService {
   }
 
   async revokeSession(userId: string, sessionId: string): Promise<void> {
-    await this.prisma.session.updateMany({
+    const result = await this.prisma.session.updateMany({
       where: { id: sessionId, userId, revokedAt: null },
       data: { revokedAt: new Date() },
+    });
+
+    this.audit('session_revoke', {
+      userId,
+      sessionId,
+      revokedSessions: result.count,
     });
   }
 
@@ -275,13 +365,45 @@ export class AuthService {
         throw new UnauthorizedException('Invalid refresh token');
       }
 
+      if (!payload.sid || !payload.did || !payload.sub || !payload.jti) {
+        throw new UnauthorizedException('Invalid refresh token');
+      }
+
       return payload;
     } catch {
       throw new UnauthorizedException('Invalid refresh token');
     }
   }
 
+  private async revokeSessionChain(
+    sessionId: string,
+    userId: string,
+  ): Promise<void> {
+    await this.prisma.session.updateMany({
+      where: { id: sessionId, userId, revokedAt: null },
+      data: { revokedAt: new Date() },
+    });
+  }
+
   private hashToken(token: string): string {
     return createHash('sha256').update(token).digest('hex');
+  }
+
+  private audit(event: string, context: Record<string, unknown>): void {
+    this.logger.log(
+      JSON.stringify({
+        event,
+        ...context,
+      }),
+    );
+  }
+
+  private auditWarn(event: string, context: Record<string, unknown>): void {
+    this.logger.warn(
+      JSON.stringify({
+        event,
+        ...context,
+      }),
+    );
   }
 }
