@@ -30,6 +30,21 @@ export type SessionListQuery = {
   sort?: "lastUsedAt:asc" | "lastUsedAt:desc" | "createdAt:asc" | "createdAt:desc";
 };
 
+export type SessionListMeta = {
+  total: number;
+  limit: number;
+  offset: number;
+  page: number;
+  pageCount: number;
+  hasNext: boolean;
+  hasPrev: boolean;
+};
+
+export type SessionListResponse = {
+  data: DeviceSession[];
+  meta: SessionListMeta;
+};
+
 const API_URL = process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:3001";
 const ACCESS_TOKEN_KEY = "tchuno_access_token";
 const REFRESH_TOKEN_KEY = "tchuno_refresh_token";
@@ -158,7 +173,7 @@ export async function getMe(accessToken: string): Promise<unknown> {
 export async function listSessions(
   accessToken: string,
   query?: SessionListQuery,
-): Promise<DeviceSession[]> {
+): Promise<SessionListResponse> {
   const params = new URLSearchParams();
 
   if (query?.status) {
@@ -179,7 +194,7 @@ export async function listSessions(
 
   const path = params.size > 0 ? `/auth/sessions?${params.toString()}` : "/auth/sessions";
 
-  return getJson<DeviceSession[]>(path, accessToken);
+  return getJson<SessionListResponse>(path, accessToken);
 }
 
 export async function revokeSession(

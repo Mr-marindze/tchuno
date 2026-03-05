@@ -29,7 +29,7 @@ import { ListSessionsQueryDto } from './dto/list-sessions-query.dto';
 import { LoginDto } from './dto/login.dto';
 import { RefreshTokenDto } from './dto/refresh-token.dto';
 import { RegisterDto } from './dto/register.dto';
-import { SessionDto } from './dto/session.dto';
+import { SessionListResponseDto } from './dto/session-list-response.dto';
 import { JwtAuthGuard } from './guards/jwt-auth.guard';
 import { SessionClientInfo } from './types';
 
@@ -96,7 +96,7 @@ export class AuthController {
   @UseGuards(JwtAuthGuard)
   @Get('sessions')
   @ApiOperation({ summary: 'List user sessions/devices' })
-  @ApiOkResponse({ type: SessionDto, isArray: true })
+  @ApiOkResponse({ type: SessionListResponseDto })
   @ApiUnauthorizedResponse({ description: 'Missing or invalid access token' })
   sessions(
     @Req() req: AuthenticatedRequest,

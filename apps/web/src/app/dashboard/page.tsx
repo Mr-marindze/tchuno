@@ -15,6 +15,7 @@ import {
   refresh,
   revokeSession,
   saveTokens,
+  SessionListMeta,
   SessionListQuery,
   startAutoRefresh,
 } from "@/lib/auth";
@@ -28,6 +29,7 @@ export default function DashboardPage() {
   const router = useRouter();
   const [state, setState] = useState<DashboardState | null>(null);
   const [sessions, setSessions] = useState<DeviceSession[]>([]);
+  const [sessionsMeta, setSessionsMeta] = useState<SessionListMeta | null>(null);
   const [statusFilter, setStatusFilter] = useState<SessionListQuery["status"]>("active");
   const [sort, setSort] = useState<SessionListQuery["sort"]>("lastUsedAt:desc");
   const [limit, setLimit] = useState(20);
@@ -43,7 +45,8 @@ export default function DashboardPage() {
         limit,
         offset,
       });
-      setSessions(deviceSessions);
+      setSessions(deviceSessions.data);
+      setSessionsMeta(deviceSessions.meta);
     },
     [statusFilter, sort, limit, offset],
   );
@@ -280,18 +283,20 @@ export default function DashboardPage() {
           <button
             type="button"
             onClick={() => setOffset((current) => Math.max(0, current - limit))}
-            disabled={offset === 0}
+            disabled={!sessionsMeta?.hasPrev}
           >
             Página anterior
           </button>
           <button
             type="button"
             onClick={() => setOffset((current) => current + limit)}
-            disabled={sessions.length < limit}
+            disabled={!sessionsMeta?.hasNext}
           >
             Próxima página
           </button>
-          <p className="status">Offset atual: {offset}</p>
+          <p className="status">
+            Página atual: {sessionsMeta?.page ?? 1} / {sessionsMeta?.pageCount ?? 1}
+          </p>
         </div>
         <div className="result">
           {sessions.length === 0 ? (

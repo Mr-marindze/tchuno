@@ -151,21 +151,40 @@ export class AuthService {
       where.revokedAt = { not: null };
     }
 
-    return this.prisma.session.findMany({
-      where,
-      select: {
-        id: true,
-        deviceId: true,
-        ip: true,
-        userAgent: true,
-        createdAt: true,
-        lastUsedAt: true,
-        revokedAt: true,
+    const [total, data] = await this.prisma.$transaction([
+      this.prisma.session.count({ where }),
+      this.prisma.session.findMany({
+        where,
+        select: {
+          id: true,
+          deviceId: true,
+          ip: true,
+          userAgent: true,
+          createdAt: true,
+          lastUsedAt: true,
+          revokedAt: true,
+        },
+        orderBy: [{ [sortField]: sortDirection }],
+        take: limit,
+        skip: offset,
+      }),
+    ]);
+
+    const page = Math.floor(offset / limit) + 1;
+    const pageCount = total === 0 ? 1 : Math.ceil(total / limit);
+
+    return {
+      data,
+      meta: {
+        total,
+        limit,
+        offset,
+        page,
+        pageCount,
+        hasNext: offset + data.length < total,
+        hasPrev: offset > 0,
       },
-      orderBy: [{ [sortField]: sortDirection }],
-      take: limit,
-      skip: offset,
-    });
+    };
   }
 
   async revokeSession(userId: string, sessionId: string): Promise<void> {
