@@ -2,7 +2,7 @@
 
 import Link from "next/link";
 import { useRouter } from "next/navigation";
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import {
   AuthResponse,
   clearTokens,
@@ -15,6 +15,7 @@ import {
   refresh,
   revokeSession,
   saveTokens,
+  SessionListQuery,
   startAutoRefresh,
 } from "@/lib/auth";
 
@@ -27,8 +28,25 @@ export default function DashboardPage() {
   const router = useRouter();
   const [state, setState] = useState<DashboardState | null>(null);
   const [sessions, setSessions] = useState<DeviceSession[]>([]);
+  const [statusFilter, setStatusFilter] = useState<SessionListQuery["status"]>("active");
+  const [sort, setSort] = useState<SessionListQuery["sort"]>("lastUsedAt:desc");
+  const [limit, setLimit] = useState(20);
+  const [offset, setOffset] = useState(0);
   const [status, setStatus] = useState("A validar sessão...");
   const [loading, setLoading] = useState(true);
+
+  const loadSessions = useCallback(
+    async (accessToken: string) => {
+      const deviceSessions = await listSessions(accessToken, {
+        status: statusFilter,
+        sort,
+        limit,
+        offset,
+      });
+      setSessions(deviceSessions);
+    },
+    [statusFilter, sort, limit, offset],
+  );
 
   useEffect(() => {
     let isMounted = true;
@@ -47,8 +65,6 @@ export default function DashboardPage() {
       }
 
       setState({ auth: session.auth, me: session.me });
-      const deviceSessions = await listSessions(session.auth.accessToken);
-      setSessions(deviceSessions);
       setStatus("Sessão ativa.");
       setLoading(false);
     }
@@ -76,6 +92,16 @@ export default function DashboardPage() {
     };
   }, [router]);
 
+  useEffect(() => {
+    if (!state?.auth.accessToken) {
+      return;
+    }
+
+    loadSessions(state.auth.accessToken).catch((error) => {
+      setStatus(error instanceof Error ? error.message : "Falha ao carregar sessões.");
+    });
+  }, [state?.auth.accessToken, loadSessions]);
+
   async function handleRefreshNow() {
     const { refreshToken } = getStoredTokens();
     if (!refreshToken) {
@@ -89,8 +115,7 @@ export default function DashboardPage() {
       const auth = await refresh(refreshToken);
       saveTokens(auth);
       setState((current) => (current ? { ...current, auth } : current));
-      const deviceSessions = await listSessions(auth.accessToken);
-      setSessions(deviceSessions);
+      await loadSessions(auth.accessToken);
       setStatus("Sessão renovada com sucesso.");
     } catch (error) {
       clearTokens();
@@ -140,11 +165,26 @@ export default function DashboardPage() {
 
     try {
       await revokeSession(accessToken, sessionId);
-      const deviceSessions = await listSessions(accessToken);
-      setSessions(deviceSessions);
+      await loadSessions(accessToken);
       setStatus("Sessão revogada.");
     } catch (error) {
       setStatus(error instanceof Error ? error.message : "Falha ao revogar sessão.");
+    }
+  }
+
+  async function handleReloadSessions() {
+    const { accessToken } = getStoredTokens();
+
+    if (!accessToken) {
+      setStatus("Access token ausente.");
+      return;
+    }
+
+    try {
+      await loadSessions(accessToken);
+      setStatus("Sessões recarregadas.");
+    } catch (error) {
+      setStatus(error instanceof Error ? error.message : "Falha ao carregar sessões.");
     }
   }
 
@@ -200,6 +240,59 @@ export default function DashboardPage() {
         </pre>
 
         <h2 style={{ marginTop: "1rem", fontWeight: 700 }}>Dispositivos/Sessões</h2>
+        <div className="actions" style={{ marginBottom: "0.8rem" }}>
+          <select
+            value={statusFilter}
+            onChange={(event) => {
+              setOffset(0);
+              setStatusFilter(event.target.value as SessionListQuery["status"]);
+            }}
+          >
+            <option value="active">Ativas</option>
+            <option value="revoked">Revogadas</option>
+            <option value="all">Todas</option>
+          </select>
+          <select
+            value={sort}
+            onChange={(event) => setSort(event.target.value as SessionListQuery["sort"])}
+          >
+            <option value="lastUsedAt:desc">Último uso (desc)</option>
+            <option value="lastUsedAt:asc">Último uso (asc)</option>
+            <option value="createdAt:desc">Criação (desc)</option>
+            <option value="createdAt:asc">Criação (asc)</option>
+          </select>
+          <select
+            value={String(limit)}
+            onChange={(event) => {
+              setOffset(0);
+              setLimit(Number(event.target.value));
+            }}
+          >
+            <option value="10">10</option>
+            <option value="20">20</option>
+            <option value="50">50</option>
+          </select>
+          <button type="button" onClick={handleReloadSessions}>
+            Recarregar
+          </button>
+        </div>
+        <div className="actions" style={{ marginBottom: "0.8rem" }}>
+          <button
+            type="button"
+            onClick={() => setOffset((current) => Math.max(0, current - limit))}
+            disabled={offset === 0}
+          >
+            Página anterior
+          </button>
+          <button
+            type="button"
+            onClick={() => setOffset((current) => current + limit)}
+            disabled={sessions.length < limit}
+          >
+            Próxima página
+          </button>
+          <p className="status">Offset atual: {offset}</p>
+        </div>
         <div className="result">
           {sessions.length === 0 ? (
             <p>Sem sessões registadas.</p>

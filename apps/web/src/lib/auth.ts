@@ -23,6 +23,13 @@ export type DeviceSession = {
   revokedAt: string | null;
 };
 
+export type SessionListQuery = {
+  status?: "active" | "revoked" | "all";
+  limit?: number;
+  offset?: number;
+  sort?: "lastUsedAt:asc" | "lastUsedAt:desc" | "createdAt:asc" | "createdAt:desc";
+};
+
 const API_URL = process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:3001";
 const ACCESS_TOKEN_KEY = "tchuno_access_token";
 const REFRESH_TOKEN_KEY = "tchuno_refresh_token";
@@ -148,8 +155,31 @@ export async function getMe(accessToken: string): Promise<unknown> {
   return getJson<unknown>("/auth/me", accessToken);
 }
 
-export async function listSessions(accessToken: string): Promise<DeviceSession[]> {
-  return getJson<DeviceSession[]>("/auth/sessions", accessToken);
+export async function listSessions(
+  accessToken: string,
+  query?: SessionListQuery,
+): Promise<DeviceSession[]> {
+  const params = new URLSearchParams();
+
+  if (query?.status) {
+    params.set("status", query.status);
+  }
+
+  if (typeof query?.limit === "number") {
+    params.set("limit", String(query.limit));
+  }
+
+  if (typeof query?.offset === "number") {
+    params.set("offset", String(query.offset));
+  }
+
+  if (query?.sort) {
+    params.set("sort", query.sort);
+  }
+
+  const path = params.size > 0 ? `/auth/sessions?${params.toString()}` : "/auth/sessions";
+
+  return getJson<DeviceSession[]>(path, accessToken);
 }
 
 export async function revokeSession(
