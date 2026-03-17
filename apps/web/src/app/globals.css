@@ -422,6 +422,65 @@ body {
   grid-template-columns: repeat(2, minmax(0, 1fr));
 }
 
+.flow-summary {
+  margin-top: 0.4rem;
+  display: grid;
+  gap: 0.5rem;
+  grid-template-columns: repeat(auto-fit, minmax(130px, 1fr));
+}
+
+.flow-summary-item {
+  border: 1px solid rgba(125, 211, 252, 0.2);
+  border-radius: 10px;
+  background: rgba(15, 23, 42, 0.38);
+  padding: 0.52rem 0.58rem;
+}
+
+.flow-summary-item .metric-label {
+  font-size: 0.67rem;
+}
+
+.flow-summary-item .metric-value {
+  font-size: 1.15rem;
+}
+
+.flow-steps {
+  margin: 0.5rem 0 0;
+  padding: 0;
+  list-style: none;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.35rem;
+}
+
+.flow-steps li {
+  border: 1px solid rgba(148, 163, 184, 0.35);
+  border-radius: 999px;
+  padding: 0.2rem 0.48rem;
+  font-size: 0.7rem;
+  line-height: 1.2;
+  color: #cbd5e1;
+  background: rgba(15, 23, 42, 0.42);
+}
+
+.flow-steps li.is-done {
+  border-color: rgba(34, 197, 94, 0.45);
+  color: #bbf7d0;
+  background: rgba(22, 101, 52, 0.3);
+}
+
+.flow-steps li.is-current {
+  border-color: rgba(56, 189, 248, 0.55);
+  color: #e0f2fe;
+  background: rgba(3, 105, 161, 0.35);
+}
+
+.flow-hint {
+  margin: 0.36rem 0 0;
+  color: #bae6fd;
+  font-size: 0.8rem;
+}
+
 .muted {
   color: #93c5fd;
   font-size: 0.8rem;

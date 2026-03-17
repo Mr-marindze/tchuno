@@ -185,6 +185,85 @@ function shortenId(value: string): string {
   return `${value.slice(0, 6)}...${value.slice(-4)}`;
 }
 
+type JobFlowStepState = "is-done" | "is-current" | "is-todo";
+
+const jobFlowOrder: JobStatus[] = [
+  "REQUESTED",
+  "ACCEPTED",
+  "IN_PROGRESS",
+  "COMPLETED",
+];
+
+type JobFlowCounter = Record<JobStatus, number>;
+
+function createJobFlowCounter(): JobFlowCounter {
+  return {
+    REQUESTED: 0,
+    ACCEPTED: 0,
+    IN_PROGRESS: 0,
+    COMPLETED: 0,
+    CANCELED: 0,
+  };
+}
+
+function getJobFlowStepState(
+  currentStatus: JobStatus,
+  stepStatus: JobStatus,
+): JobFlowStepState {
+  const currentIndex = jobFlowOrder.indexOf(currentStatus);
+  const stepIndex = jobFlowOrder.indexOf(stepStatus);
+
+  if (stepIndex < currentIndex) {
+    return "is-done";
+  }
+
+  if (stepIndex === currentIndex) {
+    return "is-current";
+  }
+
+  return "is-todo";
+}
+
+function getClientFlowHint(status: JobStatus): string {
+  if (status === "REQUESTED") {
+    return "Aguardar aceitação do worker ou cancelar se necessário.";
+  }
+
+  if (status === "ACCEPTED") {
+    return "Worker aceitou. Próximo passo é iniciar execução.";
+  }
+
+  if (status === "IN_PROGRESS") {
+    return "Serviço em execução. Próximo passo é conclusão.";
+  }
+
+  if (status === "COMPLETED") {
+    return "Serviço concluído. Próximo passo é publicar review.";
+  }
+
+  return "Fluxo encerrado por cancelamento.";
+}
+
+function getWorkerFlowHint(status: JobStatus): string {
+  if (status === "REQUESTED") {
+    return "Próximo passo: aceitar job para iniciar o fluxo.";
+  }
+
+  if (status === "ACCEPTED") {
+    return "Próximo passo: marcar como Em progresso quando começares.";
+  }
+
+  if (status === "IN_PROGRESS") {
+    return "Próximo passo: marcar como Concluído ao terminar.";
+  }
+
+  if (status === "COMPLETED") {
+    return "Fluxo concluído. Aguardar review do cliente.";
+  }
+
+  return "Fluxo encerrado por cancelamento do cliente.";
+}
+
 type LocationParts = {
   city: string;
   neighborhood: string;
@@ -706,6 +785,18 @@ export default function DashboardPage() {
       withHistoryCount,
     };
   }, [visibleWorkerProfiles]);
+  const reviewableJobIdSet = useMemo(
+    () => new Set(reviewableJobs.map((job) => job.id)),
+    [reviewableJobs],
+  );
+  const clientJobFlowCounts = useMemo(() => {
+    const summary = createJobFlowCounter();
+    for (const job of clientJobs) {
+      summary[job.status] += 1;
+    }
+
+    return summary;
+  }, [clientJobs]);
 
   const pushStatusToast = useCallback(
     (channel: string, message: string) => {
@@ -2602,6 +2693,49 @@ export default function DashboardPage() {
           <p className={`status status--${getStatusTone(jobsStatus)}`}>{jobsStatus}</p>
 
           <div className="result">
+            <p className="item-title">
+              Fluxo do pedido (cliente {"->"} worker {"->"} review)
+            </p>
+            <div className="flow-summary">
+              <article className="flow-summary-item">
+                <p className="metric-label">Aguardando aceitação</p>
+                <p className="metric-value">{clientJobFlowCounts.REQUESTED}</p>
+              </article>
+              <article className="flow-summary-item">
+                <p className="metric-label">Em execução</p>
+                <p className="metric-value">
+                  {clientJobFlowCounts.ACCEPTED + clientJobFlowCounts.IN_PROGRESS}
+                </p>
+              </article>
+              <article className="flow-summary-item">
+                <p className="metric-label">Concluídos</p>
+                <p className="metric-value">{clientJobFlowCounts.COMPLETED}</p>
+              </article>
+              <article className="flow-summary-item">
+                <p className="metric-label">Pendentes de review</p>
+                <p className="metric-value">{reviewableJobs.length}</p>
+              </article>
+              <article className="flow-summary-item">
+                <p className="metric-label">Cancelados</p>
+                <p className="metric-value">{clientJobFlowCounts.CANCELED}</p>
+              </article>
+            </div>
+            {reviewableJobs.length > 0 ? (
+              <p className="status" style={{ marginTop: "0.4rem" }}>
+                Tens {reviewableJobs.length} job(s) prontos para avaliação.{" "}
+                <a href="#reviews" className="nav-link">
+                  Ir para reviews
+                </a>
+              </p>
+            ) : (
+              <p className="muted">
+                Quando um job chega a concluído, ele aparece automaticamente em
+                Reviews.
+              </p>
+            )}
+          </div>
+
+          <div className="result">
             <p className="item-title">Checklist antes de criar job</p>
             <ul className="checklist">
               {jobCreationChecklist.map((item) => (
@@ -2844,6 +2978,28 @@ export default function DashboardPage() {
                           <strong>Agendado:</strong> {formatDate(job.scheduledFor)}
                         </p>
                       ) : null}
+                      {job.status === "CANCELED" ? (
+                        <p className="muted">Fluxo encerrado por cancelamento.</p>
+                      ) : (
+                        <ol className="flow-steps">
+                          {jobFlowOrder.map((stepStatus) => (
+                            <li
+                              key={`${job.id}-${stepStatus}`}
+                              className={getJobFlowStepState(job.status, stepStatus)}
+                            >
+                              {formatJobStatus(stepStatus)}
+                            </li>
+                          ))}
+                        </ol>
+                      )}
+                      <p className="flow-hint">{getClientFlowHint(job.status)}</p>
+                      {job.status === "COMPLETED" && reviewableJobIdSet.has(job.id) ? (
+                        <p className="status" style={{ marginTop: "0.35rem" }}>
+                          <a href="#reviews" className="nav-link">
+                            Job concluído: publicar review agora
+                          </a>
+                        </p>
+                      ) : null}
                       <button
                         type="button"
                         onClick={() =>
@@ -2897,6 +3053,21 @@ export default function DashboardPage() {
                           <strong>Concluído:</strong> {formatDate(job.completedAt)}
                         </p>
                       ) : null}
+                      {job.status === "CANCELED" ? (
+                        <p className="muted">Fluxo encerrado por cancelamento.</p>
+                      ) : (
+                        <ol className="flow-steps">
+                          {jobFlowOrder.map((stepStatus) => (
+                            <li
+                              key={`${job.id}-${stepStatus}`}
+                              className={getJobFlowStepState(job.status, stepStatus)}
+                            >
+                              {formatJobStatus(stepStatus)}
+                            </li>
+                          ))}
+                        </ol>
+                      )}
+                      <p className="flow-hint">{getWorkerFlowHint(job.status)}</p>
                       <div
                         className="actions"
                         style={{
@@ -2941,6 +3112,34 @@ export default function DashboardPage() {
           <p className={`status status--${getStatusTone(reviewsStatus)}`}>
             {reviewsStatus}
           </p>
+
+          <div className="result">
+            <p className="item-title">Handoff de conclusão {"->"} review</p>
+            <div className="flow-summary">
+              <article className="flow-summary-item">
+                <p className="metric-label">Jobs concluídos</p>
+                <p className="metric-value">{completedClientJobs.length}</p>
+              </article>
+              <article className="flow-summary-item">
+                <p className="metric-label">Reviews já criadas</p>
+                <p className="metric-value">{myReviews.length}</p>
+              </article>
+              <article className="flow-summary-item">
+                <p className="metric-label">Pendentes de review</p>
+                <p className="metric-value">{reviewableJobs.length}</p>
+              </article>
+            </div>
+            {reviewableJobs.length === 0 ? (
+              <p className="muted">
+                Sem pendências. O fluxo está fechado para os teus jobs concluídos.
+              </p>
+            ) : (
+              <p className="flow-hint">
+                Seleciona um job concluído no formulário abaixo para fechar o ciclo
+                com avaliação.
+              </p>
+            )}
+          </div>
 
           <div className="section-toolbar">
             <label>

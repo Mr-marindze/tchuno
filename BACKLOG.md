@@ -21,7 +21,7 @@
 3. [x] Dados de localização (bairro/cidade) mais claros
 4. [x] Disponibilidade básica mais visível
 5. [x] Sinais de perfil completo/verificação
-6. [ ] Refinamento do fluxo job -> aceitação -> conclusão -> review
+6. [x] Refinamento do fluxo job -> aceitação -> conclusão -> review
 
 ## Sprint C — Pilot Readiness
 
