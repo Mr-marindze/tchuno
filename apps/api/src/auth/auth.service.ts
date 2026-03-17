@@ -8,6 +8,7 @@ import { JwtService } from '@nestjs/jwt';
 import { Prisma, Session, User } from '@prisma/client';
 import * as bcrypt from 'bcryptjs';
 import { createHash, randomUUID } from 'crypto';
+import { MetricsService } from '../observability/metrics.service';
 import { PrismaService } from '../prisma/prisma.service';
 import { ListSessionsQueryDto } from './dto/list-sessions-query.dto';
 import { LoginDto } from './dto/login.dto';
@@ -40,6 +41,7 @@ export class AuthService {
   constructor(
     private readonly prisma: PrismaService,
     private readonly jwtService: JwtService,
+    private readonly metricsService: MetricsService,
   ) {}
 
   async register(
@@ -416,6 +418,12 @@ export class AuthService {
   }
 
   private audit(event: string, context: Record<string, unknown>): void {
+    this.metricsService.recordBusinessEvent({
+      domain: 'auth',
+      event,
+      result: 'success',
+    });
+
     this.logger.log(
       JSON.stringify({
         event,
@@ -425,6 +433,12 @@ export class AuthService {
   }
 
   private auditWarn(event: string, context: Record<string, unknown>): void {
+    this.metricsService.recordBusinessEvent({
+      domain: 'auth',
+      event,
+      result: event === 'register_conflict' ? 'blocked' : 'failed',
+    });
+
     this.logger.warn(
       JSON.stringify({
         event,

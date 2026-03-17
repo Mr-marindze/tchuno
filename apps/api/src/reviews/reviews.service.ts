@@ -2,15 +2,22 @@ import {
   ConflictException,
   ForbiddenException,
   Injectable,
+  Logger,
   NotFoundException,
 } from '@nestjs/common';
 import { Prisma } from '@prisma/client';
+import { MetricsService } from '../observability/metrics.service';
 import { PrismaService } from '../prisma/prisma.service';
 import { CreateReviewDto } from './dto/create-review.dto';
 
 @Injectable()
 export class ReviewsService {
-  constructor(private readonly prisma: PrismaService) {}
+  private readonly logger = new Logger(ReviewsService.name);
+
+  constructor(
+    private readonly prisma: PrismaService,
+    private readonly metricsService: MetricsService,
+  ) {}
 
   async create(reviewerId: string, dto: CreateReviewDto) {
     const job = await this.prisma.job.findUnique({
@@ -24,14 +31,27 @@ export class ReviewsService {
     });
 
     if (!job) {
+      this.auditWarn('review_create_job_not_found', {
+        reviewerId,
+        jobId: dto.jobId,
+      });
       throw new NotFoundException('Job not found');
     }
 
     if (job.clientId !== reviewerId) {
+      this.auditWarn('review_create_forbidden_reviewer', {
+        reviewerId,
+        jobId: dto.jobId,
+      });
       throw new ForbiddenException('Only the job client can review this job');
     }
 
     if (job.status !== 'COMPLETED') {
+      this.auditWarn('review_create_job_not_completed', {
+        reviewerId,
+        jobId: dto.jobId,
+        jobStatus: job.status,
+      });
       throw new ConflictException('Only completed jobs can be reviewed');
     }
 
@@ -41,10 +61,14 @@ export class ReviewsService {
     });
 
     if (existing) {
+      this.auditWarn('review_create_duplicate', {
+        reviewerId,
+        jobId: dto.jobId,
+      });
       throw new ConflictException('This job already has a review');
     }
 
-    return this.prisma.$transaction(async (tx) => {
+    const review = await this.prisma.$transaction(async (tx) => {
       const review = await tx.review.create({
         data: {
           jobId: dto.jobId,
@@ -74,6 +98,16 @@ export class ReviewsService {
 
       return review;
     });
+
+    this.audit('review_created', {
+      reviewId: review.id,
+      jobId: review.jobId,
+      workerProfileId: review.workerProfileId,
+      reviewerId,
+      rating: review.rating,
+    });
+
+    return review;
   }
 
   async listByWorkerProfile(workerProfileId: string) {
@@ -88,5 +122,35 @@ export class ReviewsService {
       where: { reviewerId },
       orderBy: [{ createdAt: 'desc' }],
     });
+  }
+
+  private audit(event: string, context: Record<string, unknown>): void {
+    this.metricsService.recordBusinessEvent({
+      domain: 'reviews',
+      event,
+      result: 'success',
+    });
+
+    this.logger.log(
+      JSON.stringify({
+        event,
+        ...context,
+      }),
+    );
+  }
+
+  private auditWarn(event: string, context: Record<string, unknown>): void {
+    this.metricsService.recordBusinessEvent({
+      domain: 'reviews',
+      event,
+      result: 'blocked',
+    });
+
+    this.logger.warn(
+      JSON.stringify({
+        event,
+        ...context,
+      }),
+    );
   }
 }

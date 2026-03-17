@@ -27,7 +27,7 @@
 
 1. [x] Ambiente staging limpo
 2. [x] Dados demo
-3. [ ] Métricas mínimas de uso
-4. [ ] Logs e observabilidade básica de operação
-5. [ ] Checklist operacional do piloto
-6. [ ] Roteiro de teste com utilizadores reais
+3. [x] Métricas mínimas de uso
+4. [x] Logs e observabilidade básica de operação
+5. [x] Checklist operacional do piloto
+6. [x] Roteiro de teste com utilizadores reais

@@ -3,9 +3,11 @@ import {
   ConflictException,
   ForbiddenException,
   Injectable,
+  Logger,
   NotFoundException,
 } from '@nestjs/common';
 import { JobStatus } from '@prisma/client';
+import { MetricsService } from '../observability/metrics.service';
 import { PrismaService } from '../prisma/prisma.service';
 import { CreateJobDto } from './dto/create-job.dto';
 import { ListJobsQueryDto } from './dto/list-jobs-query.dto';
@@ -13,13 +15,22 @@ import { UpdateJobStatusDto } from './dto/update-job-status.dto';
 
 @Injectable()
 export class JobsService {
-  constructor(private readonly prisma: PrismaService) {}
+  private readonly logger = new Logger(JobsService.name);
+
+  constructor(
+    private readonly prisma: PrismaService,
+    private readonly metricsService: MetricsService,
+  ) {}
 
   async create(clientId: string, dto: CreateJobDto) {
     const scheduledForDate = dto.scheduledFor
       ? new Date(dto.scheduledFor)
       : null;
     if (scheduledForDate && scheduledForDate.getTime() <= Date.now()) {
+      this.auditWarn('job_create_invalid_schedule', {
+        clientId,
+        workerProfileId: dto.workerProfileId,
+      });
       throw new BadRequestException('scheduledFor must be in the future');
     }
 
@@ -29,6 +40,10 @@ export class JobsService {
     });
 
     if (!workerProfile) {
+      this.auditWarn('job_create_worker_not_found', {
+        clientId,
+        workerProfileId: dto.workerProfileId,
+      });
       throw new NotFoundException('Worker profile not found');
     }
 
@@ -38,10 +53,18 @@ export class JobsService {
     });
 
     if (!category || !category.isActive) {
+      this.auditWarn('job_create_category_not_found', {
+        clientId,
+        categoryId: dto.categoryId,
+      });
       throw new NotFoundException('Category not found');
     }
 
     if (!workerProfile.isAvailable) {
+      this.auditWarn('job_create_worker_unavailable', {
+        clientId,
+        workerProfileId: dto.workerProfileId,
+      });
       throw new ConflictException('Worker is not currently available');
     }
 
@@ -56,12 +79,17 @@ export class JobsService {
     });
 
     if (!matchesCategory) {
+      this.auditWarn('job_create_category_mismatch', {
+        clientId,
+        workerProfileId: dto.workerProfileId,
+        categoryId: dto.categoryId,
+      });
       throw new ConflictException(
         'Worker profile is not linked to this category',
       );
     }
 
-    return this.prisma.job.create({
+    const job = await this.prisma.job.create({
       data: {
         clientId,
         workerProfileId: dto.workerProfileId,
@@ -72,6 +100,15 @@ export class JobsService {
         scheduledFor: scheduledForDate,
       },
     });
+
+    this.audit('job_created', {
+      jobId: job.id,
+      clientId,
+      workerProfileId: job.workerProfileId,
+      status: job.status,
+    });
+
+    return job;
   }
 
   async getById(jobId: string, requesterId: string) {
@@ -168,12 +205,25 @@ export class JobsService {
     const next = dto.status as JobStatus;
 
     if (!this.isTransitionAllowed(current, next, isClient, isWorker)) {
+      this.auditWarn('job_status_transition_rejected', {
+        jobId,
+        requesterId,
+        from: current,
+        to: next,
+      });
+
+      this.metricsService.recordJobStatusTransition({
+        from: current,
+        to: next,
+        result: 'failed',
+      });
+
       throw new ConflictException(
         `Invalid transition from ${current} to ${next}`,
       );
     }
 
-    return this.prisma.job.update({
+    const updatedJob = await this.prisma.job.update({
       where: { id: jobId },
       data: {
         status: next,
@@ -181,6 +231,21 @@ export class JobsService {
         canceledAt: next === 'CANCELED' ? new Date() : null,
       },
     });
+
+    this.metricsService.recordJobStatusTransition({
+      from: current,
+      to: next,
+      result: 'success',
+    });
+
+    this.audit('job_status_transition_success', {
+      jobId,
+      requesterId,
+      from: current,
+      to: next,
+    });
+
+    return updatedJob;
   }
 
   private isTransitionAllowed(
@@ -218,5 +283,35 @@ export class JobsService {
     }
 
     return false;
+  }
+
+  private audit(event: string, context: Record<string, unknown>): void {
+    this.metricsService.recordBusinessEvent({
+      domain: 'jobs',
+      event,
+      result: 'success',
+    });
+
+    this.logger.log(
+      JSON.stringify({
+        event,
+        ...context,
+      }),
+    );
+  }
+
+  private auditWarn(event: string, context: Record<string, unknown>): void {
+    this.metricsService.recordBusinessEvent({
+      domain: 'jobs',
+      event,
+      result: 'blocked',
+    });
+
+    this.logger.warn(
+      JSON.stringify({
+        event,
+        ...context,
+      }),
+    );
   }
 }
