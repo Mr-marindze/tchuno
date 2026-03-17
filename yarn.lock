@@ -2487,6 +2487,7 @@ __metadata:
   resolution: "@tchuno/database@workspace:packages/database"
   dependencies:
     "@prisma/client": "npm:^6.19.2"
+    bcryptjs: "npm:^3.0.2"
     prisma: "npm:^6.19.2"
     tsx: "npm:^4.19.3"
     typescript: "npm:^5.7.3"

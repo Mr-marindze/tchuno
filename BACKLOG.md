@@ -25,8 +25,8 @@
 
 ## Sprint C — Pilot Readiness
 
-1. [ ] Ambiente staging limpo
-2. [ ] Dados demo
+1. [x] Ambiente staging limpo
+2. [x] Dados demo
 3. [ ] Métricas mínimas de uso
 4. [ ] Logs e observabilidade básica de operação
 5. [ ] Checklist operacional do piloto

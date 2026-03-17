@@ -14,7 +14,8 @@
     "test": "echo \"No tests configured for @tchuno/database\""
   },
   "dependencies": {
-    "@prisma/client": "^6.19.2"
+    "@prisma/client": "^6.19.2",
+    "bcryptjs": "^3.0.2"
   },
   "devDependencies": {
     "prisma": "^6.19.2",
