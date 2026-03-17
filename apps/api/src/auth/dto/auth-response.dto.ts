@@ -9,6 +9,9 @@ class AuthUserDto {
 
   @ApiProperty({ nullable: true })
   name!: string | null;
+
+  @ApiProperty({ enum: ['USER', 'ADMIN'] })
+  role!: 'USER' | 'ADMIN';
 }
 
 export class AuthResponseDto {

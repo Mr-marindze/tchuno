@@ -1,5 +1,6 @@
 import { Transform, Type } from 'class-transformer';
 import {
+  IsIn,
   IsDateString,
   IsInt,
   IsNotEmpty,
@@ -47,10 +48,15 @@ export class CreateJobDto {
   description!: string;
 
   @Type(() => Number)
+  @IsOptional()
   @IsInt()
   @Min(0)
   @Max(100_000_000)
-  budget!: number;
+  budget?: number;
+
+  @IsOptional()
+  @IsIn(['FIXED_PRICE', 'QUOTE_REQUEST'])
+  pricingMode?: 'FIXED_PRICE' | 'QUOTE_REQUEST';
 
   @IsOptional()
   @Transform(({ value }: { value: unknown }) =>

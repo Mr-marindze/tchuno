@@ -70,17 +70,21 @@ async function main() {
   for (const [key, user] of Object.entries(seedUsers) as Array<
     [SeedUserKey, { email: string; name: string }]
   >) {
+    const role = key === 'admin' ? 'ADMIN' : 'USER';
+
     const upsertedUser = await prisma.user.upsert({
       where: { email: user.email },
       update: {
         name: user.name,
         passwordHash,
+        role,
         isActive: true,
       },
       create: {
         email: user.email,
         name: user.name,
         passwordHash,
+        role,
         isActive: true,
       },
       select: {

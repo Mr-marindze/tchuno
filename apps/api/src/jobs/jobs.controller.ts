@@ -17,8 +17,10 @@ import {
   ApiOperation,
   ApiParam,
   ApiTags,
+  ApiTooManyRequestsResponse,
   ApiUnauthorizedResponse,
 } from '@nestjs/swagger';
+import { Throttle } from '@nestjs/throttler';
 import { ErrorResponseDto } from '../auth/dto/error-response.dto';
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
 import { CreateJobDto } from './dto/create-job.dto';
@@ -39,11 +41,13 @@ export class JobsController {
   constructor(private readonly jobsService: JobsService) {}
 
   @Post()
+  @Throttle({ default: { limit: 20, ttl: 60_000 } })
   @ApiOperation({ summary: 'Create a new job request' })
   @ApiOkResponse({ type: JobDto })
   @ApiUnauthorizedResponse({ type: ErrorResponseDto })
   @ApiConflictResponse({ type: ErrorResponseDto })
   @ApiNotFoundResponse({ type: ErrorResponseDto })
+  @ApiTooManyRequestsResponse({ type: ErrorResponseDto })
   create(@Req() req: AuthenticatedRequest, @Body() dto: CreateJobDto) {
     return this.jobsService.create(req.user.sub, dto);
   }
@@ -82,12 +86,14 @@ export class JobsController {
   }
 
   @Patch(':id/status')
+  @Throttle({ default: { limit: 40, ttl: 60_000 } })
   @ApiOperation({ summary: 'Update job status with transition rules' })
   @ApiParam({ name: 'id', type: String })
   @ApiOkResponse({ type: JobDto })
   @ApiUnauthorizedResponse({ type: ErrorResponseDto })
   @ApiConflictResponse({ type: ErrorResponseDto })
   @ApiNotFoundResponse({ type: ErrorResponseDto })
+  @ApiTooManyRequestsResponse({ type: ErrorResponseDto })
   updateStatus(
     @Req() req: AuthenticatedRequest,
     @Param('id') id: string,

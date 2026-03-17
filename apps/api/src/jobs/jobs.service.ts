@@ -6,7 +6,7 @@ import {
   Logger,
   NotFoundException,
 } from '@nestjs/common';
-import { JobStatus } from '@prisma/client';
+import { JobStatus, Prisma } from '@prisma/client';
 import { MetricsService } from '../observability/metrics.service';
 import { PrismaService } from '../prisma/prisma.service';
 import { CreateJobDto } from './dto/create-job.dto';
@@ -23,6 +23,29 @@ export class JobsService {
   ) {}
 
   async create(clientId: string, dto: CreateJobDto) {
+    const pricingMode = dto.pricingMode ?? 'FIXED_PRICE';
+    const budget = dto.budget ?? null;
+
+    if (pricingMode === 'FIXED_PRICE' && (budget === null || budget <= 0)) {
+      this.auditWarn('job_create_invalid_fixed_price_budget', {
+        clientId,
+        budget,
+      });
+      throw new BadRequestException(
+        'budget is required and must be > 0 for FIXED_PRICE jobs',
+      );
+    }
+
+    if (pricingMode === 'QUOTE_REQUEST' && budget !== null && budget < 0) {
+      this.auditWarn('job_create_invalid_quote_budget', {
+        clientId,
+        budget,
+      });
+      throw new BadRequestException(
+        'budget must be >= 0 when provided for QUOTE_REQUEST jobs',
+      );
+    }
+
     const scheduledForDate = dto.scheduledFor
       ? new Date(dto.scheduledFor)
       : null;
@@ -36,7 +59,13 @@ export class JobsService {
 
     const workerProfile = await this.prisma.workerProfile.findUnique({
       where: { id: dto.workerProfileId },
-      select: { id: true, isAvailable: true },
+      select: {
+        id: true,
+        isAvailable: true,
+        location: true,
+        hourlyRate: true,
+        experienceYears: true,
+      },
     });
 
     if (!workerProfile) {
@@ -68,6 +97,23 @@ export class JobsService {
       throw new ConflictException('Worker is not currently available');
     }
 
+    const isWorkerProfileReady =
+      !!workerProfile.location &&
+      workerProfile.location.trim().length >= 3 &&
+      typeof workerProfile.hourlyRate === 'number' &&
+      workerProfile.hourlyRate > 0 &&
+      workerProfile.experienceYears > 0;
+
+    if (!isWorkerProfileReady) {
+      this.auditWarn('job_create_worker_profile_incomplete', {
+        clientId,
+        workerProfileId: dto.workerProfileId,
+      });
+      throw new ConflictException(
+        'Worker profile must include location, hourlyRate and experienceYears',
+      );
+    }
+
     const matchesCategory = await this.prisma.workerProfileCategory.findUnique({
       where: {
         workerProfileId_categoryId: {
@@ -94,9 +140,10 @@ export class JobsService {
         clientId,
         workerProfileId: dto.workerProfileId,
         categoryId: dto.categoryId,
+        pricingMode,
         title: dto.title.trim(),
         description: dto.description.trim(),
-        budget: dto.budget,
+        budget,
         scheduledFor: scheduledForDate,
       },
     });
@@ -105,6 +152,7 @@ export class JobsService {
       jobId: job.id,
       clientId,
       workerProfileId: job.workerProfileId,
+      pricingMode: job.pricingMode,
       status: job.status,
     });
 
@@ -223,13 +271,61 @@ export class JobsService {
       );
     }
 
+    if (next === 'ACCEPTED' && job.pricingMode === 'QUOTE_REQUEST') {
+      if (!dto.quotedAmount || dto.quotedAmount <= 0) {
+        this.auditWarn('job_status_quote_missing_on_accept', {
+          jobId,
+          requesterId,
+        });
+        throw new BadRequestException(
+          'quotedAmount is required when accepting QUOTE_REQUEST jobs',
+        );
+      }
+    }
+
+    if (next !== 'ACCEPTED' && dto.quotedAmount !== undefined) {
+      throw new BadRequestException(
+        'quotedAmount can only be provided when status=ACCEPTED',
+      );
+    }
+
+    if (next !== 'CANCELED' && dto.cancelReason) {
+      throw new BadRequestException(
+        'cancelReason can only be provided when status=CANCELED',
+      );
+    }
+
+    const data: Prisma.JobUpdateInput = {
+      status: next,
+    };
+
+    if (next === 'ACCEPTED' && !job.acceptedAt) {
+      data.acceptedAt = new Date();
+    }
+
+    if (next === 'ACCEPTED' && job.pricingMode === 'QUOTE_REQUEST') {
+      data.quotedAmount = dto.quotedAmount ?? null;
+    }
+
+    if (next === 'IN_PROGRESS' && !job.startedAt) {
+      data.startedAt = new Date();
+    }
+
+    if (next === 'COMPLETED' && !job.completedAt) {
+      data.completedAt = new Date();
+    }
+
+    if (next === 'CANCELED') {
+      if (!job.canceledAt) {
+        data.canceledAt = new Date();
+      }
+      data.canceledBy = requesterId;
+      data.cancelReason = dto.cancelReason?.trim() || null;
+    }
+
     const updatedJob = await this.prisma.job.update({
       where: { id: jobId },
-      data: {
-        status: next,
-        completedAt: next === 'COMPLETED' ? new Date() : null,
-        canceledAt: next === 'CANCELED' ? new Date() : null,
-      },
+      data,
     });
 
     this.metricsService.recordJobStatusTransition({
@@ -255,7 +351,7 @@ export class JobsService {
     isWorker: boolean,
   ) {
     if (current === next) {
-      return true;
+      return false;
     }
 
     if (current === 'COMPLETED' || current === 'CANCELED') {

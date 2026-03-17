@@ -13,13 +13,19 @@ export type Job = {
   clientId: string;
   workerProfileId: string;
   categoryId: string;
+  pricingMode: "FIXED_PRICE" | "QUOTE_REQUEST";
   title: string;
   description: string;
-  budget: number;
+  budget: number | null;
+  quotedAmount: number | null;
   status: JobStatus;
+  acceptedAt: string | null;
+  startedAt: string | null;
   scheduledFor: string | null;
   completedAt: string | null;
   canceledAt: string | null;
+  canceledBy: string | null;
+  cancelReason: string | null;
   createdAt: string;
   updatedAt: string;
 };
@@ -29,7 +35,8 @@ export type CreateJobInput = {
   categoryId: string;
   title: string;
   description: string;
-  budget: number;
+  pricingMode?: "FIXED_PRICE" | "QUOTE_REQUEST";
+  budget?: number;
   scheduledFor?: string;
 };
 
@@ -125,6 +132,10 @@ export async function updateJobStatus(
   accessToken: string,
   jobId: string,
   status: JobStatus,
+  options?: {
+    quotedAmount?: number;
+    cancelReason?: string;
+  },
 ): Promise<Job> {
   const response = await fetch(`${API_URL}/jobs/${jobId}/status`, {
     method: "PATCH",
@@ -132,7 +143,11 @@ export async function updateJobStatus(
       Authorization: `Bearer ${accessToken}`,
       "Content-Type": "application/json",
     },
-    body: JSON.stringify({ status }),
+    body: JSON.stringify({
+      status,
+      quotedAmount: options?.quotedAmount,
+      cancelReason: options?.cancelReason,
+    }),
   });
 
   if (!response.ok) {

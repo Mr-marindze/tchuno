@@ -22,7 +22,7 @@ export class JwtStrategy extends PassportStrategy(Strategy) {
   async validate(payload: AccessTokenPayload): Promise<{
     sub: string;
     email: string;
-    user: Pick<User, 'id' | 'email' | 'name' | 'isActive'>;
+    user: Pick<User, 'id' | 'email' | 'name' | 'isActive' | 'role'>;
   }> {
     const user = await this.authService.validateUserById(payload.sub);
 
@@ -38,6 +38,7 @@ export class JwtStrategy extends PassportStrategy(Strategy) {
         email: user.email,
         name: user.name,
         isActive: user.isActive,
+        role: user.role,
       },
     };
   }

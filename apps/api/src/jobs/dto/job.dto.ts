@@ -19,8 +19,14 @@ export class JobDto {
   @ApiProperty()
   description!: string;
 
-  @ApiProperty()
-  budget!: number;
+  @ApiProperty({ nullable: true })
+  budget!: number | null;
+
+  @ApiProperty({ enum: ['FIXED_PRICE', 'QUOTE_REQUEST'] })
+  pricingMode!: 'FIXED_PRICE' | 'QUOTE_REQUEST';
+
+  @ApiProperty({ nullable: true })
+  quotedAmount!: number | null;
 
   @ApiProperty({
     enum: ['REQUESTED', 'ACCEPTED', 'IN_PROGRESS', 'COMPLETED', 'CANCELED'],
@@ -34,7 +40,19 @@ export class JobDto {
   completedAt!: Date | null;
 
   @ApiProperty({ nullable: true })
+  acceptedAt!: Date | null;
+
+  @ApiProperty({ nullable: true })
+  startedAt!: Date | null;
+
+  @ApiProperty({ nullable: true })
   canceledAt!: Date | null;
+
+  @ApiProperty({ nullable: true })
+  canceledBy!: string | null;
+
+  @ApiProperty({ nullable: true })
+  cancelReason!: string | null;
 
   @ApiProperty()
   createdAt!: Date;

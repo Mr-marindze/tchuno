@@ -150,7 +150,11 @@ function getToastToneFromStatus(message: string): ToastTone | null {
   return null;
 }
 
-function formatCurrencyMzn(value: number): string {
+function formatCurrencyMzn(value: number | null): string {
+  if (typeof value !== "number") {
+    return "Sob cotação";
+  }
+
   return new Intl.NumberFormat("pt-MZ", {
     style: "currency",
     currency: "MZN",
@@ -476,6 +480,7 @@ export default function DashboardPage() {
   >("all");
   const [loading, setLoading] = useState(true);
   const isAuthenticated = Boolean(state?.auth.accessToken);
+  const isAdmin = state?.auth.user.role === "ADMIN";
   const activeCategories = useMemo(
     () => categories.filter((category) => category.isActive),
     [categories],
@@ -1371,6 +1376,11 @@ export default function DashboardPage() {
   async function handleCreateCategory(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
 
+    if (!isAdmin) {
+      setCategoryStatus("Apenas admins podem criar categorias.");
+      return;
+    }
+
     const accessToken = state?.auth.accessToken ?? getStoredTokens().accessToken;
     if (!accessToken) {
       setCategoryStatus("Access token ausente.");
@@ -1436,6 +1446,11 @@ export default function DashboardPage() {
   }
 
   async function handleDeactivateCategory(categoryId: string) {
+    if (!isAdmin) {
+      setCategoryStatus("Apenas admins podem desativar categorias.");
+      return;
+    }
+
     const accessToken = state?.auth.accessToken ?? getStoredTokens().accessToken;
     if (!accessToken) {
       setCategoryStatus("Access token ausente.");
@@ -2088,6 +2103,9 @@ export default function DashboardPage() {
           <p className={`status status--${getStatusTone(categoryStatus)}`}>
             {categoryStatus}
           </p>
+          {!isAdmin ? (
+            <p className="status">Modo leitura: gestão de categorias é admin only.</p>
+          ) : null}
 
           <div className="section-toolbar">
             <label className="inline-check">
@@ -2217,7 +2235,11 @@ export default function DashboardPage() {
                 required
               />
             </label>
-            <button type="submit" className="primary" disabled={categoriesLoading}>
+            <button
+              type="submit"
+              className="primary"
+              disabled={categoriesLoading || !isAdmin}
+            >
               {categoriesLoading ? "Aguarda..." : "Criar categoria"}
             </button>
           </form>
@@ -2253,7 +2275,7 @@ export default function DashboardPage() {
                   <button
                     type="button"
                     onClick={() => handleDeactivateCategory(category.id)}
-                    disabled={categoriesLoading || !category.isActive}
+                    disabled={categoriesLoading || !category.isActive || !isAdmin}
                   >
                     {category.isActive ? "Desativar categoria" : "Inativa"}
                   </button>

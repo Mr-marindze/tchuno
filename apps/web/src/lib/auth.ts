@@ -5,6 +5,7 @@ export type AuthResponse = {
     id: string;
     email: string;
     name: string | null;
+    role: "USER" | "ADMIN";
   };
   accessToken: string;
   refreshToken: string;
@@ -242,6 +243,7 @@ export async function ensureSession(): Promise<SessionState | null> {
             id: "",
             email: "",
             name: null,
+            role: "USER",
           },
           accessToken,
           refreshToken: refreshToken ?? "",

@@ -12,6 +12,7 @@ model User {
   email        String    @unique
   name         String?
   passwordHash String
+  role         UserRole  @default(USER)
   isActive     Boolean   @default(true)
   createdAt    DateTime  @default(now())
   updatedAt    DateTime  @updatedAt
@@ -72,13 +73,19 @@ model Job {
   clientId        String
   workerProfileId String
   categoryId      String
+  pricingMode     JobPricingMode @default(FIXED_PRICE)
   title           String
   description     String
-  budget          Int
+  budget          Int?
+  quotedAmount    Int?
   status          JobStatus    @default(REQUESTED)
+  acceptedAt      DateTime?
+  startedAt       DateTime?
   scheduledFor    DateTime?
   completedAt     DateTime?
   canceledAt      DateTime?
+  canceledBy      String?
+  cancelReason    String?
   createdAt       DateTime     @default(now())
   updatedAt       DateTime     @updatedAt
   client          User         @relation("ClientJobs", fields: [clientId], references: [id], onDelete: Cascade)
@@ -89,6 +96,7 @@ model Job {
   @@index([clientId, status, createdAt])
   @@index([workerProfileId, status, createdAt])
   @@index([status, createdAt])
+  @@index([pricingMode, status, createdAt])
 }
 
 model Review {
@@ -114,6 +122,16 @@ enum JobStatus {
   IN_PROGRESS
   COMPLETED
   CANCELED
+}
+
+enum JobPricingMode {
+  FIXED_PRICE
+  QUOTE_REQUEST
+}
+
+enum UserRole {
+  USER
+  ADMIN
 }
 
 model Session {

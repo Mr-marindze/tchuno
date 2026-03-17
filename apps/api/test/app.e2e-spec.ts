@@ -64,6 +64,7 @@ type ReviewPayload = {
 
 describe('Auth and Sessions (e2e)', () => {
   let app: INestApplication<App>;
+  let prisma: PrismaClient;
 
   const rootDir = resolve(__dirname, '../../..');
   const originalDatabaseUrl = process.env.DATABASE_URL;
@@ -92,6 +93,14 @@ describe('Auth and Sessions (e2e)', () => {
       },
     });
 
+    prisma = new PrismaClient({
+      datasources: {
+        db: {
+          url: e2eDatabaseUrl,
+        },
+      },
+    });
+
     const moduleFixture: TestingModule = await Test.createTestingModule({
       imports: [AppModule],
     }).compile();
@@ -112,6 +121,7 @@ describe('Auth and Sessions (e2e)', () => {
   afterAll(async () => {
     try {
       await app.close();
+      await prisma.$disconnect();
     } finally {
       const prismaAdmin = new PrismaClient({
         datasources: {
@@ -336,17 +346,19 @@ describe('Auth and Sessions (e2e)', () => {
       .expect(201);
     const clientAuth = clientRegister.body as AuthPayload;
 
-    const categoryResponse = await request(app.getHttpServer())
-      .post('/categories')
-      .set('Authorization', `Bearer ${workerAuth.accessToken}`)
-      .send({
+    const category = (await prisma.category.create({
+      data: {
         name: `Ar Condicionado ${Date.now()}`,
         slug: `ar-condicionado-${Date.now()}`,
         description: 'Instalacao e manutencao de ar condicionado',
         sortOrder: 40,
-      })
-      .expect(201);
-    const category = categoryResponse.body as CategoryPayload;
+      },
+      select: {
+        id: true,
+        name: true,
+        slug: true,
+      },
+    })) as CategoryPayload;
 
     const workerProfileResponse = await request(app.getHttpServer())
       .put('/worker-profile/me')
@@ -483,7 +495,7 @@ describe('Auth and Sessions (e2e)', () => {
       .send({ refreshToken: expiredRefreshToken })
       .expect(401);
 
-    const categoryResponse = await request(app.getHttpServer())
+    await request(app.getHttpServer())
       .post('/categories')
       .set('Authorization', `Bearer ${workerAuth.accessToken}`)
       .send({
@@ -492,8 +504,21 @@ describe('Auth and Sessions (e2e)', () => {
         description: 'Servicos eletricos para QA de caos',
         sortOrder: 70,
       })
-      .expect(201);
-    const category = categoryResponse.body as CategoryPayload;
+      .expect(403);
+
+    const category = (await prisma.category.create({
+      data: {
+        name: `Eletricista Chaos ${Date.now()}`,
+        slug: `eletricista-chaos-${Date.now()}`,
+        description: 'Servicos eletricos para QA de caos',
+        sortOrder: 70,
+      },
+      select: {
+        id: true,
+        name: true,
+        slug: true,
+      },
+    })) as CategoryPayload;
 
     const workerProfileUnavailableResponse = await request(app.getHttpServer())
       .put('/worker-profile/me')
