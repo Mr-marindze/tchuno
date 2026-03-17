@@ -205,7 +205,7 @@ export class JobsService {
 
     if (isClient) {
       if (next === 'CANCELED') {
-        return current !== 'COMPLETED';
+        return true;
       }
     }
 
