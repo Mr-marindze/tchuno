@@ -86,3 +86,32 @@ No DevTools > Network:
 - Fluxo manual em 3 viewports (mobile + desktop) sem bloqueios críticos
 - Erros sempre legíveis para humano
 - Sem ação protegida passar sem token/permissão correta
+
+## 5) Execução do Checkpoint 3 (17 de março de 2026)
+
+### Resultado automatizado (executado)
+
+- `corepack yarn workspace @tchuno/web lint` -> **PASS**
+- `corepack yarn workspace @tchuno/web build` -> **PASS**
+- `corepack yarn workspace @tchuno/api test:e2e` -> **PASS (9/9)**
+- `corepack yarn lint && corepack yarn test` -> **PASS**
+
+### Ajustes de UX/responsividade aplicados
+
+- Quebra de texto longa em cards/result/toasts para evitar overflow horizontal.
+- Alvos de toque mínimos (`min-height`) para botões em mobile.
+- Toolbar mais flexível para filtros/inputs em diferentes larguras.
+- Inputs com `font-size: 16px` em mobile para evitar zoom automático no iOS.
+
+### Checklist manual para fechar fase (browser real)
+
+Marca cada item como `OK` ou `NOK` durante validação manual:
+
+- [ ] **Sessões em múltiplas tabs** (logout-all invalida tab secundária)
+- [ ] **Refresh token reutilizado** (cadeia revogada e erro humano claro)
+- [ ] **Validações absurdas** (frontend bloqueia e backend retorna mensagem clara)
+- [ ] **Responsividade iPhone SE** (sem overflow, botões clicáveis)
+- [ ] **Responsividade Pixel 7** (filtros/paginação sem atrito)
+- [ ] **Responsividade iPad Mini** (layout estável, sem cortes)
+- [ ] **Rede Slow 3G** (loading/error coerentes)
+- [ ] **Modo Offline e recuperação** (mensagem clara + retoma ao voltar online)

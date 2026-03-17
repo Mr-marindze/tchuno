@@ -86,6 +86,7 @@ body {
   padding: 0.7rem 0.9rem;
   font-weight: 600;
   transition: transform 140ms ease, background-color 140ms ease;
+  min-height: 42px;
 }
 
 .mode-switch button.active,
@@ -150,6 +151,7 @@ body {
   display: flex;
   flex-wrap: wrap;
   gap: 0.6rem;
+  align-items: flex-end;
 }
 
 .section-toolbar label {
@@ -157,6 +159,8 @@ body {
   gap: 0.35rem;
   font-weight: 600;
   min-width: 180px;
+  flex: 1 1 220px;
+  max-width: 320px;
 }
 
 .section-toolbar .inline-check {
@@ -308,6 +312,7 @@ body {
   border: 1px solid rgba(186, 230, 253, 0.2);
   background: rgba(15, 23, 42, 0.66);
   overflow-x: auto;
+  overflow-wrap: anywhere;
   font-size: 0.84rem;
 }
 
@@ -316,6 +321,7 @@ body {
   display: flex;
   align-items: center;
   justify-content: space-between;
+  flex-wrap: wrap;
   gap: 0.5rem;
   font-weight: 700;
 }
@@ -361,6 +367,7 @@ body {
 .job-card p,
 .review-card p {
   margin: 0.24rem 0;
+  overflow-wrap: anywhere;
 }
 
 .empty-state {
@@ -466,6 +473,12 @@ body {
   color: #e2e8f0;
   font-size: 0.83rem;
   line-height: 1.35;
+  overflow-wrap: anywhere;
+}
+
+pre {
+  white-space: pre-wrap;
+  word-break: break-word;
 }
 
 .toast button {
@@ -537,6 +550,10 @@ body {
     grid-template-columns: 1fr;
   }
 
+  .section-toolbar label {
+    max-width: none;
+  }
+
   .panel-grid {
     grid-template-columns: 1fr;
   }
@@ -546,5 +563,14 @@ body {
     right: 0.7rem;
     bottom: 0.7rem;
     width: auto;
+  }
+
+  .form input,
+  .form select,
+  .form textarea,
+  .section-toolbar input,
+  .section-toolbar select,
+  .section-toolbar textarea {
+    font-size: 16px;
   }
 }
