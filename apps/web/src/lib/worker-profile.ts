@@ -1,4 +1,5 @@
 import { API_URL } from "@/lib/auth";
+import { readApiError } from "@/lib/http-errors";
 
 export type WorkerProfileCategoryItem = {
   id: string;
@@ -37,27 +38,6 @@ export type UpsertWorkerProfileInput = {
   categoryIds?: string[];
 };
 
-type ApiErrorBody = {
-  message?: string | string[];
-};
-
-async function readError(response: Response): Promise<string> {
-  let detail = `Request failed with status ${response.status}`;
-
-  try {
-    const body = (await response.json()) as ApiErrorBody;
-    if (Array.isArray(body.message)) {
-      detail = body.message.join(", ");
-    } else if (body.message) {
-      detail = body.message;
-    }
-  } catch {
-    // Keep fallback detail if API does not return JSON.
-  }
-
-  return detail;
-}
-
 export async function listWorkerProfiles(
   query?: ListWorkerProfilesQuery,
 ): Promise<WorkerProfile[]> {
@@ -83,7 +63,7 @@ export async function listWorkerProfiles(
   const response = await fetch(`${API_URL}/worker-profile${path}`);
 
   if (!response.ok) {
-    throw new Error(await readError(response));
+    throw new Error(await readApiError(response));
   }
 
   return (await response.json()) as WorkerProfile[];
@@ -103,7 +83,7 @@ export async function getMyWorkerProfile(
   }
 
   if (!response.ok) {
-    throw new Error(await readError(response));
+    throw new Error(await readApiError(response));
   }
 
   return (await response.json()) as WorkerProfile;
@@ -123,7 +103,7 @@ export async function upsertMyWorkerProfile(
   });
 
   if (!response.ok) {
-    throw new Error(await readError(response));
+    throw new Error(await readApiError(response));
   }
 
   return (await response.json()) as WorkerProfile;

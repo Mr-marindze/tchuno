@@ -1,3 +1,5 @@
+import { readApiError } from "@/lib/http-errors";
+
 export type AuthResponse = {
   user: {
     id: string;
@@ -50,27 +52,6 @@ const ACCESS_TOKEN_KEY = "tchuno_access_token";
 const REFRESH_TOKEN_KEY = "tchuno_refresh_token";
 const DEVICE_ID_KEY = "tchuno_device_id";
 
-type ApiErrorBody = {
-  message?: string | string[];
-};
-
-async function readError(response: Response): Promise<string> {
-  let detail = `Request failed with status ${response.status}`;
-
-  try {
-    const body = (await response.json()) as ApiErrorBody;
-    if (Array.isArray(body.message)) {
-      detail = body.message.join(", ");
-    } else if (body.message) {
-      detail = body.message;
-    }
-  } catch {
-    // Keep fallback detail if API does not return JSON.
-  }
-
-  return detail;
-}
-
 async function postJson<T>(path: string, payload: unknown): Promise<T> {
   const headers: Record<string, string> = {
     "Content-Type": "application/json",
@@ -87,7 +68,7 @@ async function postJson<T>(path: string, payload: unknown): Promise<T> {
   });
 
   if (!response.ok) {
-    throw new Error(await readError(response));
+    throw new Error(await readApiError(response));
   }
 
   if (response.status === 204) {
@@ -105,7 +86,7 @@ async function getJson<T>(path: string, accessToken: string): Promise<T> {
   });
 
   if (!response.ok) {
-    throw new Error(await readError(response));
+    throw new Error(await readApiError(response));
   }
 
   return (await response.json()) as T;
@@ -194,7 +175,7 @@ export async function logoutAll(accessToken: string): Promise<void> {
   });
 
   if (!response.ok) {
-    throw new Error(await readError(response));
+    throw new Error(await readApiError(response));
   }
 }
 
@@ -241,7 +222,7 @@ export async function revokeSession(
   });
 
   if (!response.ok) {
-    throw new Error(await readError(response));
+    throw new Error(await readApiError(response));
   }
 }
 

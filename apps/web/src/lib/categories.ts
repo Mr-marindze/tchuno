@@ -1,4 +1,5 @@
 import { API_URL } from "@/lib/auth";
+import { readApiError } from "@/lib/http-errors";
 
 export type Category = {
   id: string;
@@ -22,27 +23,6 @@ export type CreateCategoryInput = {
   sortOrder?: number;
 };
 
-type ApiErrorBody = {
-  message?: string | string[];
-};
-
-async function readError(response: Response): Promise<string> {
-  let detail = `Request failed with status ${response.status}`;
-
-  try {
-    const body = (await response.json()) as ApiErrorBody;
-    if (Array.isArray(body.message)) {
-      detail = body.message.join(", ");
-    } else if (body.message) {
-      detail = body.message;
-    }
-  } catch {
-    // Keep fallback detail if API does not return JSON.
-  }
-
-  return detail;
-}
-
 export async function listCategories(
   query?: ListCategoriesQuery,
 ): Promise<Category[]> {
@@ -55,7 +35,7 @@ export async function listCategories(
   const response = await fetch(`${API_URL}/categories${path}`);
 
   if (!response.ok) {
-    throw new Error(await readError(response));
+    throw new Error(await readApiError(response));
   }
 
   return (await response.json()) as Category[];
@@ -75,7 +55,7 @@ export async function createCategory(
   });
 
   if (!response.ok) {
-    throw new Error(await readError(response));
+    throw new Error(await readApiError(response));
   }
 
   return (await response.json()) as Category;
@@ -93,6 +73,6 @@ export async function deactivateCategory(
   });
 
   if (!response.ok) {
-    throw new Error(await readError(response));
+    throw new Error(await readApiError(response));
   }
 }

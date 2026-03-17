@@ -1,4 +1,5 @@
 import { API_URL } from "@/lib/auth";
+import { readApiError } from "@/lib/http-errors";
 
 export type JobStatus =
   | "REQUESTED"
@@ -38,27 +39,6 @@ export type ListJobsQuery = {
   offset?: number;
 };
 
-type ApiErrorBody = {
-  message?: string | string[];
-};
-
-async function readError(response: Response): Promise<string> {
-  let detail = `Request failed with status ${response.status}`;
-
-  try {
-    const body = (await response.json()) as ApiErrorBody;
-    if (Array.isArray(body.message)) {
-      detail = body.message.join(", ");
-    } else if (body.message) {
-      detail = body.message;
-    }
-  } catch {
-    // Keep fallback detail if API does not return JSON.
-  }
-
-  return detail;
-}
-
 function buildQueryString(query?: ListJobsQuery): string {
   const params = new URLSearchParams();
 
@@ -91,7 +71,7 @@ export async function createJob(
   });
 
   if (!response.ok) {
-    throw new Error(await readError(response));
+    throw new Error(await readApiError(response));
   }
 
   return (await response.json()) as Job;
@@ -111,7 +91,7 @@ export async function listMyClientJobs(
   );
 
   if (!response.ok) {
-    throw new Error(await readError(response));
+    throw new Error(await readApiError(response));
   }
 
   return (await response.json()) as Job[];
@@ -135,7 +115,7 @@ export async function listMyWorkerJobs(
   }
 
   if (!response.ok) {
-    throw new Error(await readError(response));
+    throw new Error(await readApiError(response));
   }
 
   return (await response.json()) as Job[];
@@ -156,7 +136,7 @@ export async function updateJobStatus(
   });
 
   if (!response.ok) {
-    throw new Error(await readError(response));
+    throw new Error(await readApiError(response));
   }
 
   return (await response.json()) as Job;

@@ -1,4 +1,5 @@
 import { INestApplication, ValidationPipe } from '@nestjs/common';
+import { JwtService } from '@nestjs/jwt';
 import { Test, TestingModule } from '@nestjs/testing';
 import { PrismaClient } from '@prisma/client';
 import { execSync } from 'node:child_process';
@@ -427,6 +428,225 @@ describe('Auth and Sessions (e2e)', () => {
     const workerReviews = workerReviewsResponse.body as ReviewPayload[];
     expect(workerReviews.length).toBeGreaterThanOrEqual(1);
     expect(workerReviews[0]?.jobId).toBe(job.id);
+  });
+
+  it('chaos flow: rejects invalid actions and handles multi-session revocation', async () => {
+    const workerEmail = `chaos_worker_${Date.now()}@tchuno.local`;
+    const clientEmail = `chaos_client_${Date.now()}@tchuno.local`;
+    const password = 'abc12345';
+
+    const workerRegister = await request(app.getHttpServer())
+      .post('/auth/register')
+      .set('x-device-id', 'chaos-worker-device')
+      .send({ email: workerEmail, password, name: 'Chaos Worker' })
+      .expect(201);
+    const workerAuth = workerRegister.body as AuthPayload;
+
+    await request(app.getHttpServer())
+      .get('/jobs/me/worker')
+      .set('Authorization', `Bearer ${workerAuth.accessToken}`)
+      .expect(404);
+
+    const clientRegister = await request(app.getHttpServer())
+      .post('/auth/register')
+      .set('x-device-id', 'chaos-client-tab-a')
+      .send({ email: clientEmail, password, name: 'Chaos Client' })
+      .expect(201);
+    const clientTabA = clientRegister.body as AuthPayload;
+
+    const clientLogin = await request(app.getHttpServer())
+      .post('/auth/login')
+      .set('x-device-id', 'chaos-client-tab-b')
+      .send({ email: clientEmail, password })
+      .expect(200);
+    const clientTabB = clientLogin.body as AuthPayload;
+
+    const jwtService = app.get(JwtService);
+    const expiredRefreshToken = jwtService.sign(
+      {
+        sub: clientTabA.user.id,
+        email: clientTabA.user.email,
+        type: 'refresh',
+        sid: randomUUID(),
+        did: 'chaos-client-tab-a',
+        jti: randomUUID(),
+      },
+      {
+        secret: process.env.JWT_REFRESH_SECRET || 'change-me-refresh',
+        expiresIn: '-10s',
+      },
+    );
+
+    await request(app.getHttpServer())
+      .post('/auth/refresh')
+      .set('x-device-id', 'chaos-client-tab-a')
+      .send({ refreshToken: expiredRefreshToken })
+      .expect(401);
+
+    const categoryResponse = await request(app.getHttpServer())
+      .post('/categories')
+      .set('Authorization', `Bearer ${workerAuth.accessToken}`)
+      .send({
+        name: `Eletricista Chaos ${Date.now()}`,
+        slug: `eletricista-chaos-${Date.now()}`,
+        description: 'Servicos eletricos para QA de caos',
+        sortOrder: 70,
+      })
+      .expect(201);
+    const category = categoryResponse.body as CategoryPayload;
+
+    const workerProfileUnavailableResponse = await request(app.getHttpServer())
+      .put('/worker-profile/me')
+      .set('Authorization', `Bearer ${workerAuth.accessToken}`)
+      .send({
+        bio: 'Perfil criado para testes agressivos',
+        location: 'Maputo',
+        hourlyRate: 900,
+        experienceYears: 5,
+        isAvailable: false,
+        categoryIds: [category.id],
+      })
+      .expect(200);
+    const workerProfile =
+      workerProfileUnavailableResponse.body as WorkerProfilePayload;
+
+    await request(app.getHttpServer())
+      .post('/jobs')
+      .set('Authorization', `Bearer ${clientTabA.accessToken}`)
+      .send({
+        workerProfileId: workerProfile.id,
+        categoryId: category.id,
+        title: 'Serviço com worker indisponível',
+        description: 'Este job deve falhar porque o worker está indisponível.',
+        budget: 3500,
+      })
+      .expect(409);
+
+    await request(app.getHttpServer())
+      .patch('/worker-profile/me')
+      .set('Authorization', `Bearer ${workerAuth.accessToken}`)
+      .send({ isAvailable: true })
+      .expect(200);
+
+    await request(app.getHttpServer())
+      .post('/jobs')
+      .set('Authorization', `Bearer ${clientTabA.accessToken}`)
+      .send({
+        workerProfileId: workerProfile.id,
+        categoryId: category.id,
+        title: 'ab',
+        description: 'curta',
+        budget: -1,
+      })
+      .expect(400);
+
+    const createJobResponse = await request(app.getHttpServer())
+      .post('/jobs')
+      .set('Authorization', `Bearer ${clientTabA.accessToken}`)
+      .send({
+        workerProfileId: workerProfile.id,
+        categoryId: category.id,
+        title: 'Trocar quadro elétrico',
+        description: 'Preciso trocar quadro elétrico e revisar disjuntores.',
+        budget: 6000,
+      })
+      .expect(201);
+    const job = createJobResponse.body as JobPayload;
+
+    const activeSessionsResponse = await request(app.getHttpServer())
+      .get('/auth/sessions?status=active&limit=10&offset=0&sort=createdAt:asc')
+      .set('Authorization', `Bearer ${clientTabB.accessToken}`)
+      .expect(200);
+    const activeSessions = activeSessionsResponse.body as SessionListResponse;
+    expect(activeSessions.meta.total).toBeGreaterThanOrEqual(2);
+
+    await request(app.getHttpServer())
+      .patch(`/jobs/${job.id}/status`)
+      .set('Authorization', `Bearer ${clientTabA.accessToken}`)
+      .send({ status: 'ACCEPTED' })
+      .expect(409);
+
+    await request(app.getHttpServer())
+      .patch(`/jobs/${job.id}/status`)
+      .set('Authorization', `Bearer ${workerAuth.accessToken}`)
+      .send({ status: 'COMPLETED' })
+      .expect(409);
+
+    await request(app.getHttpServer())
+      .patch(`/jobs/${job.id}/status`)
+      .set('Authorization', `Bearer ${workerAuth.accessToken}`)
+      .send({ status: 'ACCEPTED' })
+      .expect(200);
+
+    await request(app.getHttpServer())
+      .patch(`/jobs/${job.id}/status`)
+      .set('Authorization', `Bearer ${workerAuth.accessToken}`)
+      .send({ status: 'COMPLETED' })
+      .expect(409);
+
+    await request(app.getHttpServer())
+      .patch(`/jobs/${job.id}/status`)
+      .set('Authorization', `Bearer ${workerAuth.accessToken}`)
+      .send({ status: 'IN_PROGRESS' })
+      .expect(200);
+
+    await request(app.getHttpServer())
+      .patch(`/jobs/${job.id}/status`)
+      .set('Authorization', `Bearer ${workerAuth.accessToken}`)
+      .send({ status: 'COMPLETED' })
+      .expect(200);
+
+    await request(app.getHttpServer())
+      .post('/reviews')
+      .set('Authorization', `Bearer ${clientTabA.accessToken}`)
+      .send({
+        jobId: job.id,
+        rating: 4,
+        comment: 'Concluído com qualidade.',
+      })
+      .expect(201);
+
+    await request(app.getHttpServer())
+      .post('/reviews')
+      .set('Authorization', `Bearer ${clientTabA.accessToken}`)
+      .send({
+        jobId: job.id,
+        rating: 3,
+        comment: 'Tentativa duplicada deve falhar.',
+      })
+      .expect(409);
+
+    await request(app.getHttpServer())
+      .post('/auth/logout-all')
+      .set('Authorization', `Bearer ${clientTabA.accessToken}`)
+      .send({})
+      .expect(204);
+
+    await request(app.getHttpServer())
+      .post('/auth/refresh')
+      .set('x-device-id', 'chaos-client-tab-a')
+      .send({ refreshToken: clientTabA.refreshToken })
+      .expect(401);
+
+    await request(app.getHttpServer())
+      .post('/auth/refresh')
+      .set('x-device-id', 'chaos-client-tab-b')
+      .send({ refreshToken: clientTabB.refreshToken })
+      .expect(401);
+
+    const revokedSessionsResponse = await request(app.getHttpServer())
+      .get(
+        '/auth/sessions?status=revoked&limit=1&offset=0&sort=lastUsedAt:desc',
+      )
+      .set('Authorization', `Bearer ${clientTabA.accessToken}`)
+      .expect(200);
+    const revokedSessions = revokedSessionsResponse.body as SessionListResponse;
+
+    expect(revokedSessions.meta.total).toBeGreaterThanOrEqual(2);
+    expect(revokedSessions.meta.page).toBe(1);
+    expect(revokedSessions.meta.hasPrev).toBe(false);
+    expect(revokedSessions.meta.pageCount).toBeGreaterThanOrEqual(2);
+    expect(revokedSessions.meta.hasNext).toBe(true);
   });
 
   it('rate-limits repeated login attempts', async () => {

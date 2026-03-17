@@ -1,4 +1,5 @@
 import { API_URL } from "@/lib/auth";
+import { readApiError } from "@/lib/http-errors";
 
 export type Review = {
   id: string;
@@ -17,27 +18,6 @@ export type CreateReviewInput = {
   comment?: string;
 };
 
-type ApiErrorBody = {
-  message?: string | string[];
-};
-
-async function readError(response: Response): Promise<string> {
-  let detail = `Request failed with status ${response.status}`;
-
-  try {
-    const body = (await response.json()) as ApiErrorBody;
-    if (Array.isArray(body.message)) {
-      detail = body.message.join(", ");
-    } else if (body.message) {
-      detail = body.message;
-    }
-  } catch {
-    // Keep fallback detail if API does not return JSON.
-  }
-
-  return detail;
-}
-
 export async function createReview(
   accessToken: string,
   input: CreateReviewInput,
@@ -52,7 +32,7 @@ export async function createReview(
   });
 
   if (!response.ok) {
-    throw new Error(await readError(response));
+    throw new Error(await readApiError(response));
   }
 
   return (await response.json()) as Review;
@@ -66,7 +46,7 @@ export async function listMyReviews(accessToken: string): Promise<Review[]> {
   });
 
   if (!response.ok) {
-    throw new Error(await readError(response));
+    throw new Error(await readApiError(response));
   }
 
   return (await response.json()) as Review[];
@@ -78,7 +58,7 @@ export async function listWorkerReviews(
   const response = await fetch(`${API_URL}/reviews/worker/${workerProfileId}`);
 
   if (!response.ok) {
-    throw new Error(await readError(response));
+    throw new Error(await readApiError(response));
   }
 
   return (await response.json()) as Review[];
