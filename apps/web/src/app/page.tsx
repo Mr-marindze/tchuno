@@ -1,7 +1,7 @@
 "use client";
 
 import Link from "next/link";
-import { FormEvent, useMemo, useState } from "react";
+import { FormEvent, useEffect, useMemo, useState } from "react";
 import {
   AuthResponse,
   API_URL,
@@ -13,39 +13,93 @@ import {
   register,
   saveTokens,
 } from "@/lib/auth";
+import { ToastTone, useToast } from "@/components/toast-provider";
+import { humanizeUnknownError } from "@/lib/http-errors";
 
 type Mode = "login" | "register";
 
 export default function Home() {
+  const { pushToast } = useToast();
   const [mode, setMode] = useState<Mode>("login");
   const [email, setEmail] = useState("user1@tchuno.local");
-  const [password, setPassword] = useState("12345678");
+  const [password, setPassword] = useState("abc12345");
   const [name, setName] = useState("User 1");
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [result, setResult] = useState<AuthResponse | null>(null);
   const [message, setMessage] = useState("Ready");
+  const [hasSession, setHasSession] = useState(false);
 
   const title = useMemo(
     () => (mode === "login" ? "Entrar no Tchuno" : "Criar conta no Tchuno"),
     [mode],
   );
 
+  useEffect(() => {
+    const accessToken = localStorage.getItem("tchuno_access_token");
+    const refreshToken = localStorage.getItem("tchuno_refresh_token");
+    setHasSession(Boolean(accessToken || refreshToken));
+  }, []);
+
+  function setFeedback(nextMessage: string, tone: ToastTone = "info"): void {
+    setMessage(nextMessage);
+    if (tone !== "info") {
+      pushToast({ message: nextMessage, tone });
+    }
+  }
+
+  function validateAuthForm(): string | null {
+    const normalizedEmail = email.trim().toLowerCase();
+    if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(normalizedEmail)) {
+      return "Email inválido.";
+    }
+
+    if (
+      password.length < 8 ||
+      !/[a-zA-Z]/.test(password) ||
+      !/[0-9]/.test(password)
+    ) {
+      return "Password deve ter pelo menos 8 caracteres, 1 letra e 1 número.";
+    }
+
+    if (mode === "register") {
+      const normalizedName = name.trim();
+      if (normalizedName.length > 0 && normalizedName.length < 2) {
+        return "Name deve ter pelo menos 2 caracteres.";
+      }
+    }
+
+    return null;
+  }
+
   async function onSubmit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
+
+    const validationError = validateAuthForm();
+    if (validationError) {
+      setFeedback(validationError, "error");
+      return;
+    }
+
     setIsSubmitting(true);
     setMessage("A processar...");
 
     try {
+      const normalizedEmail = email.trim().toLowerCase();
       const auth =
         mode === "login"
-          ? await login({ email, password })
-          : await register({ email, password, name: name.trim() || undefined });
+          ? await login({ email: normalizedEmail, password })
+          : await register({
+              email: normalizedEmail,
+              password,
+              name: name.trim() || undefined,
+            });
 
       setResult(auth);
       saveTokens(auth);
-      setMessage(`${mode === "login" ? "Login" : "Registo"} com sucesso.`);
+      setHasSession(true);
+      setFeedback(`${mode === "login" ? "Login" : "Registo"} com sucesso.`, "success");
     } catch (error) {
-      setMessage(error instanceof Error ? error.message : "Erro inesperado");
+      setFeedback(humanizeUnknownError(error, "Erro inesperado no login."), "error");
     } finally {
       setIsSubmitting(false);
     }
@@ -55,7 +109,7 @@ export default function Home() {
     const refreshToken = result?.refreshToken ?? localStorage.getItem("tchuno_refresh_token");
 
     if (!refreshToken) {
-      setMessage("Nenhum refresh token disponível.");
+      setFeedback("Nenhum refresh token disponível.", "error");
       return;
     }
 
@@ -66,9 +120,10 @@ export default function Home() {
       const auth = await refresh(refreshToken);
       setResult(auth);
       saveTokens(auth);
-      setMessage("Sessão renovada.");
+      setHasSession(true);
+      setFeedback("Sessão renovada.", "success");
     } catch (error) {
-      setMessage(error instanceof Error ? error.message : "Erro inesperado");
+      setFeedback(humanizeUnknownError(error, "Erro inesperado no refresh."), "error");
     } finally {
       setIsSubmitting(false);
     }
@@ -86,9 +141,10 @@ export default function Home() {
       }
       setResult(null);
       clearTokens();
-      setMessage("Sessão terminada.");
+      setHasSession(false);
+      setFeedback("Sessão terminada.", "success");
     } catch (error) {
-      setMessage(error instanceof Error ? error.message : "Erro inesperado");
+      setFeedback(humanizeUnknownError(error, "Erro inesperado no logout."), "error");
     } finally {
       setIsSubmitting(false);
     }
@@ -98,7 +154,7 @@ export default function Home() {
     const accessToken = result?.accessToken ?? localStorage.getItem("tchuno_access_token");
 
     if (!accessToken) {
-      setMessage("Access token ausente.");
+      setFeedback("Access token ausente.", "error");
       return;
     }
 
@@ -109,9 +165,13 @@ export default function Home() {
       await logoutAll(accessToken);
       setResult(null);
       clearTokens();
-      setMessage("Todas as sessões foram terminadas.");
+      setHasSession(false);
+      setFeedback("Todas as sessões foram terminadas.", "success");
     } catch (error) {
-      setMessage(error instanceof Error ? error.message : "Erro inesperado");
+      setFeedback(
+        humanizeUnknownError(error, "Erro inesperado no logout all."),
+        "error",
+      );
     } finally {
       setIsSubmitting(false);
     }
@@ -161,6 +221,8 @@ export default function Home() {
               value={password}
               onChange={(event) => setPassword(event.target.value)}
               minLength={8}
+              pattern="(?=.*[A-Za-z])(?=.*[0-9]).{8,}"
+              title="Use pelo menos 8 caracteres, incluindo 1 letra e 1 número."
               required
             />
           </label>
@@ -210,11 +272,15 @@ export default function Home() {
             : "Sem sessão ativa"}
         </pre>
 
-        <p className="status">
-          <Link href="/dashboard" className="nav-link">
-            Ir para dashboard protegido
-          </Link>
-        </p>
+        {hasSession ? (
+          <p className="status">
+            <Link href="/dashboard" className="nav-link">
+              Ir para dashboard protegido
+            </Link>
+          </p>
+        ) : (
+          <p className="status">Faz login para aceder ao dashboard protegido.</p>
+        )}
       </section>
     </main>
   );
