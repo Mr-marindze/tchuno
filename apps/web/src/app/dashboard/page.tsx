@@ -185,6 +185,127 @@ function shortenId(value: string): string {
   return `${value.slice(0, 6)}...${value.slice(-4)}`;
 }
 
+type LocationParts = {
+  city: string;
+  neighborhood: string;
+};
+
+type ProfileReputation = {
+  label: string;
+  tone: "is-ok" | "is-muted" | "is-danger";
+};
+
+type ProfileCompleteness = {
+  score: number;
+  total: number;
+  percent: number;
+  missing: string[];
+  location: LocationParts;
+};
+
+function parseLocationParts(value: string | null): LocationParts {
+  if (!value || value.trim().length === 0) {
+    return {
+      city: "Não indicado",
+      neighborhood: "Não indicado",
+    };
+  }
+
+  const parts = value
+    .split(",")
+    .map((item) => item.trim())
+    .filter((item) => item.length > 0);
+
+  if (parts.length === 0) {
+    return {
+      city: "Não indicado",
+      neighborhood: "Não indicado",
+    };
+  }
+
+  if (parts.length === 1) {
+    return {
+      city: parts[0],
+      neighborhood: "Não indicado",
+    };
+  }
+
+  return {
+    city: parts[0],
+    neighborhood: parts.slice(1).join(", "),
+  };
+}
+
+function getProfileReputation(
+  ratingValue: number | string,
+  ratingCount: number,
+): ProfileReputation {
+  const avg = typeof ratingValue === "number" ? ratingValue : Number(ratingValue);
+
+  if (ratingCount >= 10 && avg >= 4.6) {
+    return { label: "Top reputação", tone: "is-ok" };
+  }
+
+  if (ratingCount >= 5 && avg >= 4) {
+    return { label: "Reputação confiável", tone: "is-ok" };
+  }
+
+  if (ratingCount >= 3 && avg < 3.5) {
+    return { label: "Reputação em revisão", tone: "is-danger" };
+  }
+
+  if (ratingCount > 0) {
+    return { label: "Reputação inicial", tone: "is-muted" };
+  }
+
+  return { label: "Sem histórico", tone: "is-muted" };
+}
+
+function getProfileCompleteness(profile: WorkerProfile): ProfileCompleteness {
+  const location = parseLocationParts(profile.location);
+  const checks = [
+    {
+      ok: (profile.bio ?? "").trim().length >= 40,
+      label: "Bio curta (mín. 40 caracteres)",
+    },
+    {
+      ok:
+        profile.location !== null &&
+        profile.location.trim().length > 0 &&
+        location.neighborhood !== "Não indicado",
+      label: "Localização incompleta (usa Cidade, Bairro)",
+    },
+    {
+      ok: typeof profile.hourlyRate === "number" && profile.hourlyRate > 0,
+      label: "Tarifa por hora não definida",
+    },
+    {
+      ok: profile.experienceYears > 0,
+      label: "Experiência não definida",
+    },
+    {
+      ok: profile.categories.length > 0,
+      label: "Sem categorias associadas",
+    },
+    {
+      ok: profile.isAvailable,
+      label: "Perfil está indisponível",
+    },
+  ];
+
+  const score = checks.filter((item) => item.ok).length;
+  const total = checks.length;
+  const missing = checks.filter((item) => !item.ok).map((item) => item.label);
+
+  return {
+    score,
+    total,
+    percent: Math.round((score / total) * 100),
+    missing,
+    location,
+  };
+}
+
 export default function DashboardPage() {
   const router = useRouter();
   const { pushToast } = useToast();
@@ -551,6 +672,40 @@ export default function DashboardPage() {
     ],
     [activeCategories.length, availableJobCategories.length, jobWorkerOptions.length],
   );
+  const myProfileCompleteness = useMemo(
+    () => (workerProfile ? getProfileCompleteness(workerProfile) : null),
+    [workerProfile],
+  );
+  const myProfileReputation = useMemo(
+    () =>
+      workerProfile
+        ? getProfileReputation(workerProfile.ratingAvg, workerProfile.ratingCount)
+        : null,
+    [workerProfile],
+  );
+  const myProfileLocation = useMemo(
+    () =>
+      workerProfile ? parseLocationParts(workerProfile.location) : null,
+    [workerProfile],
+  );
+  const workerDiscoveryStats = useMemo(() => {
+    const availableCount = visibleWorkerProfiles.filter(
+      (profile) => profile.isAvailable,
+    ).length;
+    const completeCount = visibleWorkerProfiles.filter((profile) => {
+      const health = getProfileCompleteness(profile);
+      return health.score >= 5;
+    }).length;
+    const withHistoryCount = visibleWorkerProfiles.filter(
+      (profile) => profile.ratingCount > 0,
+    ).length;
+
+    return {
+      availableCount,
+      completeCount,
+      withHistoryCount,
+    };
+  }, [visibleWorkerProfiles]);
 
   const pushStatusToast = useCallback(
     (channel: string, message: string) => {
@@ -2045,6 +2200,45 @@ export default function DashboardPage() {
             </label>
           </div>
 
+          <div className="result">
+            <p className="item-title">Estado de confiança do perfil</p>
+            {workerProfile && myProfileCompleteness && myProfileReputation ? (
+              <>
+                <div className="pill-row">
+                  <span
+                    className={`status-pill ${
+                      myProfileCompleteness.score >= 5 ? "is-ok" : "is-muted"
+                    }`}
+                  >
+                    Perfil {myProfileCompleteness.percent}% completo
+                  </span>
+                  <span className={`status-pill ${myProfileReputation.tone}`}>
+                    {myProfileReputation.label}
+                  </span>
+                </div>
+                {myProfileCompleteness.missing.length > 0 ? (
+                  <ul className="checklist">
+                    {myProfileCompleteness.missing.map((item) => (
+                      <li key={item} className="is-blocked">
+                        {item}
+                      </li>
+                    ))}
+                  </ul>
+                ) : (
+                  <p className="muted">
+                    Perfil completo. Mantém disponibilidade e atualiza reviews
+                    para preservar confiança.
+                  </p>
+                )}
+              </>
+            ) : (
+              <p className="empty-state">
+                Ainda não existe perfil para avaliar completude. Guarda o teu
+                perfil para ativar estes sinais de confiança.
+              </p>
+            )}
+          </div>
+
           <form onSubmit={handleSaveWorkerProfile} className="form">
             <label>
               Bio (opcional)
@@ -2060,6 +2254,7 @@ export default function DashboardPage() {
                 type="text"
                 value={profileLocation}
                 onChange={(event) => setProfileLocation(event.target.value)}
+                placeholder="Cidade, Bairro"
                 maxLength={120}
               />
             </label>
@@ -2130,6 +2325,20 @@ export default function DashboardPage() {
                     {workerProfile.isAvailable ? "Disponível" : "Indisponível"}
                   </span>
                 </p>
+                {myProfileCompleteness && myProfileReputation ? (
+                  <div className="pill-row">
+                    <span
+                      className={`status-pill ${
+                        myProfileCompleteness.score >= 5 ? "is-ok" : "is-muted"
+                      }`}
+                    >
+                      Completude {myProfileCompleteness.percent}%
+                    </span>
+                    <span className={`status-pill ${myProfileReputation.tone}`}>
+                      {myProfileReputation.label}
+                    </span>
+                  </div>
+                ) : null}
                 <p>
                   <strong>Worker:</strong> {workerProfile.userId}
                 </p>
@@ -2141,6 +2350,14 @@ export default function DashboardPage() {
                 </p>
                 <p>
                   <strong>Experiência:</strong> {workerProfile.experienceYears} anos
+                </p>
+                <p>
+                  <strong>Cidade:</strong>{" "}
+                  {myProfileLocation ? myProfileLocation.city : "Não indicado"}
+                </p>
+                <p>
+                  <strong>Bairro:</strong>{" "}
+                  {myProfileLocation ? myProfileLocation.neighborhood : "Não indicado"}
                 </p>
                 <p>
                   <strong>Rating:</strong>{" "}
@@ -2281,6 +2498,15 @@ export default function DashboardPage() {
             <p className="status">
               Visíveis: {visibleWorkerProfiles.length}/{workerProfiles.length}
             </p>
+            <p className="status">
+              Disponíveis: {workerDiscoveryStats.availableCount}
+            </p>
+            <p className="status">
+              Perfis completos: {workerDiscoveryStats.completeCount}
+            </p>
+            <p className="status">
+              Com histórico: {workerDiscoveryStats.withHistoryCount}
+            </p>
           </div>
 
           <div className="result">
@@ -2296,6 +2522,11 @@ export default function DashboardPage() {
               <div className="panel-grid">
                 {visibleWorkerProfiles.map((profile) => {
                   const isMe = profile.userId === state.auth.user.id;
+                  const profileCompleteness = getProfileCompleteness(profile);
+                  const reputation = getProfileReputation(
+                    profile.ratingAvg,
+                    profile.ratingCount,
+                  );
                   return (
                     <article key={profile.id} className="worker-card">
                       <p className="item-title">
@@ -2308,6 +2539,18 @@ export default function DashboardPage() {
                           {profile.isAvailable ? "Disponível" : "Indisponível"}
                         </span>
                       </p>
+                      <div className="pill-row">
+                        <span
+                          className={`status-pill ${
+                            profileCompleteness.score >= 5 ? "is-ok" : "is-muted"
+                          }`}
+                        >
+                          Completude {profileCompleteness.percent}%
+                        </span>
+                        <span className={`status-pill ${reputation.tone}`}>
+                          {reputation.label}
+                        </span>
+                      </div>
                       <p>
                         <strong>Rating:</strong> {formatStars(profile.ratingAvg)}{" "}
                         {formatRatingValue(profile.ratingAvg)} ({profile.ratingCount})
@@ -2322,7 +2565,11 @@ export default function DashboardPage() {
                         <strong>Experiência:</strong> {profile.experienceYears} anos
                       </p>
                       <p>
-                        <strong>Localização:</strong> {profile.location ?? "n/a"}
+                        <strong>Cidade:</strong> {profileCompleteness.location.city}
+                      </p>
+                      <p>
+                        <strong>Bairro:</strong>{" "}
+                        {profileCompleteness.location.neighborhood}
                       </p>
                       <p>
                         <strong>Categorias:</strong>{" "}
@@ -2330,6 +2577,13 @@ export default function DashboardPage() {
                           ? profile.categories.map((item) => item.name).join(", ")
                           : "Sem categorias"}
                       </p>
+                      {profileCompleteness.missing.length > 0 ? (
+                        <p className="muted">
+                          Falta para perfil completo: {profileCompleteness.missing[0]}.
+                        </p>
+                      ) : (
+                        <p className="muted">Perfil com sinais fortes de confiança.</p>
+                      )}
                       <p className="muted">Atualizado: {formatDate(profile.updatedAt)}</p>
                     </article>
                   );
