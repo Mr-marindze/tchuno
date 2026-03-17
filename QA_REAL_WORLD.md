@@ -25,8 +25,10 @@ Web: `http://localhost:3000`
 - Worker sem perfil a listar jobs de worker: `404`
 - Worker indisponível a receber job: `409`
 - Criação de job inválido (validação DTO): `400`
+- Criação de job com `scheduledFor` no passado: `400`
 - Transições fora de ordem (`REQUESTED -> COMPLETED`, `ACCEPTED -> COMPLETED`): `409`
 - Review duplicada para o mesmo job: `409`
+- Filtro de worker com `categorySlug` inválido: `400`
 - Refresh token expirado (JWT com `exp` passado): `401`
 - Múltiplas sessões/tabs + `logout-all` + refresh em ambas: `401`
 - Sessões paginadas com `meta` (`hasNext/hasPrev/page/pageCount`) após revogação

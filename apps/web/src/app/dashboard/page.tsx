@@ -1161,7 +1161,7 @@ export default function DashboardPage() {
       parsedSortOrder < 0 ||
       parsedSortOrder > 10_000
     ) {
-      setCategoryStatus("sortOrder deve ser um inteiro entre 0 e 10000.");
+      setCategoryStatus("Ordem da categoria deve ser um inteiro entre 0 e 10000.");
       return;
     }
 
@@ -1266,7 +1266,9 @@ export default function DashboardPage() {
         parsedHourlyRate < 0 ||
         parsedHourlyRate > 1_000_000
       ) {
-        setWorkerProfileStatus("hourlyRate deve ser inteiro entre 0 e 1000000.");
+        setWorkerProfileStatus(
+          "Tarifa por hora deve ser um inteiro entre 0 e 1000000.",
+        );
         return;
       }
       hourlyRate = parsedHourlyRate;
@@ -1280,7 +1282,9 @@ export default function DashboardPage() {
         parsedExperienceYears < 0 ||
         parsedExperienceYears > 80
       ) {
-        setWorkerProfileStatus("experienceYears deve ser inteiro entre 0 e 80.");
+        setWorkerProfileStatus(
+          "Anos de experiência deve ser um inteiro entre 0 e 80.",
+        );
         return;
       }
       experienceYears = parsedExperienceYears;
@@ -1419,7 +1423,7 @@ export default function DashboardPage() {
 
     const parsedBudget = Number(jobBudget.trim());
     if (!Number.isInteger(parsedBudget) || parsedBudget < 0 || parsedBudget > 100_000_000) {
-      setJobsStatus("budget deve ser inteiro entre 0 e 100000000.");
+      setJobsStatus("Orçamento deve ser um inteiro entre 0 e 100000000.");
       return;
     }
 
@@ -1428,6 +1432,10 @@ export default function DashboardPage() {
       const parsedDate = new Date(jobScheduledFor);
       if (Number.isNaN(parsedDate.getTime())) {
         setJobsStatus("Data agendada inválida.");
+        return;
+      }
+      if (parsedDate.getTime() <= Date.now()) {
+        setJobsStatus("A data agendada deve ser futura.");
         return;
       }
       scheduledForIso = parsedDate.toISOString();
@@ -1542,7 +1550,7 @@ export default function DashboardPage() {
 
     const parsedRating = Number(reviewRating);
     if (!Number.isInteger(parsedRating) || parsedRating < 1 || parsedRating > 5) {
-      setReviewsStatus("rating deve ser inteiro entre 1 e 5.");
+      setReviewsStatus("Rating deve ser um inteiro entre 1 e 5.");
       return;
     }
 

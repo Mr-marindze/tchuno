@@ -10,6 +10,7 @@ import {
   Max,
   MaxLength,
   Min,
+  MinLength,
 } from 'class-validator';
 
 export class UpsertWorkerProfileDto {
@@ -46,9 +47,17 @@ export class UpsertWorkerProfileDto {
   isAvailable?: boolean;
 
   @IsOptional()
+  @Transform(({ value }: { value: unknown }) =>
+    Array.isArray(value)
+      ? (value as unknown[]).map((item: unknown) =>
+          typeof item === 'string' ? item.trim() : item,
+        )
+      : value,
+  )
   @IsArray()
   @ArrayUnique()
   @ArrayMaxSize(20)
   @IsString({ each: true })
+  @MinLength(3, { each: true })
   categoryIds?: string[];
 }

@@ -1,4 +1,5 @@
 import {
+  BadRequestException,
   ConflictException,
   ForbiddenException,
   Injectable,
@@ -15,6 +16,13 @@ export class JobsService {
   constructor(private readonly prisma: PrismaService) {}
 
   async create(clientId: string, dto: CreateJobDto) {
+    const scheduledForDate = dto.scheduledFor
+      ? new Date(dto.scheduledFor)
+      : null;
+    if (scheduledForDate && scheduledForDate.getTime() <= Date.now()) {
+      throw new BadRequestException('scheduledFor must be in the future');
+    }
+
     const workerProfile = await this.prisma.workerProfile.findUnique({
       where: { id: dto.workerProfileId },
       select: { id: true, isAvailable: true },
@@ -61,7 +69,7 @@ export class JobsService {
         title: dto.title.trim(),
         description: dto.description.trim(),
         budget: dto.budget,
-        scheduledFor: dto.scheduledFor ? new Date(dto.scheduledFor) : null,
+        scheduledFor: scheduledForDate,
       },
     });
   }

@@ -5,7 +5,9 @@ import {
   IsInt,
   IsOptional,
   IsString,
+  Matches,
   Max,
+  MaxLength,
   Min,
 } from 'class-validator';
 
@@ -31,7 +33,12 @@ function toBoolean(value: unknown): unknown {
 export class ListWorkerProfilesQueryDto {
   @ApiPropertyOptional()
   @IsOptional()
+  @Transform(({ value }: { value: unknown }) =>
+    typeof value === 'string' ? value.trim().toLowerCase() : value,
+  )
   @IsString()
+  @MaxLength(80)
+  @Matches(/^[a-z0-9]+(?:-[a-z0-9]+)*$/)
   categorySlug?: string;
 
   @ApiPropertyOptional()

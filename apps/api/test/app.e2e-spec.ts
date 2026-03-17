@@ -540,6 +540,24 @@ describe('Auth and Sessions (e2e)', () => {
       })
       .expect(400);
 
+    await request(app.getHttpServer())
+      .post('/jobs')
+      .set('Authorization', `Bearer ${clientTabA.accessToken}`)
+      .send({
+        workerProfileId: workerProfile.id,
+        categoryId: category.id,
+        title: 'Serviço agendado no passado',
+        description:
+          'Este job deve falhar porque foi agendado para uma data passada.',
+        budget: 3500,
+        scheduledFor: '2020-01-01T10:00:00.000Z',
+      })
+      .expect(400);
+
+    await request(app.getHttpServer())
+      .get('/worker-profile?categorySlug=@@slug-invalido')
+      .expect(400);
+
     const createJobResponse = await request(app.getHttpServer())
       .post('/jobs')
       .set('Authorization', `Bearer ${clientTabA.accessToken}`)
