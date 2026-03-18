@@ -214,11 +214,32 @@ type BrowserWindow = Window & {
 };
 
 const TRACK_DEBUG_STORAGE_KEY = "tchuno_track_debug";
+const BEHAVIOR_AGGREGATION_STORAGE_KEY = "tchuno_behavior_aggregation_v1";
+const BEHAVIOR_AGGREGATION_STORAGE_VERSION = 1;
+const BEHAVIOR_AGGREGATION_TTL_MS = 1000 * 60 * 60 * 24 * 7;
+
+type PersistedWorkerBehaviorAggregate = {
+  interactions: number;
+  clicks: number;
+  ctaClicks: number;
+  conversions: number;
+};
+
+type PersistedBehaviorAggregationSnapshot = {
+  version: number;
+  savedAt: string;
+  expiresAt: number;
+  workersById: Record<string, PersistedWorkerBehaviorAggregate>;
+  categoriesBySlug: Record<string, number>;
+};
+
 const eventQueue: AnyTrackingEvent[] = [];
 let flushScheduled = false;
 let trackingTransport: TrackingTransport = defaultTrackingTransport;
 let sessionEventIndex = 0;
 let lifecycleHooksInitialized = false;
+let behaviorAggregationHydrated = false;
+let behaviorPersistenceScheduled = false;
 
 const trackingSessionId = createTrackingSessionId();
 const trackingSessionStartedAt = nowIso();
@@ -301,6 +322,186 @@ function getOrCreateWorkerBehavior(workerId: string): WorkerBehaviorAggregate {
   return workerBehaviorById[workerId];
 }
 
+function normalizeCounter(value: unknown, max = 10_000): number {
+  const parsed = typeof value === "number" ? value : Number(value);
+  if (!Number.isFinite(parsed)) {
+    return 0;
+  }
+
+  return Math.max(0, Math.min(max, Math.floor(parsed)));
+}
+
+function removePersistedBehaviorAggregation() {
+  const browserWindow = getBrowserWindow();
+  if (!browserWindow) {
+    return;
+  }
+
+  try {
+    localStorage.removeItem(BEHAVIOR_AGGREGATION_STORAGE_KEY);
+  } catch {
+    // ignore storage issues in restricted environments
+  }
+}
+
+function persistBehaviorAggregation() {
+  behaviorPersistenceScheduled = false;
+
+  const browserWindow = getBrowserWindow();
+  if (!browserWindow) {
+    return;
+  }
+
+  const workersById = Object.entries(workerBehaviorById).reduce<
+    Record<string, PersistedWorkerBehaviorAggregate>
+  >((acc, [workerId, stats]) => {
+    const interactions = normalizeCounter(stats.interactions);
+    const clicks = normalizeCounter(stats.clicks);
+    const ctaClicks = normalizeCounter(stats.ctaClicks);
+    const conversions = normalizeCounter(stats.conversions);
+    if (interactions === 0 && clicks === 0 && ctaClicks === 0 && conversions === 0) {
+      return acc;
+    }
+
+    acc[workerId] = {
+      interactions,
+      clicks,
+      ctaClicks,
+      conversions,
+    };
+    return acc;
+  }, {});
+
+  const categoriesBySlug = Object.entries(categoryInteractionBySlug).reduce<
+    Record<string, number>
+  >((acc, [categorySlug, interactions]) => {
+    const normalizedInteractions = normalizeCounter(interactions);
+    if (normalizedInteractions === 0) {
+      return acc;
+    }
+
+    acc[categorySlug] = normalizedInteractions;
+    return acc;
+  }, {});
+
+  const payload: PersistedBehaviorAggregationSnapshot = {
+    version: BEHAVIOR_AGGREGATION_STORAGE_VERSION,
+    savedAt: nowIso(),
+    expiresAt: Date.now() + BEHAVIOR_AGGREGATION_TTL_MS,
+    workersById,
+    categoriesBySlug,
+  };
+
+  try {
+    localStorage.setItem(
+      BEHAVIOR_AGGREGATION_STORAGE_KEY,
+      JSON.stringify(payload),
+    );
+  } catch (error) {
+    if (isDebugModeEnabled()) {
+      console.error("[tchuno-track] behavior persistence error", error);
+    }
+  }
+}
+
+function scheduleBehaviorPersistence() {
+  if (behaviorPersistenceScheduled) {
+    return;
+  }
+
+  if (!getBrowserWindow()) {
+    return;
+  }
+
+  behaviorPersistenceScheduled = true;
+  setTimeout(persistBehaviorAggregation, 150);
+}
+
+function ensureBehaviorAggregationHydrated() {
+  if (behaviorAggregationHydrated) {
+    return;
+  }
+
+  behaviorAggregationHydrated = true;
+
+  const browserWindow = getBrowserWindow();
+  if (!browserWindow) {
+    return;
+  }
+
+  try {
+    const rawPayload = localStorage.getItem(BEHAVIOR_AGGREGATION_STORAGE_KEY);
+    if (!rawPayload) {
+      return;
+    }
+
+    const parsedPayload = JSON.parse(
+      rawPayload,
+    ) as PersistedBehaviorAggregationSnapshot;
+    if (
+      !parsedPayload ||
+      parsedPayload.version !== BEHAVIOR_AGGREGATION_STORAGE_VERSION ||
+      typeof parsedPayload.expiresAt !== "number" ||
+      parsedPayload.expiresAt <= Date.now()
+    ) {
+      removePersistedBehaviorAggregation();
+      return;
+    }
+
+    let changed = false;
+
+    const persistedWorkers = parsedPayload.workersById ?? {};
+    Object.entries(persistedWorkers).forEach(([workerId, rawStats]) => {
+      if (!rawStats || typeof rawStats !== "object") {
+        return;
+      }
+
+      const clicks = normalizeCounter(rawStats.clicks);
+      const conversions = normalizeCounter(rawStats.conversions);
+      const ctaClicks = normalizeCounter(rawStats.ctaClicks);
+      const interactions = normalizeCounter(rawStats.interactions);
+      if (clicks === 0 && conversions === 0 && ctaClicks === 0 && interactions === 0) {
+        return;
+      }
+
+      const workerStats = getOrCreateWorkerBehavior(workerId);
+      workerStats.clicks += clicks;
+      workerStats.conversions += conversions;
+      workerStats.ctaClicks += ctaClicks;
+      workerStats.interactions += interactions;
+      changed = true;
+    });
+
+    const persistedCategories = parsedPayload.categoriesBySlug ?? {};
+    Object.entries(persistedCategories).forEach(([categorySlug, interactions]) => {
+      const normalizedInteractions = normalizeCounter(interactions);
+      if (normalizedInteractions === 0) {
+        return;
+      }
+
+      categoryInteractionBySlug[categorySlug] =
+        (categoryInteractionBySlug[categorySlug] ?? 0) + normalizedInteractions;
+      changed = true;
+    });
+
+    if (changed) {
+      notifyBehaviorAggregationChanged();
+      if (isDebugModeEnabled()) {
+        console.info("[tchuno-track] behavior hydrated", {
+          workerCount: Object.keys(persistedWorkers).length,
+          categoryCount: Object.keys(persistedCategories).length,
+          expiresAt: new Date(parsedPayload.expiresAt).toISOString(),
+        });
+      }
+    }
+  } catch (error) {
+    removePersistedBehaviorAggregation();
+    if (isDebugModeEnabled()) {
+      console.error("[tchuno-track] behavior hydration error", error);
+    }
+  }
+}
+
 function notifyBehaviorAggregationChanged() {
   behaviorAggregationVersion += 1;
   behaviorAggregationListeners.forEach((listener) => {
@@ -315,6 +516,7 @@ function notifyBehaviorAggregationChanged() {
 }
 
 function updateBehaviorAggregation(event: AnyTrackingEvent) {
+  ensureBehaviorAggregationHydrated();
   let changed = false;
 
   switch (event.name) {
@@ -375,6 +577,7 @@ function updateBehaviorAggregation(event: AnyTrackingEvent) {
 
   if (changed) {
     notifyBehaviorAggregationChanged();
+    scheduleBehaviorPersistence();
   }
 }
 
@@ -602,6 +805,7 @@ export function getWorkerRelevanceScore(input: {
   ratingAvg: number | string;
   ratingCount: number;
 }): WorkerRelevanceScoreBreakdown {
+  ensureBehaviorAggregationHydrated();
   const behavior = workerBehaviorById[input.workerId] ?? {
     interactions: 0,
     clicks: 0,
@@ -813,10 +1017,12 @@ export function getTrackingSessionSummary(): TrackingFunnelSummary {
 }
 
 export function getBehaviorAggregationVersion(): number {
+  ensureBehaviorAggregationHydrated();
   return behaviorAggregationVersion;
 }
 
 export function getBehaviorAggregationSnapshot(): BehaviorAggregationSnapshot {
+  ensureBehaviorAggregationHydrated();
   const workersById = Object.entries(workerBehaviorById).reduce<
     Record<string, WorkerBehaviorAggregate>
   >((acc, [workerId, stats]) => {
@@ -834,6 +1040,7 @@ export function getBehaviorAggregationSnapshot(): BehaviorAggregationSnapshot {
 export function subscribeBehaviorAggregation(
   listener: () => void,
 ): () => void {
+  ensureBehaviorAggregationHydrated();
   behaviorAggregationListeners.add(listener);
   return () => {
     behaviorAggregationListeners.delete(listener);
