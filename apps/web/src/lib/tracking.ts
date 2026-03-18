@@ -9,6 +9,12 @@ export type WorkerRankingDebugItem = {
   intentionComponent: number;
   conversionComponent: number;
   stabilityMultiplier: number;
+  temporalDecayMultiplier: number;
+  sessionBehaviorSignal: number;
+  historicalBehaviorSignal: number;
+  sessionSignalWeight: number;
+  historicalSignalWeight: number;
+  confidenceGuardMultiplier: number;
   reasons: string[];
 };
 
@@ -173,6 +179,15 @@ export type WorkerBehaviorAggregate = {
   ctaClicks: number;
   conversions: number;
   lastInteractionEventIndex: number;
+  sessionInteractions: number;
+  sessionClicks: number;
+  sessionCtaClicks: number;
+  sessionConversions: number;
+  historicalInteractions: number;
+  historicalClicks: number;
+  historicalCtaClicks: number;
+  historicalConversions: number;
+  historyLastUpdatedAt: number | null;
 };
 
 export type BehaviorAggregationSnapshot = {
@@ -189,6 +204,12 @@ export type WorkerRelevanceScoreBreakdown = {
   conversionComponent: number;
   behaviorSignal: number;
   stabilityMultiplier: number;
+  temporalDecayMultiplier: number;
+  sessionBehaviorSignal: number;
+  historicalBehaviorSignal: number;
+  sessionSignalWeight: number;
+  historicalSignalWeight: number;
+  confidenceGuardMultiplier: number;
   clicks: number;
   conversions: number;
   ctaClicks: number;
@@ -215,7 +236,8 @@ type BrowserWindow = Window & {
 
 const TRACK_DEBUG_STORAGE_KEY = "tchuno_track_debug";
 const BEHAVIOR_AGGREGATION_STORAGE_KEY = "tchuno_behavior_aggregation_v1";
-const BEHAVIOR_AGGREGATION_STORAGE_VERSION = 1;
+const LEGACY_BEHAVIOR_AGGREGATION_STORAGE_VERSION = 1;
+const BEHAVIOR_AGGREGATION_STORAGE_VERSION = 2;
 const BEHAVIOR_AGGREGATION_TTL_MS = 1000 * 60 * 60 * 24 * 7;
 
 type PersistedWorkerBehaviorAggregate = {
@@ -223,6 +245,7 @@ type PersistedWorkerBehaviorAggregate = {
   clicks: number;
   ctaClicks: number;
   conversions: number;
+  lastUpdatedAt: number;
 };
 
 type PersistedBehaviorAggregationSnapshot = {
@@ -230,6 +253,21 @@ type PersistedBehaviorAggregationSnapshot = {
   savedAt: string;
   expiresAt: number;
   workersById: Record<string, PersistedWorkerBehaviorAggregate>;
+  categoriesBySlug: Record<string, number>;
+};
+
+type LegacyPersistedWorkerBehaviorAggregate = {
+  interactions: number;
+  clicks: number;
+  ctaClicks: number;
+  conversions: number;
+};
+
+type LegacyPersistedBehaviorAggregationSnapshot = {
+  version: 1;
+  savedAt: string;
+  expiresAt: number;
+  workersById: Record<string, LegacyPersistedWorkerBehaviorAggregate>;
   categoriesBySlug: Record<string, number>;
 };
 
@@ -264,6 +302,13 @@ const RATING_VALUE_WEIGHT = 1.65;
 const RATING_COUNT_WEIGHT = 0.22;
 const RECENCY_EVENT_WINDOW = 35;
 const MIN_CONFIDENCE_EVIDENCE = 12;
+const HISTORY_SIGNAL_WEIGHT = 0.55;
+const SESSION_SIGNAL_WEIGHT = 1;
+const HISTORY_DECAY_HALF_LIFE_MS = 1000 * 60 * 60 * 24 * 2;
+const HISTORY_DECAY_MIN_MULTIPLIER = 0.1;
+const LOW_CONFIDENCE_INTERACTION_FLOOR = 3;
+const LOW_CONFIDENCE_GUARD_MULTIPLIER = 0.72;
+const VERY_LOW_CONFIDENCE_GUARD_MULTIPLIER = 0.52;
 
 function nowIso(): string {
   return new Date().toISOString();
@@ -316,10 +361,38 @@ function getOrCreateWorkerBehavior(workerId: string): WorkerBehaviorAggregate {
       ctaClicks: 0,
       conversions: 0,
       lastInteractionEventIndex: 0,
+      sessionInteractions: 0,
+      sessionClicks: 0,
+      sessionCtaClicks: 0,
+      sessionConversions: 0,
+      historicalInteractions: 0,
+      historicalClicks: 0,
+      historicalCtaClicks: 0,
+      historicalConversions: 0,
+      historyLastUpdatedAt: null,
     };
   }
 
   return workerBehaviorById[workerId];
+}
+
+function syncWorkerBehaviorTotals(workerStats: WorkerBehaviorAggregate) {
+  workerStats.interactions = Math.max(
+    0,
+    workerStats.sessionInteractions + workerStats.historicalInteractions,
+  );
+  workerStats.clicks = Math.max(
+    0,
+    workerStats.sessionClicks + workerStats.historicalClicks,
+  );
+  workerStats.ctaClicks = Math.max(
+    0,
+    workerStats.sessionCtaClicks + workerStats.historicalCtaClicks,
+  );
+  workerStats.conversions = Math.max(
+    0,
+    workerStats.sessionConversions + workerStats.historicalConversions,
+  );
 }
 
 function normalizeCounter(value: unknown, max = 10_000): number {
@@ -329,6 +402,35 @@ function normalizeCounter(value: unknown, max = 10_000): number {
   }
 
   return Math.max(0, Math.min(max, Math.floor(parsed)));
+}
+
+function parseTimestamp(value: unknown): number | null {
+  if (typeof value === "number" && Number.isFinite(value)) {
+    return value;
+  }
+
+  if (typeof value === "string") {
+    const parsed = Date.parse(value);
+    if (Number.isFinite(parsed)) {
+      return parsed;
+    }
+  }
+
+  return null;
+}
+
+function getTemporalDecayMultiplier(
+  historyLastUpdatedAt: number | null,
+  now = Date.now(),
+): number {
+  if (!historyLastUpdatedAt || historyLastUpdatedAt <= 0) {
+    return HISTORY_DECAY_MIN_MULTIPLIER;
+  }
+
+  const ageMs = Math.max(0, now - historyLastUpdatedAt);
+  const halfLives = ageMs / HISTORY_DECAY_HALF_LIFE_MS;
+  const decay = Math.pow(0.5, halfLives);
+  return Math.max(HISTORY_DECAY_MIN_MULTIPLIER, Math.min(1, decay));
 }
 
 function removePersistedBehaviorAggregation() {
@@ -352,13 +454,20 @@ function persistBehaviorAggregation() {
     return;
   }
 
+  const now = Date.now();
   const workersById = Object.entries(workerBehaviorById).reduce<
     Record<string, PersistedWorkerBehaviorAggregate>
   >((acc, [workerId, stats]) => {
-    const interactions = normalizeCounter(stats.interactions);
-    const clicks = normalizeCounter(stats.clicks);
-    const ctaClicks = normalizeCounter(stats.ctaClicks);
-    const conversions = normalizeCounter(stats.conversions);
+    const interactions = normalizeCounter(
+      stats.historicalInteractions + stats.sessionInteractions,
+    );
+    const clicks = normalizeCounter(stats.historicalClicks + stats.sessionClicks);
+    const ctaClicks = normalizeCounter(
+      stats.historicalCtaClicks + stats.sessionCtaClicks,
+    );
+    const conversions = normalizeCounter(
+      stats.historicalConversions + stats.sessionConversions,
+    );
     if (interactions === 0 && clicks === 0 && ctaClicks === 0 && conversions === 0) {
       return acc;
     }
@@ -368,6 +477,7 @@ function persistBehaviorAggregation() {
       clicks,
       ctaClicks,
       conversions,
+      lastUpdatedAt: now,
     };
     return acc;
   }, {});
@@ -387,7 +497,7 @@ function persistBehaviorAggregation() {
   const payload: PersistedBehaviorAggregationSnapshot = {
     version: BEHAVIOR_AGGREGATION_STORAGE_VERSION,
     savedAt: nowIso(),
-    expiresAt: Date.now() + BEHAVIOR_AGGREGATION_TTL_MS,
+    expiresAt: now + BEHAVIOR_AGGREGATION_TTL_MS,
     workersById,
     categoriesBySlug,
   };
@@ -435,12 +545,13 @@ function ensureBehaviorAggregationHydrated() {
       return;
     }
 
-    const parsedPayload = JSON.parse(
-      rawPayload,
-    ) as PersistedBehaviorAggregationSnapshot;
+    const parsedPayload = JSON.parse(rawPayload) as
+      | PersistedBehaviorAggregationSnapshot
+      | LegacyPersistedBehaviorAggregationSnapshot;
     if (
       !parsedPayload ||
-      parsedPayload.version !== BEHAVIOR_AGGREGATION_STORAGE_VERSION ||
+      (parsedPayload.version !== BEHAVIOR_AGGREGATION_STORAGE_VERSION &&
+        parsedPayload.version !== LEGACY_BEHAVIOR_AGGREGATION_STORAGE_VERSION) ||
       typeof parsedPayload.expiresAt !== "number" ||
       parsedPayload.expiresAt <= Date.now()
     ) {
@@ -464,11 +575,18 @@ function ensureBehaviorAggregationHydrated() {
         return;
       }
 
+      const historyLastUpdatedAt =
+        parsedPayload.version === BEHAVIOR_AGGREGATION_STORAGE_VERSION
+          ? parseTimestamp((rawStats as PersistedWorkerBehaviorAggregate).lastUpdatedAt)
+          : parseTimestamp(parsedPayload.savedAt);
+
       const workerStats = getOrCreateWorkerBehavior(workerId);
-      workerStats.clicks += clicks;
-      workerStats.conversions += conversions;
-      workerStats.ctaClicks += ctaClicks;
-      workerStats.interactions += interactions;
+      workerStats.historicalClicks += clicks;
+      workerStats.historicalConversions += conversions;
+      workerStats.historicalCtaClicks += ctaClicks;
+      workerStats.historicalInteractions += interactions;
+      workerStats.historyLastUpdatedAt = historyLastUpdatedAt;
+      syncWorkerBehaviorTotals(workerStats);
       changed = true;
     });
 
@@ -486,6 +604,7 @@ function ensureBehaviorAggregationHydrated() {
 
     if (changed) {
       notifyBehaviorAggregationChanged();
+      scheduleBehaviorPersistence();
       if (isDebugModeEnabled()) {
         console.info("[tchuno-track] behavior hydrated", {
           workerCount: Object.keys(persistedWorkers).length,
@@ -523,9 +642,10 @@ function updateBehaviorAggregation(event: AnyTrackingEvent) {
     case "marketplace.worker.card.click":
     case "dashboard.worker.card.click": {
       const workerStats = getOrCreateWorkerBehavior(event.metadata.workerId);
-      workerStats.interactions += 1;
-      workerStats.clicks += 1;
+      workerStats.sessionInteractions += 1;
+      workerStats.sessionClicks += 1;
       workerStats.lastInteractionEventIndex = event.context.eventIndex;
+      syncWorkerBehaviorTotals(workerStats);
       changed = true;
       break;
     }
@@ -535,17 +655,19 @@ function updateBehaviorAggregation(event: AnyTrackingEvent) {
       }
 
       const workerStats = getOrCreateWorkerBehavior(event.metadata.workerId);
-      workerStats.interactions += 1;
-      workerStats.ctaClicks += 1;
+      workerStats.sessionInteractions += 1;
+      workerStats.sessionCtaClicks += 1;
       workerStats.lastInteractionEventIndex = event.context.eventIndex;
+      syncWorkerBehaviorTotals(workerStats);
       changed = true;
       break;
     }
     case "dashboard.cta.click": {
       const workerStats = getOrCreateWorkerBehavior(event.metadata.workerId);
-      workerStats.interactions += 1;
-      workerStats.ctaClicks += 1;
+      workerStats.sessionInteractions += 1;
+      workerStats.sessionCtaClicks += 1;
       workerStats.lastInteractionEventIndex = event.context.eventIndex;
+      syncWorkerBehaviorTotals(workerStats);
       changed = true;
       break;
     }
@@ -565,8 +687,9 @@ function updateBehaviorAggregation(event: AnyTrackingEvent) {
         break;
       }
 
-      workerStats.conversions += 1;
+      workerStats.sessionConversions += 1;
       workerStats.lastInteractionEventIndex = event.context.eventIndex;
+      syncWorkerBehaviorTotals(workerStats);
       changed = true;
       break;
     }
@@ -812,6 +935,15 @@ export function getWorkerRelevanceScore(input: {
     ctaClicks: 0,
     conversions: 0,
     lastInteractionEventIndex: 0,
+    sessionInteractions: 0,
+    sessionClicks: 0,
+    sessionCtaClicks: 0,
+    sessionConversions: 0,
+    historicalInteractions: 0,
+    historicalClicks: 0,
+    historicalCtaClicks: 0,
+    historicalConversions: 0,
+    historyLastUpdatedAt: null,
   };
 
   const ratingValue = parseRating(input.ratingAvg);
@@ -820,29 +952,100 @@ export function getWorkerRelevanceScore(input: {
     ratingValue * RATING_VALUE_WEIGHT +
     Math.log1p(Math.min(60, ratingCount)) * RATING_COUNT_WEIGHT;
 
+  const temporalDecayMultiplier = getTemporalDecayMultiplier(
+    behavior.historyLastUpdatedAt,
+  );
+
   const eventsSinceInteraction = Math.max(
     0,
     sessionEventIndex - behavior.lastInteractionEventIndex,
   );
-  const recencyMultiplier =
+  const sessionRecencyMultiplier =
     behavior.lastInteractionEventIndex > 0
       ? 1 - clamp01(eventsSinceInteraction / RECENCY_EVENT_WINDOW) * 0.45
-      : 0.6;
+      : 1;
 
-  const interestComponent =
-    Math.min(24, behavior.clicks) * CLICK_WEIGHT * recencyMultiplier;
+  const weightedSessionClicks = behavior.sessionClicks * SESSION_SIGNAL_WEIGHT;
+  const weightedSessionCtaClicks =
+    behavior.sessionCtaClicks * SESSION_SIGNAL_WEIGHT;
+  const weightedSessionConversions =
+    behavior.sessionConversions * SESSION_SIGNAL_WEIGHT;
+
+  const weightedHistoricalClicks =
+    behavior.historicalClicks *
+    temporalDecayMultiplier *
+    HISTORY_SIGNAL_WEIGHT;
+  const weightedHistoricalCtaClicks =
+    behavior.historicalCtaClicks *
+    temporalDecayMultiplier *
+    HISTORY_SIGNAL_WEIGHT;
+  const weightedHistoricalConversions =
+    behavior.historicalConversions *
+    temporalDecayMultiplier *
+    HISTORY_SIGNAL_WEIGHT;
+
+  const sessionInterestComponent =
+    Math.min(24, weightedSessionClicks) *
+    CLICK_WEIGHT *
+    sessionRecencyMultiplier;
+  const historicalInterestComponent =
+    Math.min(24, weightedHistoricalClicks) * CLICK_WEIGHT;
+  const interestComponent = sessionInterestComponent + historicalInterestComponent;
+
+  const sessionIntentionComponent =
+    Math.min(18, weightedSessionCtaClicks) *
+    CTA_CLICK_WEIGHT *
+    sessionRecencyMultiplier;
+  const historicalIntentionComponent =
+    Math.min(18, weightedHistoricalCtaClicks) * CTA_CLICK_WEIGHT;
   const intentionComponent =
-    Math.min(18, behavior.ctaClicks) * CTA_CLICK_WEIGHT * recencyMultiplier;
-  const conversionComponent =
-    Math.min(10, behavior.conversions) * CONVERSION_WEIGHT;
-  const behaviorSignal =
-    interestComponent + intentionComponent + conversionComponent;
+    sessionIntentionComponent + historicalIntentionComponent;
 
-  const evidenceScore =
-    Math.min(20, ratingCount) +
-    behavior.interactions * 1.1 +
-    behavior.conversions * 4;
-  const stabilityMultiplier = 0.45 + clamp01(evidenceScore / MIN_CONFIDENCE_EVIDENCE) * 0.55;
+  const sessionConversionComponent =
+    Math.min(10, weightedSessionConversions) * CONVERSION_WEIGHT;
+  const historicalConversionComponent =
+    Math.min(10, weightedHistoricalConversions) * CONVERSION_WEIGHT;
+  const conversionComponent =
+    sessionConversionComponent + historicalConversionComponent;
+
+  const sessionBehaviorSignal =
+    sessionInterestComponent +
+    sessionIntentionComponent +
+    sessionConversionComponent;
+  const historicalBehaviorSignal =
+    historicalInterestComponent +
+    historicalIntentionComponent +
+    historicalConversionComponent;
+  const behaviorSignal = sessionBehaviorSignal + historicalBehaviorSignal;
+
+  const effectiveInteractions =
+    behavior.sessionInteractions * SESSION_SIGNAL_WEIGHT +
+    behavior.historicalInteractions *
+      temporalDecayMultiplier *
+      HISTORY_SIGNAL_WEIGHT;
+  const effectiveConversions =
+    weightedSessionConversions + weightedHistoricalConversions;
+
+  const evidenceScore = Math.min(20, ratingCount) + effectiveInteractions * 1.1 + effectiveConversions * 4;
+  const baseStabilityMultiplier =
+    0.45 + clamp01(evidenceScore / MIN_CONFIDENCE_EVIDENCE) * 0.55;
+
+  let confidenceGuardMultiplier = 1;
+  if (
+    effectiveInteractions < 1.5 &&
+    effectiveConversions < 0.5 &&
+    ratingCount < 2
+  ) {
+    confidenceGuardMultiplier = VERY_LOW_CONFIDENCE_GUARD_MULTIPLIER;
+  } else if (
+    effectiveInteractions < LOW_CONFIDENCE_INTERACTION_FLOOR &&
+    effectiveConversions < 1 &&
+    ratingCount < 4
+  ) {
+    confidenceGuardMultiplier = LOW_CONFIDENCE_GUARD_MULTIPLIER;
+  }
+
+  const stabilityMultiplier = baseStabilityMultiplier * confidenceGuardMultiplier;
   const score = qualityComponent + behaviorSignal * stabilityMultiplier;
 
   let confidenceLevel: "low" | "medium" | "high" = "low";
@@ -853,20 +1056,33 @@ export function getWorkerRelevanceScore(input: {
   }
 
   const reasons: string[] = [];
-  if (behavior.conversions >= 2) {
+  if (effectiveConversions >= 2) {
     reasons.push("Boa conversão");
-  } else if (behavior.conversions > 0) {
+  } else if (effectiveConversions > 0) {
     reasons.push("Conversão inicial");
   }
-  if (behavior.ctaClicks >= 3 || behavior.clicks >= 5) {
+  const effectiveClicks = weightedSessionClicks + weightedHistoricalClicks;
+  const effectiveCtaClicks = weightedSessionCtaClicks + weightedHistoricalCtaClicks;
+  if (effectiveCtaClicks >= 3 || effectiveClicks >= 5) {
     reasons.push("Mais procurado");
-  } else if (behavior.ctaClicks > 0 || behavior.clicks > 0) {
+  } else if (effectiveCtaClicks > 0 || effectiveClicks > 0) {
     reasons.push("Relevante nesta lista");
   }
   if (ratingCount >= 8 && ratingValue >= 4.6) {
     reasons.push("Melhor avaliação");
   } else {
     reasons.push(`Qualidade base: rating ${ratingValue.toFixed(1)} (${ratingCount})`);
+  }
+  if (temporalDecayMultiplier < 0.85) {
+    reasons.push("Histórico com decay temporal");
+  }
+  if (sessionBehaviorSignal >= historicalBehaviorSignal) {
+    reasons.push("Sessão atual com maior peso");
+  } else {
+    reasons.push("Histórico ainda influencia ranking");
+  }
+  if (confidenceGuardMultiplier < 1) {
+    reasons.push("Amostra reduzida com proteção de confiança");
   }
 
   return {
@@ -877,10 +1093,16 @@ export function getWorkerRelevanceScore(input: {
     conversionComponent: roundScore(conversionComponent),
     behaviorSignal: roundScore(behaviorSignal),
     stabilityMultiplier: roundScore(stabilityMultiplier),
-    clicks: behavior.clicks,
-    conversions: behavior.conversions,
-    ctaClicks: behavior.ctaClicks,
-    interactions: behavior.interactions,
+    temporalDecayMultiplier: roundScore(temporalDecayMultiplier),
+    sessionBehaviorSignal: roundScore(sessionBehaviorSignal),
+    historicalBehaviorSignal: roundScore(historicalBehaviorSignal),
+    sessionSignalWeight: SESSION_SIGNAL_WEIGHT,
+    historicalSignalWeight: HISTORY_SIGNAL_WEIGHT,
+    confidenceGuardMultiplier: roundScore(confidenceGuardMultiplier),
+    clicks: roundScore(effectiveClicks),
+    conversions: roundScore(effectiveConversions),
+    ctaClicks: roundScore(effectiveCtaClicks),
+    interactions: roundScore(effectiveInteractions),
     lastInteractionEventIndex: behavior.lastInteractionEventIndex,
     confidenceLevel,
     reasons,
@@ -888,21 +1110,53 @@ export function getWorkerRelevanceScore(input: {
 }
 
 function getTopBehaviorWorkers(limit = 5) {
+  const now = Date.now();
   return Object.entries(workerBehaviorById)
     .map(([workerId, stats]) => ({
       workerId,
-      ...stats,
-      behaviorScore:
-        stats.clicks * CLICK_WEIGHT +
-        stats.ctaClicks * CTA_CLICK_WEIGHT +
-        stats.conversions * CONVERSION_WEIGHT,
+      totalClicks: stats.clicks,
+      totalCtaClicks: stats.ctaClicks,
+      totalConversions: stats.conversions,
+      sessionClicks: stats.sessionClicks,
+      sessionCtaClicks: stats.sessionCtaClicks,
+      sessionConversions: stats.sessionConversions,
+      historicalClicks: stats.historicalClicks,
+      historicalCtaClicks: stats.historicalCtaClicks,
+      historicalConversions: stats.historicalConversions,
+      temporalDecayMultiplier: getTemporalDecayMultiplier(
+        stats.historyLastUpdatedAt,
+        now,
+      ),
     }))
+    .map((item) => {
+      const historicalDecayWeight =
+        item.temporalDecayMultiplier * HISTORY_SIGNAL_WEIGHT;
+      const weightedClicks =
+        item.sessionClicks * SESSION_SIGNAL_WEIGHT +
+        item.historicalClicks * historicalDecayWeight;
+      const weightedCtaClicks =
+        item.sessionCtaClicks * SESSION_SIGNAL_WEIGHT +
+        item.historicalCtaClicks * historicalDecayWeight;
+      const weightedConversions =
+        item.sessionConversions * SESSION_SIGNAL_WEIGHT +
+        item.historicalConversions * historicalDecayWeight;
+
+      return {
+        ...item,
+        weightedClicks: roundScore(weightedClicks),
+        weightedCtaClicks: roundScore(weightedCtaClicks),
+        weightedConversions: roundScore(weightedConversions),
+        sessionSignalWeight: SESSION_SIGNAL_WEIGHT,
+        historicalSignalWeight: HISTORY_SIGNAL_WEIGHT,
+        behaviorScore: roundScore(
+          weightedClicks * CLICK_WEIGHT +
+            weightedCtaClicks * CTA_CLICK_WEIGHT +
+            weightedConversions * CONVERSION_WEIGHT,
+        ),
+      };
+    })
     .sort((a, b) => b.behaviorScore - a.behaviorScore)
-    .slice(0, limit)
-    .map((item) => ({
-      ...item,
-      behaviorScore: Number(item.behaviorScore.toFixed(3)),
-    }));
+    .slice(0, limit);
 }
 
 function getTopCategoryInteractions(limit = 5) {
@@ -928,6 +1182,11 @@ function emitDebugLogs(events: AnyTrackingEvent[]): void {
   );
   console.info("funnel.batch", batchSummary);
   console.info("funnel.session", { ...sessionFunnelSummary });
+  console.info("behavior.balance", {
+    sessionSignalWeight: SESSION_SIGNAL_WEIGHT,
+    historicalSignalWeight: HISTORY_SIGNAL_WEIGHT,
+    decayHalfLifeHours: HISTORY_DECAY_HALF_LIFE_MS / (1000 * 60 * 60),
+  });
   console.info("behavior.topWorkers", getTopBehaviorWorkers());
   console.info("behavior.topCategories", getTopCategoryInteractions());
   if (jobFlowSessionState.active) {

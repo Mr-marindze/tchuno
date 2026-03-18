@@ -240,6 +240,12 @@ export function buildWorkerRankingContext(
       intentionComponent: row.scoreBreakdown.intentionComponent,
       conversionComponent: row.scoreBreakdown.conversionComponent,
       stabilityMultiplier: row.scoreBreakdown.stabilityMultiplier,
+      temporalDecayMultiplier: row.scoreBreakdown.temporalDecayMultiplier,
+      sessionBehaviorSignal: row.scoreBreakdown.sessionBehaviorSignal,
+      historicalBehaviorSignal: row.scoreBreakdown.historicalBehaviorSignal,
+      sessionSignalWeight: row.scoreBreakdown.sessionSignalWeight,
+      historicalSignalWeight: row.scoreBreakdown.historicalSignalWeight,
+      confidenceGuardMultiplier: row.scoreBreakdown.confidenceGuardMultiplier,
       reasons: row.reasons,
     }));
 
