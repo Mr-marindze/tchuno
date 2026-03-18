@@ -19,8 +19,12 @@ import {
 } from "@/components/dashboard/ui/dashboard-primitives";
 import { MarketplaceWorkerCard } from "@/components/marketplace/marketplace-worker-card";
 import {
+  buildWorkerRankingContext,
   getWorkerCtaCopy,
+  getWorkerComparisonItems,
+  getWorkerDecisionBadges,
   getWorkerRelevance,
+  getWorkerResponseEtaLabel,
 } from "@/components/marketplace/marketplace-worker-presenter";
 import { Category } from "@/lib/categories";
 import { PaginationMeta } from "@/lib/pagination";
@@ -107,6 +111,8 @@ export function WorkersDomainSection({
   formatDate,
   shortenId,
 }: WorkersDomainSectionProps) {
+  const workerRanking = buildWorkerRankingContext(visibleWorkerProfiles);
+
   function handleResetFilters() {
     onWorkerCategorySlugFilterChange("");
     onWorkerAvailabilityFilterChange("all");
@@ -275,19 +281,28 @@ export function WorkersDomainSection({
       </DashboardPaginationRow>
 
       <DashboardPanel title="Profissionais encontrados">
+        <p className="muted marketplace-signal-note">
+          Badges e comparação rápida são relativos aos profissionais desta
+          página/filtro.
+        </p>
         {workerProfilesLoading && visibleWorkerProfiles.length === 0 ? (
           <p>A carregar profissionais...</p>
         ) : visibleWorkerProfiles.length === 0 ? (
           <DashboardEmptyState
             message={
               workerSearch.trim().length > 0
-                ? "Nenhum profissional corresponde à pesquisa atual."
-                : "Não há profissionais para estes filtros. Remove os filtros e tenta novamente."
+                ? "Nenhum profissional corresponde à pesquisa atual. Tenta um termo mais amplo."
+                : "Não há profissionais para estes filtros. Remove filtros para ver mais opções."
             }
             action={
-              <button type="button" onClick={handleResetFilters}>
-                Limpar filtros
-              </button>
+              <>
+                <button type="button" onClick={handleResetFilters}>
+                  Limpar filtros
+                </button>
+                <Link href="/dashboard/jobs#job-create" className="primary primary--ghost">
+                  Criar pedido mesmo assim
+                </Link>
+              </>
             }
           />
         ) : (
@@ -300,6 +315,7 @@ export function WorkersDomainSection({
                 profile.ratingCount,
               );
               const hasHourlyRate = typeof profile.hourlyRate === "number";
+              const ratingValue = Number(profile.ratingAvg || 0);
               const ctaCopy = getWorkerCtaCopy({
                 isOwnProfile: isMe,
                 isAvailable: profile.isAvailable,
@@ -307,8 +323,35 @@ export function WorkersDomainSection({
               });
               const relevance = getWorkerRelevance({
                 isAvailable: profile.isAvailable,
-                ratingValue: Number(profile.ratingAvg || 0),
+                ratingValue,
                 ratingCount: profile.ratingCount,
+              });
+              const responseEta = getWorkerResponseEtaLabel({
+                isAvailable: profile.isAvailable,
+                ratingValue,
+                ratingCount: profile.ratingCount,
+                experienceYears: profile.experienceYears,
+                hourlyRate: profile.hourlyRate,
+                ratingRank: workerRanking.ratingRankById[profile.id] ?? null,
+                priceRank: workerRanking.priceRankById[profile.id] ?? null,
+              });
+              const decisionBadges = getWorkerDecisionBadges({
+                isAvailable: profile.isAvailable,
+                ratingValue,
+                ratingCount: profile.ratingCount,
+                experienceYears: profile.experienceYears,
+                hourlyRate: profile.hourlyRate,
+                ratingRank: workerRanking.ratingRankById[profile.id] ?? null,
+                priceRank: workerRanking.priceRankById[profile.id] ?? null,
+              });
+              const comparisonItems = getWorkerComparisonItems({
+                isAvailable: profile.isAvailable,
+                ratingValue,
+                ratingCount: profile.ratingCount,
+                experienceYears: profile.experienceYears,
+                hourlyRate: profile.hourlyRate,
+                ratingRank: workerRanking.ratingRankById[profile.id] ?? null,
+                priceRank: workerRanking.priceRankById[profile.id] ?? null,
               });
 
               return (
@@ -318,24 +361,38 @@ export function WorkersDomainSection({
                   highlighted={!isMe && relevance.highlighted}
                   relevanceLabel={isMe ? "Perfil próprio" : relevance.label ?? undefined}
                   availabilityTone={profile.isAvailable ? "is-ok" : "is-muted"}
-                  availabilityLabel={profile.isAvailable ? "Disponível" : "Indisponível"}
+                  availabilityLabel={
+                    profile.isAvailable ? "Disponível hoje" : "Agenda limitada"
+                  }
+                  responseTimeLabel={responseEta}
                   rating={{
                     stars: formatStars(profile.ratingAvg),
                     value: formatRatingValue(profile.ratingAvg),
                     reviewCount: profile.ratingCount,
                   }}
+                  comparisonItems={comparisonItems}
                   trustSignals={[
                     {
                       label: "Avaliações",
-                      value: profile.ratingCount,
+                      value:
+                        profile.ratingCount > 0
+                          ? `${profile.ratingCount} clientes`
+                          : "Sem histórico ainda",
                     },
                     {
-                      label: "Experiência",
-                      value: `${profile.experienceYears} anos`,
+                      label: "Disponibilidade",
+                      value: profile.isAvailable
+                        ? "Aceita novos pedidos"
+                        : "Confirma agenda por mensagem",
                     },
                   ]}
                   badges={
                     <>
+                      {decisionBadges.map((badge) => (
+                        <DashboardBadge key={badge.label} tone={badge.tone}>
+                          {badge.label}
+                        </DashboardBadge>
+                      ))}
                       <DashboardBadge
                         tone={profileCompleteness.score >= 5 ? "is-ok" : "is-muted"}
                       >
@@ -395,6 +452,7 @@ export function WorkersDomainSection({
                       </Link>
                     </>
                   }
+                  ctaHint={ctaCopy.helperText}
                 />
               );
             })}

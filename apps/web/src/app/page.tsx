@@ -14,7 +14,6 @@ import {
   saveTokens,
 } from "@/lib/auth";
 import {
-  formatCurrencyMzn,
   formatRatingValue,
   formatStars,
   getStatusTone,
@@ -23,8 +22,12 @@ import {
 import { useMarketplaceDiscovery } from "@/components/marketplace/use-marketplace-discovery";
 import { MarketplaceWorkerCard } from "@/components/marketplace/marketplace-worker-card";
 import {
+  buildWorkerRankingContext,
   getWorkerCtaCopy,
+  getWorkerComparisonItems,
+  getWorkerDecisionBadges,
   getWorkerRelevance,
+  getWorkerResponseEtaLabel,
 } from "@/components/marketplace/marketplace-worker-presenter";
 import { ToastTone, useToast } from "@/components/toast-provider";
 import { humanizeUnknownError } from "@/lib/http-errors";
@@ -47,6 +50,7 @@ export default function Home() {
     discoverySearch,
     discoveryCategory,
     marketCategories,
+    featuredWorkers,
     visibleCategories,
     visibleWorkers,
     trustSummary,
@@ -59,6 +63,10 @@ export default function Home() {
     () =>
       mode === "login" ? "Entrar no Tchuno" : "Criar conta e contratar serviços",
     [mode],
+  );
+  const workerRanking = useMemo(
+    () => buildWorkerRankingContext(featuredWorkers),
+    [featuredWorkers],
   );
 
   useEffect(() => {
@@ -296,7 +304,17 @@ export default function Home() {
 
             <div className="dashboard-nav marketplace-chip-grid" aria-label="Categorias">
               {visibleCategories.length === 0 ? (
-                <span className="empty-state">Sem categorias para este termo.</span>
+                <div className="marketplace-empty-state">
+                  <p className="empty-state">
+                    Sem categorias para este termo. Tenta um serviço mais amplo ou
+                    limpa a pesquisa.
+                  </p>
+                  <div className="actions actions--inline">
+                    <button type="button" onClick={onResetDiscoveryFilters}>
+                      Limpar filtros
+                    </button>
+                  </div>
+                </div>
               ) : (
                 visibleCategories.map((category) => (
                   <button
@@ -319,6 +337,10 @@ export default function Home() {
             <p className="section-lead">
               Catálogo rápido com sinais de confiança para acelerar a decisão de
               contratação.
+            </p>
+            <p className="muted marketplace-signal-note">
+              Sinais de destaque e comparação são relativos aos profissionais em
+              destaque desta página.
             </p>
 
             <div className="overview-grid">
@@ -344,25 +366,71 @@ export default function Home() {
               {discoveryLoading ? (
                 <p className="status">A carregar profissionais...</p>
               ) : visibleWorkers.length === 0 ? (
-                <p className="empty-state">
-                  Não encontrámos profissionais para este filtro. Ajusta a pesquisa
-                  ou remove a categoria selecionada.
-                </p>
+                <div className="marketplace-empty-state">
+                  <p className="empty-state">
+                    Não encontrámos profissionais para este filtro. Ajusta a pesquisa
+                    ou remove a categoria selecionada.
+                  </p>
+                  <div className="actions actions--inline">
+                    <button type="button" onClick={onResetDiscoveryFilters}>
+                      Ver todos os profissionais
+                    </button>
+                    {hasSession ? (
+                      <Link href="/dashboard/workers" className="primary primary--ghost">
+                        Abrir catálogo completo
+                      </Link>
+                    ) : (
+                      <button
+                        type="button"
+                        className="primary primary--ghost"
+                        onClick={() => focusAuth("login")}
+                      >
+                        Entrar para continuar
+                      </button>
+                    )}
+                  </div>
+                </div>
               ) : (
                 visibleWorkers.map((worker, index) => {
                   const hasHourlyRate = typeof worker.hourlyRate === "number";
+                  const ratingValue = Number(worker.ratingAvg || 0);
                   const ctaCopy = getWorkerCtaCopy({
                     isAvailable: worker.isAvailable,
                     hasHourlyRate,
                   });
                   const relevance = getWorkerRelevance({
                     isAvailable: worker.isAvailable,
-                    ratingValue: Number(worker.ratingAvg || 0),
+                    ratingValue,
                     ratingCount: worker.ratingCount,
                   });
-                  const guestPrimaryLabel = ctaCopy.primaryLabel.startsWith("Contactar")
-                    ? "Entrar para contactar"
-                    : `Entrar para ${ctaCopy.primaryLabel.toLowerCase()}`;
+                  const guestPrimaryLabel = `Entrar para ${ctaCopy.primaryLabel.toLowerCase()}`;
+                  const responseEta = getWorkerResponseEtaLabel({
+                    isAvailable: worker.isAvailable,
+                    ratingValue,
+                    ratingCount: worker.ratingCount,
+                    experienceYears: worker.experienceYears,
+                    hourlyRate: worker.hourlyRate,
+                    ratingRank: workerRanking.ratingRankById[worker.id] ?? null,
+                    priceRank: workerRanking.priceRankById[worker.id] ?? null,
+                  });
+                  const decisionBadges = getWorkerDecisionBadges({
+                    isAvailable: worker.isAvailable,
+                    ratingValue,
+                    ratingCount: worker.ratingCount,
+                    experienceYears: worker.experienceYears,
+                    hourlyRate: worker.hourlyRate,
+                    ratingRank: workerRanking.ratingRankById[worker.id] ?? null,
+                    priceRank: workerRanking.priceRankById[worker.id] ?? null,
+                  });
+                  const comparisonItems = getWorkerComparisonItems({
+                    isAvailable: worker.isAvailable,
+                    ratingValue,
+                    ratingCount: worker.ratingCount,
+                    experienceYears: worker.experienceYears,
+                    hourlyRate: worker.hourlyRate,
+                    ratingRank: workerRanking.ratingRankById[worker.id] ?? null,
+                    priceRank: workerRanking.priceRankById[worker.id] ?? null,
+                  });
 
                   return (
                     <MarketplaceWorkerCard
@@ -371,30 +439,47 @@ export default function Home() {
                       highlighted={index < 2 || relevance.highlighted}
                       relevanceLabel={relevance.label ?? undefined}
                       availabilityTone={worker.isAvailable ? "is-ok" : "is-muted"}
-                      availabilityLabel={worker.isAvailable ? "Disponível" : "Indisponível"}
+                      availabilityLabel={
+                        worker.isAvailable ? "Disponível hoje" : "Agenda limitada"
+                      }
+                      responseTimeLabel={responseEta}
                       rating={{
                         stars: formatStars(worker.ratingAvg),
                         value: formatRatingValue(worker.ratingAvg),
                         reviewCount: worker.ratingCount,
                       }}
+                      comparisonItems={comparisonItems}
                       trustSignals={[
                         {
                           label: "Avaliações",
-                          value: worker.ratingCount,
+                          value:
+                            worker.ratingCount > 0
+                              ? `${worker.ratingCount} clientes`
+                              : "Sem histórico ainda",
                         },
                         {
-                          label: "Experiência",
-                          value: `${worker.experienceYears} anos`,
+                          label: "Disponibilidade",
+                          value: worker.isAvailable
+                            ? "Aceita novos pedidos"
+                            : "Confirma agenda por mensagem",
                         },
                       ]}
+                      badges={
+                        <>
+                          {decisionBadges.map((badge) => (
+                            <span
+                              key={badge.label}
+                              className={`status-pill ${badge.tone}`}
+                            >
+                              {badge.label}
+                            </span>
+                          ))}
+                        </>
+                      }
                       details={[
                         {
                           label: "Localização",
                           value: worker.location ?? "Não indicada",
-                        },
-                        {
-                          label: "Preço/hora",
-                          value: formatCurrencyMzn(worker.hourlyRate),
                         },
                         {
                           label: "Categorias",
@@ -405,6 +490,11 @@ export default function Home() {
                         },
                       ]}
                       note={worker.bio ?? undefined}
+                      ctaHint={
+                        hasSession
+                          ? ctaCopy.helperText
+                          : "Cria conta em segundos para comparar perfis e pedir serviço sem compromisso."
+                      }
                       actions={
                         <>
                           {hasSession ? (

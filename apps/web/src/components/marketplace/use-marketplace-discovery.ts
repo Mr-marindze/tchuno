@@ -25,6 +25,7 @@ type UseMarketplaceDiscoveryResult = {
   discoverySearch: string;
   discoveryCategory: string;
   marketCategories: MarketplaceCategory[];
+  featuredWorkers: WorkerProfile[];
   visibleCategories: MarketplaceCategory[];
   visibleWorkers: WorkerProfile[];
   trustSummary: DiscoveryTrustSummary;
@@ -191,6 +192,7 @@ export function useMarketplaceDiscovery(): UseMarketplaceDiscoveryResult {
     discoverySearch,
     discoveryCategory,
     marketCategories,
+    featuredWorkers,
     visibleCategories,
     visibleWorkers,
     trustSummary,

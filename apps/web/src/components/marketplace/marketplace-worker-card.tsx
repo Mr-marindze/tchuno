@@ -1,4 +1,5 @@
 import { ReactNode } from "react";
+import type { StatusBadgeTone } from "@/components/dashboard/dashboard-formatters";
 
 export type MarketplaceWorkerCardDetail = {
   label: string;
@@ -16,19 +17,28 @@ export type MarketplaceWorkerCardRating = {
   reviewCount: number;
 };
 
+export type MarketplaceWorkerCardComparisonItem = {
+  label: string;
+  value: ReactNode;
+  tone?: StatusBadgeTone;
+};
+
 type MarketplaceWorkerCardProps = {
   title: ReactNode;
   availabilityLabel: string;
   availabilityTone?: "is-ok" | "is-muted" | "is-danger";
+  responseTimeLabel?: string;
   relevanceLabel?: string;
   highlighted?: boolean;
   rating?: MarketplaceWorkerCardRating;
+  comparisonItems?: MarketplaceWorkerCardComparisonItem[];
   trustSignals?: MarketplaceWorkerCardTrustSignal[];
   details: MarketplaceWorkerCardDetail[];
   badges?: ReactNode;
   note?: ReactNode;
   footer?: ReactNode;
   actions?: ReactNode;
+  ctaHint?: ReactNode;
   className?: string;
 };
 
@@ -36,15 +46,18 @@ export function MarketplaceWorkerCard({
   title,
   availabilityLabel,
   availabilityTone = "is-muted",
+  responseTimeLabel,
   relevanceLabel,
   highlighted = false,
   rating,
+  comparisonItems = [],
   trustSignals = [],
   details,
   badges,
   note,
   footer,
   actions,
+  ctaHint,
   className,
 }: MarketplaceWorkerCardProps) {
   return (
@@ -59,9 +72,12 @@ export function MarketplaceWorkerCard({
         .join(" ")}
     >
       <div className="marketplace-worker-card-head">
-        <p className="item-title">
-          {title}
+        <p className="item-title">{title}</p>
+        <p className="pill-row marketplace-worker-topline">
           <span className={`status-pill ${availabilityTone}`}>{availabilityLabel}</span>
+          {responseTimeLabel ? (
+            <span className="status-pill is-muted">{responseTimeLabel}</span>
+          ) : null}
         </p>
         {relevanceLabel ? (
           <p className="marketplace-worker-relevance">{relevanceLabel}</p>
@@ -77,6 +93,26 @@ export function MarketplaceWorkerCard({
               {rating.reviewCount} avaliação(ões)
             </span>
           </p>
+        </div>
+      ) : null}
+
+      {comparisonItems.length > 0 ? (
+        <div className="marketplace-worker-compare-grid" aria-label="Comparação rápida">
+          {comparisonItems.map((item) => (
+            <article key={item.label} className="marketplace-worker-compare-item">
+              <p className="metric-label">{item.label}</p>
+              <p
+                className={[
+                  "marketplace-worker-compare-value",
+                  item.tone ? `is-${item.tone.replace("is-", "")}` : "",
+                ]
+                  .filter(Boolean)
+                  .join(" ")}
+              >
+                {item.value}
+              </p>
+            </article>
+          ))}
         </div>
       ) : null}
 
@@ -106,6 +142,7 @@ export function MarketplaceWorkerCard({
           {actions}
         </div>
       ) : null}
+      {ctaHint ? <p className="muted marketplace-worker-cta-hint">{ctaHint}</p> : null}
     </article>
   );
 }
