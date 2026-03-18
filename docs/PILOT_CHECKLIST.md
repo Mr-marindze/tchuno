@@ -1,5 +1,9 @@
 # Pilot Operational Checklist
 
+Referências rápidas:
+- `docs/PILOT_RUNBOOK.md`
+- `docs/PILOT_FEEDBACK_TEMPLATE.md`
+
 ## 1. Pre-Pilot (T-7 to T-1)
 
 1. Environment

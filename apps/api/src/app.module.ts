@@ -7,6 +7,7 @@ import {
 import { ConfigModule } from '@nestjs/config';
 import { APP_GUARD, APP_INTERCEPTOR } from '@nestjs/core';
 import { ThrottlerGuard, ThrottlerModule } from '@nestjs/throttler';
+import { AdminOpsModule } from './admin-ops/admin-ops.module';
 import { AppController } from './app.controller';
 import { AppService } from './app.service';
 import { AuthModule } from './auth/auth.module';
@@ -28,6 +29,7 @@ import { WorkerProfileModule } from './worker-profile/worker-profile.module';
         limit: 120,
       },
     ]),
+    AdminOpsModule,
     PrismaModule,
     AuthModule,
     CategoriesModule,

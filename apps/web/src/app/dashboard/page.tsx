@@ -54,6 +54,11 @@ import {
   listWorkerReviews,
   Review,
 } from "@/lib/reviews";
+import {
+  AdminOpsJobListItem,
+  AdminOpsOverview,
+  getAdminOpsOverview,
+} from "@/lib/admin-ops";
 import { JobTimeline } from "@/components/job-timeline";
 import { ToastTone, useToast } from "@/components/toast-provider";
 import { humanizeUnknownError } from "@/lib/http-errors";
@@ -336,6 +341,12 @@ export default function DashboardPage() {
   const [limit, setLimit] = useState(20);
   const [offset, setOffset] = useState(0);
   const [status, setStatus] = useState("A validar sessão...");
+  const [adminOpsOverview, setAdminOpsOverview] =
+    useState<AdminOpsOverview | null>(null);
+  const [adminOpsStatus, setAdminOpsStatus] = useState(
+    "Pronto para carregar visão operacional do admin.",
+  );
+  const [adminOpsLoading, setAdminOpsLoading] = useState(false);
   const [categories, setCategories] = useState<Category[]>([]);
   const [categoryStatus, setCategoryStatus] = useState(
     "Pronto para gerir categorias.",
@@ -674,6 +685,12 @@ export default function DashboardPage() {
     [statusFilter, sort, limit, offset],
   );
 
+  const loadAdminOpsData = useCallback(async (accessToken: string) => {
+    const overview = await getAdminOpsOverview(accessToken);
+    setAdminOpsOverview(overview);
+    return overview;
+  }, []);
+
   const loadCategories = useCallback(async () => {
     const data = await listCategories({ includeInactive });
     setCategories(data);
@@ -973,6 +990,32 @@ export default function DashboardPage() {
   }, [state?.auth.accessToken, loadJobsData]);
 
   useEffect(() => {
+    if (!state?.auth.accessToken || !isAdmin) {
+      setAdminOpsOverview(null);
+      return;
+    }
+
+    setAdminOpsLoading(true);
+    loadAdminOpsData(state.auth.accessToken)
+      .then((overview) => {
+        setAdminOpsStatus(
+          `Painel admin carregado. Jobs: ${overview.kpis.totalJobs} | Reviews: ${overview.kpis.totalReviews}.`,
+        );
+      })
+      .catch((error) => {
+        setAdminOpsStatus(
+          humanizeUnknownError(
+            error,
+            "Falha ao carregar visão operacional do admin.",
+          ),
+        );
+      })
+      .finally(() => {
+        setAdminOpsLoading(false);
+      });
+  }, [isAdmin, loadAdminOpsData, state?.auth.accessToken]);
+
+  useEffect(() => {
     if (!isAuthenticated) {
       return;
     }
@@ -1134,6 +1177,14 @@ export default function DashboardPage() {
   }, [status, pushStatusToast]);
 
   useEffect(() => {
+    if (!isAdmin) {
+      return;
+    }
+
+    pushStatusToast("admin-ops", adminOpsStatus);
+  }, [adminOpsStatus, isAdmin, pushStatusToast]);
+
+  useEffect(() => {
     pushStatusToast("categories", categoryStatus);
   }, [categoryStatus, pushStatusToast]);
 
@@ -1242,6 +1293,10 @@ export default function DashboardPage() {
       .replace(/(^\w|\s\w)/g, (part) => part.toUpperCase());
   }
 
+  function formatPricingMode(value: Job["pricingMode"]): string {
+    return value === "QUOTE_REQUEST" ? "Sob cotação" : "Preço fixo";
+  }
+
   async function handleReloadSessions() {
     const { accessToken } = getStoredTokens();
 
@@ -1255,6 +1310,39 @@ export default function DashboardPage() {
       setStatus("Sessões recarregadas.");
     } catch (error) {
       setStatus(humanizeUnknownError(error, "Falha ao carregar sessões."));
+    }
+  }
+
+  async function handleReloadAdminOps() {
+    if (!isAdmin) {
+      setAdminOpsStatus("Apenas admins podem abrir visão operacional.");
+      return;
+    }
+
+    const accessToken =
+      state?.auth.accessToken ?? getStoredTokens().accessToken;
+    if (!accessToken) {
+      setAdminOpsStatus("Access token ausente.");
+      return;
+    }
+
+    setAdminOpsLoading(true);
+    setAdminOpsStatus("A recarregar visão operacional...");
+
+    try {
+      const overview = await loadAdminOpsData(accessToken);
+      setAdminOpsStatus(
+        `Painel admin recarregado. Jobs: ${overview.kpis.totalJobs} | Reviews: ${overview.kpis.totalReviews}.`,
+      );
+    } catch (error) {
+      setAdminOpsStatus(
+        humanizeUnknownError(
+          error,
+          "Falha ao recarregar visão operacional do admin.",
+        ),
+      );
+    } finally {
+      setAdminOpsLoading(false);
     }
   }
 
@@ -1866,6 +1954,65 @@ export default function DashboardPage() {
     }
   }
 
+  function renderAdminOpsJobList(
+    items: AdminOpsJobListItem[],
+    emptyMessage: string,
+  ) {
+    if (items.length === 0) {
+      return <p className="empty-state">{emptyMessage}</p>;
+    }
+
+    return items.map((job) => (
+      <article key={job.id} className="list-item job-card">
+        <p className="item-title">
+          {job.title}
+          <span className="status-pill is-muted">{formatJobStatus(job.status)}</span>
+        </p>
+        <p>
+          <strong>ID:</strong> {shortenId(job.id)}
+        </p>
+        <p>
+          <strong>Preço:</strong> {formatPricingMode(job.pricingMode)}
+        </p>
+        <p>
+          <strong>Orçamento:</strong> {formatCurrencyMzn(job.budget)}
+        </p>
+        {typeof job.quotedAmount === "number" ? (
+          <p>
+            <strong>Cotação:</strong> {formatCurrencyMzn(job.quotedAmount)}
+          </p>
+        ) : null}
+        <p>
+          <strong>Cliente:</strong> {shortenId(job.clientId)}
+        </p>
+        <p>
+          <strong>Worker:</strong> {shortenId(job.workerProfileId)}
+        </p>
+        <p>
+          <strong>Criado:</strong> {formatDate(job.createdAt)}
+        </p>
+        {job.completedAt ? (
+          <p>
+            <strong>Concluído:</strong> {formatDate(job.completedAt)}
+          </p>
+        ) : null}
+        {job.canceledAt ? (
+          <p>
+            <strong>Cancelado:</strong> {formatDate(job.canceledAt)}
+          </p>
+        ) : null}
+        {job.cancelReason ? (
+          <p>
+            <strong>Motivo:</strong> {job.cancelReason}
+          </p>
+        ) : null}
+        <p className="muted">
+          Review: {job.hasReview ? "publicada" : "pendente"}
+        </p>
+      </article>
+    ));
+  }
+
   if (loading) {
     return (
       <main className="shell">
@@ -1913,6 +2060,7 @@ export default function DashboardPage() {
 
         <nav className="dashboard-nav">
           <a href="#overview">Visão geral</a>
+          {isAdmin ? <a href="#admin-ops">Admin Ops</a> : null}
           <a href="#sessions">Sessões</a>
           <a href="#categories">Categorias</a>
           <a href="#my-profile">Meu perfil</a>
@@ -1959,6 +2107,118 @@ export default function DashboardPage() {
             </article>
           </div>
         </section>
+
+        {isAdmin ? (
+          <section id="admin-ops" className="dashboard-section">
+            <h2 className="section-title">Admin Ops Mínimo</h2>
+            <p className="section-lead">
+              Leitura rápida da operação do MVP para pilotagem diária.
+            </p>
+            <p className={`status status--${getStatusTone(adminOpsStatus)}`}>
+              {adminOpsStatus}
+            </p>
+
+            <div className="section-toolbar">
+              <button
+                type="button"
+                onClick={handleReloadAdminOps}
+                disabled={adminOpsLoading}
+              >
+                {adminOpsLoading ? "A carregar..." : "Recarregar painel admin"}
+              </button>
+            </div>
+
+            {!adminOpsOverview ? (
+              <div className="result">
+                <p className="empty-state">
+                  Sem dados operacionais neste momento.
+                </p>
+              </div>
+            ) : (
+              <>
+                <div className="overview-grid">
+                  <article className="metric-card">
+                    <p className="metric-label">Total de jobs</p>
+                    <p className="metric-value">{adminOpsOverview.kpis.totalJobs}</p>
+                  </article>
+                  <article className="metric-card">
+                    <p className="metric-label">Taxa de conclusão</p>
+                    <p className="metric-value">
+                      {adminOpsOverview.kpis.completionRate.toFixed(1)}%
+                    </p>
+                  </article>
+                  <article className="metric-card">
+                    <p className="metric-label">Total de reviews</p>
+                    <p className="metric-value">
+                      {adminOpsOverview.kpis.totalReviews}
+                    </p>
+                  </article>
+                  <article className="metric-card">
+                    <p className="metric-label">Rating médio</p>
+                    <p className="metric-value">
+                      {adminOpsOverview.kpis.averageRating.toFixed(2)}
+                    </p>
+                  </article>
+                  <article className="metric-card">
+                    <p className="metric-label">Workers ativos/publicáveis</p>
+                    <p className="metric-value">
+                      {adminOpsOverview.kpis.activePublicableWorkers}
+                    </p>
+                  </article>
+                  <article className="metric-card">
+                    <p className="metric-label">Pricing mode</p>
+                    <p className="metric-note">
+                      FIXED: {adminOpsOverview.kpis.jobsByPricingMode.FIXED_PRICE} |
+                      QUOTE: {adminOpsOverview.kpis.jobsByPricingMode.QUOTE_REQUEST}
+                    </p>
+                  </article>
+                </div>
+
+                <div className="result">
+                  <p className="item-title">Jobs por estado</p>
+                  <div className="flow-summary">
+                    {jobStatuses.map((status) => (
+                      <article
+                        key={`admin-job-status-${status}`}
+                        className="flow-summary-item"
+                      >
+                        <p className="metric-label">{formatJobStatus(status)}</p>
+                        <p className="metric-value">
+                          {adminOpsOverview.kpis.jobsByStatus[status]}
+                        </p>
+                      </article>
+                    ))}
+                  </div>
+                </div>
+
+                <div className="panel-grid">
+                  <div className="result">
+                    <p className="item-title">Jobs recentes</p>
+                    {renderAdminOpsJobList(
+                      adminOpsOverview.recentJobs,
+                      "Sem jobs recentes para mostrar.",
+                    )}
+                  </div>
+                  <div className="result">
+                    <p className="item-title">Cancelados recentemente</p>
+                    {renderAdminOpsJobList(
+                      adminOpsOverview.recentlyCanceledJobs,
+                      "Sem cancelamentos recentes.",
+                    )}
+                  </div>
+                </div>
+
+                <div className="result">
+                  <p className="item-title">Concluídos sem review</p>
+                  {renderAdminOpsJobList(
+                    adminOpsOverview.completedWithoutReviewJobs,
+                    "Sem jobs concluídos pendentes de review.",
+                  )}
+                </div>
+              </>
+            )}
+          </section>
+        ) : null}
 
         <div className="actions cta-actions">
           <button type="button" onClick={handleRefreshNow}>

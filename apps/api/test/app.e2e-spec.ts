@@ -261,6 +261,105 @@ describe('Auth and Sessions (e2e)', () => {
       .post('/auth/logout-all')
       .send({})
       .expect(401);
+    await request(app.getHttpServer()).get('/admin/ops/overview').expect(401);
+  });
+
+  it('allows admin-only access to admin ops overview', async () => {
+    const userEmail = `admin_ops_user_${Date.now()}@tchuno.local`;
+    const adminEmail = `admin_ops_admin_${Date.now()}@tchuno.local`;
+    const jwtService = app.get(JwtService);
+
+    const regularUser = await prisma.user.create({
+      data: {
+        email: userEmail,
+        name: 'Regular User',
+        passwordHash: 'e2e-placeholder-hash',
+        role: 'USER',
+        isActive: true,
+      },
+      select: {
+        id: true,
+        email: true,
+      },
+    });
+
+    const regularToken = jwtService.sign(
+      {
+        sub: regularUser.id,
+        email: regularUser.email,
+      },
+      {
+        secret: process.env.JWT_ACCESS_SECRET || 'change-me-access',
+        expiresIn: '15m',
+      },
+    );
+
+    await request(app.getHttpServer())
+      .get('/admin/ops/overview')
+      .set('Authorization', `Bearer ${regularToken}`)
+      .expect(403);
+
+    const adminUser = await prisma.user.create({
+      data: {
+        email: adminEmail,
+        name: 'Admin Ops User',
+        passwordHash: 'e2e-placeholder-hash',
+        role: 'ADMIN',
+        isActive: true,
+      },
+      select: {
+        id: true,
+        email: true,
+      },
+    });
+
+    const adminToken = jwtService.sign(
+      {
+        sub: adminUser.id,
+        email: adminUser.email,
+      },
+      {
+        secret: process.env.JWT_ACCESS_SECRET || 'change-me-access',
+        expiresIn: '15m',
+      },
+    );
+
+    const overviewResponse = await request(app.getHttpServer())
+      .get('/admin/ops/overview')
+      .set('Authorization', `Bearer ${adminToken}`)
+      .expect(200);
+
+    const overview = overviewResponse.body as {
+      kpis: {
+        totalJobs: number;
+        jobsByStatus: {
+          REQUESTED: number;
+          ACCEPTED: number;
+          IN_PROGRESS: number;
+          COMPLETED: number;
+          CANCELED: number;
+        };
+        completionRate: number;
+        totalReviews: number;
+        averageRating: number;
+        activePublicableWorkers: number;
+        jobsByPricingMode: {
+          FIXED_PRICE: number;
+          QUOTE_REQUEST: number;
+        };
+      };
+      recentJobs: Array<{ id: string; status: string }>;
+      recentlyCanceledJobs: Array<{ id: string; status: string }>;
+      completedWithoutReviewJobs: Array<{ id: string; status: string }>;
+    };
+
+    expect(typeof overview.kpis.totalJobs).toBe('number');
+    expect(typeof overview.kpis.totalReviews).toBe('number');
+    expect(typeof overview.kpis.jobsByStatus.REQUESTED).toBe('number');
+    expect(typeof overview.kpis.jobsByPricingMode.FIXED_PRICE).toBe('number');
+    expect(Array.isArray(overview.recentJobs)).toBe(true);
+    expect(Array.isArray(overview.recentlyCanceledJobs)).toBe(true);
+    expect(Array.isArray(overview.completedWithoutReviewJobs)).toBe(true);
   });
 
   it('does not allow user A to revoke user B session', async () => {
