@@ -199,7 +199,9 @@ export function useMarketplaceDiscovery(): UseMarketplaceDiscoveryResult {
 
       searchTrackTimeoutRef.current = setTimeout(() => {
         const normalized = value.trim();
-        trackEvent("marketplace_search_used", {
+        trackEvent("marketplace.search.change", {
+          source: "landing.discovery",
+          view: "landing",
           queryLength: normalized.length,
           hasCategoryFilter: discoveryCategory.length > 0,
           resultCount: visibleWorkers.length,
@@ -214,9 +216,11 @@ export function useMarketplaceDiscovery(): UseMarketplaceDiscoveryResult {
       setDiscoveryCategory((current) => {
         const nextCategory = current === categorySlug ? "" : categorySlug;
 
-        trackEvent("marketplace_category_selected", {
-          selectedCategory: nextCategory || null,
-          previousCategory: current || null,
+        trackEvent("marketplace.category.select", {
+          source: "landing.discovery",
+          view: "landing",
+          categorySlug: nextCategory || null,
+          previousCategorySlug: current || null,
           categoryCount: marketCategories.length,
           resultCount: visibleWorkers.length,
         });

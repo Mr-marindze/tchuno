@@ -185,8 +185,9 @@ export function WorkersDomainSection({
       return;
     }
 
-    trackEvent("worker_ranking_applied", {
-      scope: "dashboard_workers",
+    trackEvent("dashboard.heuristic.ranking.apply", {
+      source: "dashboard.workers",
+      view: "dashboard.workers",
       workerCount: workerHeuristicSnapshot.length,
       workersWithRatingRank: workerHeuristicSnapshot.filter(
         (item) => typeof item.ratingRank === "number",
@@ -207,8 +208,9 @@ export function WorkersDomainSection({
       return;
     }
 
-    trackEvent("worker_highlight_labels_applied", {
-      scope: "dashboard_workers",
+    trackEvent("dashboard.heuristic.highlight.apply", {
+      source: "dashboard.workers",
+      view: "dashboard.workers",
       workerCount: workerHeuristicSnapshot.length,
       highlightedCount: workerHeuristicSnapshot.filter((item) => item.highlighted)
         .length,
@@ -232,8 +234,9 @@ export function WorkersDomainSection({
       return;
     }
 
-    trackEvent("worker_contextual_cta_changed", {
-      scope: "dashboard_workers",
+    trackEvent("dashboard.heuristic.cta.apply", {
+      source: "dashboard.workers",
+      view: "dashboard.workers",
       workerCount: workerHeuristicSnapshot.length,
       labels: Array.from(
         new Set(workerHeuristicSnapshot.map((item) => item.ctaPrimaryLabel)),
@@ -571,11 +574,13 @@ export function WorkersDomainSection({
                         href={isMe ? "/dashboard/profile" : "/dashboard/jobs#job-create"}
                         className="primary"
                         onClick={() =>
-                          trackEvent("marketplace_cta_clicked", {
-                            scope: "dashboard_workers_card",
+                          trackEvent("dashboard.cta.click", {
+                            source: "dashboard.workers.card",
+                            view: "dashboard.workers",
                             workerId: profile.id,
                             isOwnProfile: isMe,
                             label: ctaCopy.primaryLabel,
+                            ctaType: "primary",
                           })
                         }
                       >
@@ -585,12 +590,13 @@ export function WorkersDomainSection({
                         href="/dashboard/jobs#job-create"
                         className="primary primary--ghost"
                         onClick={() =>
-                          trackEvent("marketplace_cta_clicked", {
-                            scope: "dashboard_workers_card",
+                          trackEvent("dashboard.cta.click", {
+                            source: "dashboard.workers.card",
+                            view: "dashboard.workers",
                             workerId: profile.id,
                             isOwnProfile: isMe,
-                            isSecondary: true,
                             label: ctaCopy.secondaryLabel,
+                            ctaType: "secondary",
                           })
                         }
                       >
@@ -600,8 +606,9 @@ export function WorkersDomainSection({
                   }
                   ctaHint={ctaCopy.helperText}
                   onCardClick={() =>
-                    trackEvent("marketplace_worker_card_clicked", {
-                      scope: "dashboard_workers",
+                    trackEvent("dashboard.worker.card.click", {
+                      source: "dashboard.workers.card",
+                      view: "dashboard.workers",
                       workerId: profile.id,
                       isOwnProfile: isMe,
                       highlighted: relevance.highlighted,

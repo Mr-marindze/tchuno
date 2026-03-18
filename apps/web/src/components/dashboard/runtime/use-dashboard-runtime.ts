@@ -1740,13 +1740,16 @@ export function useDashboardRuntime({ view }: UseDashboardRuntimeArgs) {
     setJobsStatus("A criar job...");
 
     try {
-      trackEvent("job_create_submitted", {
-        scope: "dashboard_jobs",
+      trackEvent("job.create.submit", {
+        source: "dashboard.jobs.create",
+        view: "dashboard.jobs",
         pricingMode: jobPricingMode,
         hasBudget: typeof parsedBudget === "number",
         hasScheduledFor: Boolean(scheduledForIso),
         titleLength: normalizedTitle.length,
         descriptionLength: normalizedDescription.length,
+        workerProfileId: jobWorkerProfileId,
+        categoryId: jobCategoryId,
       });
 
       await createJob(accessToken, {

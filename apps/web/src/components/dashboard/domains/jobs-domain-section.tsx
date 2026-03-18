@@ -230,8 +230,9 @@ export function JobsDomainSection({
       return;
     }
 
-    trackEvent("job_create_step_changed", {
-      scope: "dashboard_jobs_create_flow",
+    trackEvent("job.create.step.change", {
+      source: "dashboard.jobs.create",
+      view: "dashboard.jobs",
       stepIndex: creationStepState.index,
       stepLabel: creationStepState.label,
       readySteps: creationStepReadyCount,

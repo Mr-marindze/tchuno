@@ -141,8 +141,9 @@ export default function Home() {
       return;
     }
 
-    trackEvent("worker_ranking_applied", {
-      scope: "landing_featured",
+    trackEvent("marketplace.heuristic.ranking.apply", {
+      source: "landing.featured_workers",
+      view: "landing",
       workerCount: workerHeuristicSnapshot.length,
       workersWithRatingRank: workerHeuristicSnapshot.filter(
         (item) => typeof item.ratingRank === "number",
@@ -163,8 +164,9 @@ export default function Home() {
       return;
     }
 
-    trackEvent("worker_highlight_labels_applied", {
-      scope: "landing_featured",
+    trackEvent("marketplace.heuristic.highlight.apply", {
+      source: "landing.featured_workers",
+      view: "landing",
       workerCount: workerHeuristicSnapshot.length,
       highlightedCount: workerHeuristicSnapshot.filter((item) => item.highlighted)
         .length,
@@ -188,8 +190,9 @@ export default function Home() {
       return;
     }
 
-    trackEvent("worker_contextual_cta_changed", {
-      scope: "landing_featured",
+    trackEvent("marketplace.heuristic.cta.apply", {
+      source: "landing.featured_workers",
+      view: "landing",
       workerCount: workerHeuristicSnapshot.length,
       labels: Array.from(
         new Set(workerHeuristicSnapshot.map((item) => item.ctaPrimaryLabel)),
@@ -367,10 +370,12 @@ export default function Home() {
                   href="/dashboard/jobs"
                   className="primary"
                   onClick={() =>
-                    trackEvent("marketplace_cta_clicked", {
-                      scope: "landing_hero",
+                    trackEvent("marketplace.cta.click", {
+                      source: "landing.hero",
+                      view: "landing",
                       label: "Criar pedido agora",
-                      hasSession: true,
+                      ctaType: "primary",
+                      sessionState: "authenticated",
                     })
                   }
                 >
@@ -381,10 +386,12 @@ export default function Home() {
                   type="button"
                   className="primary"
                   onClick={() => {
-                    trackEvent("marketplace_cta_clicked", {
-                      scope: "landing_hero",
+                    trackEvent("marketplace.cta.click", {
+                      source: "landing.hero",
+                      view: "landing",
                       label: "Entrar para contratar",
-                      hasSession: false,
+                      ctaType: "primary",
+                      sessionState: "guest",
                     });
                     focusAuth("login");
                   }}
@@ -636,8 +643,9 @@ export default function Home() {
                           : "Cria conta em segundos para comparar perfis e pedir serviço sem compromisso."
                       }
                       onCardClick={() =>
-                        trackEvent("marketplace_worker_card_clicked", {
-                          scope: "landing_featured",
+                        trackEvent("marketplace.worker.card.click", {
+                          source: "landing.worker_card",
+                          view: "landing",
                           workerId: worker.id,
                           highlighted: index < 2 || relevance.highlighted,
                           relevanceLabel: relevance.label ?? null,
@@ -650,14 +658,16 @@ export default function Home() {
                               href="/dashboard/jobs#job-create"
                               className="primary"
                               onClick={() =>
-                                trackEvent("marketplace_cta_clicked", {
-                                  scope: "landing_worker_card",
+                                trackEvent("marketplace.cta.click", {
+                                  source: "landing.worker_card",
+                                  view: "landing",
                                   workerId: worker.id,
                                   label: ctaCopy.primaryLabel,
+                                  ctaType: "primary",
+                                  sessionState: "authenticated",
                                   pricingContext: hasHourlyRate
                                     ? "fixed-price-or-quote"
                                     : "quote-first",
-                                  hasSession: true,
                                 })
                               }
                             >
@@ -668,14 +678,16 @@ export default function Home() {
                               type="button"
                               className="primary"
                               onClick={() => {
-                                trackEvent("marketplace_cta_clicked", {
-                                  scope: "landing_worker_card",
+                                trackEvent("marketplace.cta.click", {
+                                  source: "landing.worker_card",
+                                  view: "landing",
                                   workerId: worker.id,
                                   label: guestPrimaryLabel,
+                                  ctaType: "primary",
+                                  sessionState: "guest",
                                   pricingContext: hasHourlyRate
                                     ? "fixed-price-or-quote"
                                     : "quote-first",
-                                  hasSession: false,
                                 });
                                 focusAuth("login");
                               }}
