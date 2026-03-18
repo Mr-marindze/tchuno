@@ -2,9 +2,14 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { shortenId } from "@/components/dashboard/dashboard-formatters";
+import { buildWorkerRankingContext } from "@/components/marketplace/marketplace-worker-presenter";
 import { listCategories } from "@/lib/categories";
 import { humanizeUnknownError } from "@/lib/http-errors";
-import { trackEvent } from "@/lib/tracking";
+import {
+  getBehaviorAggregationVersion,
+  subscribeBehaviorAggregation,
+  trackEvent,
+} from "@/lib/tracking";
 import { listWorkerProfiles, WorkerProfile } from "@/lib/worker-profile";
 
 type MarketplaceCategory = {
@@ -46,6 +51,7 @@ export function useMarketplaceDiscovery(): UseMarketplaceDiscoveryResult {
     [],
   );
   const [featuredWorkers, setFeaturedWorkers] = useState<WorkerProfile[]>([]);
+  const [behaviorAggregationVersion, setBehaviorAggregationVersion] = useState(0);
   const searchTrackTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(
     null,
   );
@@ -125,6 +131,13 @@ export function useMarketplaceDiscovery(): UseMarketplaceDiscoveryResult {
     };
   }, []);
 
+  useEffect(() => {
+    setBehaviorAggregationVersion(getBehaviorAggregationVersion());
+    return subscribeBehaviorAggregation(() => {
+      setBehaviorAggregationVersion(getBehaviorAggregationVersion());
+    });
+  }, []);
+
   const normalizedSearch = discoverySearch.trim().toLowerCase();
 
   const visibleCategories = useMemo(() => {
@@ -142,7 +155,7 @@ export function useMarketplaceDiscovery(): UseMarketplaceDiscoveryResult {
   }, [marketCategories, normalizedSearch]);
 
   const visibleWorkers = useMemo(() => {
-    return featuredWorkers.filter((worker) => {
+    const filtered = featuredWorkers.filter((worker) => {
       if (
         discoveryCategory.length > 0 &&
         !worker.categories.some((item) => item.slug === discoveryCategory)
@@ -165,7 +178,27 @@ export function useMarketplaceDiscovery(): UseMarketplaceDiscoveryResult {
         shortenId(worker.userId).toLowerCase().includes(normalizedSearch)
       );
     });
-  }, [featuredWorkers, discoveryCategory, normalizedSearch]);
+
+    const ranking = buildWorkerRankingContext(
+      filtered,
+      behaviorAggregationVersion,
+    );
+    return [...filtered].sort((a, b) => {
+      const scoreDiff =
+        (ranking.relevanceScoreById[b.id] ?? 0) -
+        (ranking.relevanceScoreById[a.id] ?? 0);
+      if (scoreDiff !== 0) {
+        return scoreDiff;
+      }
+
+      return Number(b.ratingAvg || 0) - Number(a.ratingAvg || 0);
+    });
+  }, [
+    featuredWorkers,
+    discoveryCategory,
+    normalizedSearch,
+    behaviorAggregationVersion,
+  ]);
 
   const trustSummary = useMemo(() => {
     const availableCount = featuredWorkers.filter((worker) => worker.isAvailable)

@@ -1,6 +1,11 @@
 export type SessionState = "guest" | "authenticated";
 export type JobPricingMode = "FIXED_PRICE" | "QUOTE_REQUEST";
 export type DropoffReason = "visibility_hidden" | "before_unload";
+export type WorkerRankingDebugItem = {
+  workerId: string;
+  score: number;
+  reasons: string[];
+};
 
 export type TrackingEventMap = {
   "marketplace.cta.click": {
@@ -40,6 +45,7 @@ export type TrackingEventMap = {
     workerCount: number;
     workersWithRatingRank: number;
     workersWithPriceRank: number;
+    topWorkers?: WorkerRankingDebugItem[];
   };
   "marketplace.heuristic.highlight.apply": {
     source: "landing.featured_workers";
@@ -76,6 +82,7 @@ export type TrackingEventMap = {
     workerCount: number;
     workersWithRatingRank: number;
     workersWithPriceRank: number;
+    topWorkers?: WorkerRankingDebugItem[];
   };
   "dashboard.heuristic.highlight.apply": {
     source: "dashboard.workers";
@@ -155,6 +162,31 @@ export type TrackingFunnelSummary = {
   maxJobStepReached: number;
 };
 
+export type WorkerBehaviorAggregate = {
+  interactions: number;
+  clicks: number;
+  ctaClicks: number;
+  conversions: number;
+};
+
+export type BehaviorAggregationSnapshot = {
+  version: number;
+  workersById: Record<string, WorkerBehaviorAggregate>;
+  categoriesBySlug: Record<string, number>;
+};
+
+export type WorkerRelevanceScoreBreakdown = {
+  score: number;
+  ratingComponent: number;
+  clickComponent: number;
+  conversionComponent: number;
+  ctaComponent: number;
+  clicks: number;
+  conversions: number;
+  ctaClicks: number;
+  reasons: string[];
+};
+
 type JobFlowSessionState = {
   active: boolean;
   submitted: boolean;
@@ -188,6 +220,16 @@ const jobFlowSessionState: JobFlowSessionState = {
   pricingMode: null,
   visibleDropoffDetected: false,
 };
+const workerBehaviorById: Record<string, WorkerBehaviorAggregate> = {};
+const categoryInteractionBySlug: Record<string, number> = {};
+const behaviorAggregationListeners = new Set<() => void>();
+let behaviorAggregationVersion = 0;
+
+const CLICK_WEIGHT = 0.6;
+const CTA_CLICK_WEIGHT = 0.8;
+const CONVERSION_WEIGHT = 4;
+const RATING_VALUE_WEIGHT = 1.8;
+const RATING_COUNT_WEIGHT = 0.06;
 
 function nowIso(): string {
   return new Date().toISOString();
@@ -230,6 +272,92 @@ function createEmptyFunnelSummary(): TrackingFunnelSummary {
     jobVisibleDropoffs: 0,
     maxJobStepReached: 0,
   };
+}
+
+function getOrCreateWorkerBehavior(workerId: string): WorkerBehaviorAggregate {
+  if (!workerBehaviorById[workerId]) {
+    workerBehaviorById[workerId] = {
+      interactions: 0,
+      clicks: 0,
+      ctaClicks: 0,
+      conversions: 0,
+    };
+  }
+
+  return workerBehaviorById[workerId];
+}
+
+function notifyBehaviorAggregationChanged() {
+  behaviorAggregationVersion += 1;
+  behaviorAggregationListeners.forEach((listener) => {
+    try {
+      listener();
+    } catch (error) {
+      if (isDebugModeEnabled()) {
+        console.error("[tchuno-track] behavior listener error", error);
+      }
+    }
+  });
+}
+
+function updateBehaviorAggregation(event: AnyTrackingEvent) {
+  let changed = false;
+
+  switch (event.name) {
+    case "marketplace.worker.card.click":
+    case "dashboard.worker.card.click": {
+      const workerStats = getOrCreateWorkerBehavior(event.metadata.workerId);
+      workerStats.interactions += 1;
+      workerStats.clicks += 1;
+      changed = true;
+      break;
+    }
+    case "marketplace.cta.click": {
+      if (!event.metadata.workerId) {
+        break;
+      }
+
+      const workerStats = getOrCreateWorkerBehavior(event.metadata.workerId);
+      workerStats.interactions += 1;
+      workerStats.ctaClicks += 1;
+      changed = true;
+      break;
+    }
+    case "dashboard.cta.click": {
+      const workerStats = getOrCreateWorkerBehavior(event.metadata.workerId);
+      workerStats.interactions += 1;
+      workerStats.ctaClicks += 1;
+      changed = true;
+      break;
+    }
+    case "marketplace.category.select": {
+      if (!event.metadata.categorySlug) {
+        break;
+      }
+
+      categoryInteractionBySlug[event.metadata.categorySlug] =
+        (categoryInteractionBySlug[event.metadata.categorySlug] ?? 0) + 1;
+      changed = true;
+      break;
+    }
+    case "job.create.submit": {
+      const workerStats = workerBehaviorById[event.metadata.workerProfileId];
+      if (!workerStats || workerStats.interactions === 0) {
+        break;
+      }
+
+      workerStats.conversions += 1;
+      changed = true;
+      break;
+    }
+    default: {
+      break;
+    }
+  }
+
+  if (changed) {
+    notifyBehaviorAggregationChanged();
+  }
 }
 
 function summarizeEventInto(
@@ -324,6 +452,7 @@ function updateJobFlowSessionState(event: AnyTrackingEvent) {
 function applyEventToSessionState(event: AnyTrackingEvent) {
   summarizeEventInto(event, sessionFunnelSummary);
   updateJobFlowSessionState(event);
+  updateBehaviorAggregation(event);
 }
 
 function createTrackingEvent<Name extends TrackingEventName>(
@@ -433,6 +562,92 @@ function defaultTrackingTransport(events: AnyTrackingEvent[]): void {
   browserWindow.__tchunoTrackingBuffer__.push(...events);
 }
 
+function parseRating(rating: number | string): number {
+  const parsed = typeof rating === "number" ? rating : Number(rating);
+  if (!Number.isFinite(parsed)) {
+    return 0;
+  }
+
+  return Math.max(0, Math.min(5, parsed));
+}
+
+export function getWorkerRelevanceScore(input: {
+  workerId: string;
+  ratingAvg: number | string;
+  ratingCount: number;
+}): WorkerRelevanceScoreBreakdown {
+  const behavior = workerBehaviorById[input.workerId] ?? {
+    interactions: 0,
+    clicks: 0,
+    ctaClicks: 0,
+    conversions: 0,
+  };
+
+  const ratingValue = parseRating(input.ratingAvg);
+  const ratingCount = Math.max(0, input.ratingCount);
+  const ratingComponent =
+    ratingValue * RATING_VALUE_WEIGHT +
+    Math.min(20, ratingCount) * RATING_COUNT_WEIGHT;
+  const clickComponent = Math.min(20, behavior.clicks) * CLICK_WEIGHT;
+  const ctaComponent = Math.min(20, behavior.ctaClicks) * CTA_CLICK_WEIGHT;
+  const conversionComponent =
+    Math.min(10, behavior.conversions) * CONVERSION_WEIGHT;
+  const score =
+    ratingComponent + clickComponent + ctaComponent + conversionComponent;
+
+  const reasons: string[] = [];
+  if (behavior.conversions > 0) {
+    reasons.push(`${behavior.conversions} conversão(ões) na sessão`);
+  }
+  if (behavior.ctaClicks > 0) {
+    reasons.push(`${behavior.ctaClicks} clique(s) em CTA`);
+  }
+  if (behavior.clicks > 0) {
+    reasons.push(`${behavior.clicks} clique(s) em card`);
+  }
+  reasons.push(`rating ${ratingValue.toFixed(1)} (${ratingCount} avaliações)`);
+
+  return {
+    score: Number(score.toFixed(3)),
+    ratingComponent: Number(ratingComponent.toFixed(3)),
+    clickComponent: Number(clickComponent.toFixed(3)),
+    conversionComponent: Number(conversionComponent.toFixed(3)),
+    ctaComponent: Number(ctaComponent.toFixed(3)),
+    clicks: behavior.clicks,
+    conversions: behavior.conversions,
+    ctaClicks: behavior.ctaClicks,
+    reasons,
+  };
+}
+
+function getTopBehaviorWorkers(limit = 5) {
+  return Object.entries(workerBehaviorById)
+    .map(([workerId, stats]) => ({
+      workerId,
+      ...stats,
+      behaviorScore:
+        stats.clicks * CLICK_WEIGHT +
+        stats.ctaClicks * CTA_CLICK_WEIGHT +
+        stats.conversions * CONVERSION_WEIGHT,
+    }))
+    .sort((a, b) => b.behaviorScore - a.behaviorScore)
+    .slice(0, limit)
+    .map((item) => ({
+      ...item,
+      behaviorScore: Number(item.behaviorScore.toFixed(3)),
+    }));
+}
+
+function getTopCategoryInteractions(limit = 5) {
+  return Object.entries(categoryInteractionBySlug)
+    .sort((a, b) => b[1] - a[1])
+    .slice(0, limit)
+    .map(([categorySlug, interactions]) => ({
+      categorySlug,
+      interactions,
+    }));
+}
+
 function emitDebugLogs(events: AnyTrackingEvent[]): void {
   if (!isDebugModeEnabled()) {
     return;
@@ -446,6 +661,8 @@ function emitDebugLogs(events: AnyTrackingEvent[]): void {
   );
   console.info("funnel.batch", batchSummary);
   console.info("funnel.session", { ...sessionFunnelSummary });
+  console.info("behavior.topWorkers", getTopBehaviorWorkers());
+  console.info("behavior.topCategories", getTopCategoryInteractions());
   if (jobFlowSessionState.active) {
     console.info("funnel.jobFlow", { ...jobFlowSessionState });
   }
@@ -530,4 +747,32 @@ export function getTrackingSessionId(): string {
 
 export function getTrackingSessionSummary(): TrackingFunnelSummary {
   return { ...sessionFunnelSummary };
+}
+
+export function getBehaviorAggregationVersion(): number {
+  return behaviorAggregationVersion;
+}
+
+export function getBehaviorAggregationSnapshot(): BehaviorAggregationSnapshot {
+  const workersById = Object.entries(workerBehaviorById).reduce<
+    Record<string, WorkerBehaviorAggregate>
+  >((acc, [workerId, stats]) => {
+    acc[workerId] = { ...stats };
+    return acc;
+  }, {});
+
+  return {
+    version: behaviorAggregationVersion,
+    workersById,
+    categoriesBySlug: { ...categoryInteractionBySlug },
+  };
+}
+
+export function subscribeBehaviorAggregation(
+  listener: () => void,
+): () => void {
+  behaviorAggregationListeners.add(listener);
+  return () => {
+    behaviorAggregationListeners.delete(listener);
+  };
 }

@@ -51,7 +51,6 @@ export default function Home() {
     discoverySearch,
     discoveryCategory,
     marketCategories,
-    featuredWorkers,
     visibleCategories,
     visibleWorkers,
     trustSummary,
@@ -66,8 +65,8 @@ export default function Home() {
     [mode],
   );
   const workerRanking = useMemo(
-    () => buildWorkerRankingContext(featuredWorkers),
-    [featuredWorkers],
+    () => buildWorkerRankingContext(visibleWorkers),
+    [visibleWorkers],
   );
   const workerHeuristicSnapshot = useMemo(
     () =>
@@ -151,9 +150,10 @@ export default function Home() {
       workersWithPriceRank: workerHeuristicSnapshot.filter(
         (item) => typeof item.priceRank === "number",
       ).length,
+      topWorkers: workerRanking.topWorkersDebug,
     });
     lastRankingSignatureRef.current = rankingSignature;
-  }, [rankingSignature, workerHeuristicSnapshot]);
+  }, [rankingSignature, workerHeuristicSnapshot, workerRanking.topWorkersDebug]);
 
   useEffect(() => {
     if (highlightSignature.length === 0) {
@@ -538,7 +538,7 @@ export default function Home() {
                   </div>
                 </div>
               ) : (
-                visibleWorkers.map((worker, index) => {
+                visibleWorkers.map((worker) => {
                   const hasHourlyRate = typeof worker.hourlyRate === "number";
                   const ratingValue = Number(worker.ratingAvg || 0);
                   const ctaCopy = getWorkerCtaCopy({
@@ -583,7 +583,10 @@ export default function Home() {
                     <MarketplaceWorkerCard
                       key={worker.id}
                       title={`Profissional ${shortenId(worker.userId)}`}
-                      highlighted={index < 2 || relevance.highlighted}
+                      highlighted={
+                        (workerRanking.relevanceRankById[worker.id] ?? Number.MAX_SAFE_INTEGER) <=
+                          2 || relevance.highlighted
+                      }
                       relevanceLabel={relevance.label ?? undefined}
                       availabilityTone={worker.isAvailable ? "is-ok" : "is-muted"}
                       availabilityLabel={
@@ -647,7 +650,9 @@ export default function Home() {
                           source: "landing.worker_card",
                           view: "landing",
                           workerId: worker.id,
-                          highlighted: index < 2 || relevance.highlighted,
+                          highlighted:
+                            (workerRanking.relevanceRankById[worker.id] ??
+                              Number.MAX_SAFE_INTEGER) <= 2 || relevance.highlighted,
                           relevanceLabel: relevance.label ?? null,
                         })
                       }

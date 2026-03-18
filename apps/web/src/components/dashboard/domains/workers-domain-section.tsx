@@ -117,6 +117,26 @@ export function WorkersDomainSection({
     () => buildWorkerRankingContext(visibleWorkerProfiles),
     [visibleWorkerProfiles],
   );
+  const orderedWorkerProfiles = useMemo(() => {
+    const originalIndexById = visibleWorkerProfiles.reduce<Record<string, number>>(
+      (acc, profile, index) => {
+        acc[profile.id] = index;
+        return acc;
+      },
+      {},
+    );
+
+    return [...visibleWorkerProfiles].sort((a, b) => {
+      const scoreDiff =
+        (workerRanking.relevanceScoreById[b.id] ?? 0) -
+        (workerRanking.relevanceScoreById[a.id] ?? 0);
+      if (scoreDiff !== 0) {
+        return scoreDiff;
+      }
+
+      return (originalIndexById[a.id] ?? 0) - (originalIndexById[b.id] ?? 0);
+    });
+  }, [visibleWorkerProfiles, workerRanking.relevanceScoreById]);
   const workerHeuristicSnapshot = useMemo(
     () =>
       visibleWorkerProfiles.map((profile) => {
@@ -195,9 +215,10 @@ export function WorkersDomainSection({
       workersWithPriceRank: workerHeuristicSnapshot.filter(
         (item) => typeof item.priceRank === "number",
       ).length,
+      topWorkers: workerRanking.topWorkersDebug,
     });
     lastRankingSignatureRef.current = rankingSignature;
-  }, [rankingSignature, workerHeuristicSnapshot]);
+  }, [rankingSignature, workerHeuristicSnapshot, workerRanking.topWorkersDebug]);
 
   useEffect(() => {
     if (highlightSignature.length === 0) {
@@ -439,7 +460,7 @@ export function WorkersDomainSection({
           />
         ) : (
           <div className="panel-grid">
-            {visibleWorkerProfiles.map((profile) => {
+            {orderedWorkerProfiles.map((profile) => {
               const isMe = profile.userId === currentUserId;
               const profileCompleteness = getProfileCompleteness(profile);
               const reputation = getProfileReputation(
@@ -490,7 +511,11 @@ export function WorkersDomainSection({
                 <MarketplaceWorkerCard
                   key={profile.id}
                   title={isMe ? "O teu perfil" : `Worker ${shortenId(profile.userId)}`}
-                  highlighted={!isMe && relevance.highlighted}
+                  highlighted={
+                    !isMe &&
+                    ((workerRanking.relevanceRankById[profile.id] ??
+                      Number.MAX_SAFE_INTEGER) <= 3 || relevance.highlighted)
+                  }
                   relevanceLabel={isMe ? "Perfil próprio" : relevance.label ?? undefined}
                   availabilityTone={profile.isAvailable ? "is-ok" : "is-muted"}
                   availabilityLabel={
@@ -611,7 +636,9 @@ export function WorkersDomainSection({
                       view: "dashboard.workers",
                       workerId: profile.id,
                       isOwnProfile: isMe,
-                      highlighted: relevance.highlighted,
+                      highlighted:
+                        (workerRanking.relevanceRankById[profile.id] ??
+                          Number.MAX_SAFE_INTEGER) <= 3 || relevance.highlighted,
                       relevanceLabel: relevance.label ?? null,
                     })
                   }

@@ -1,4 +1,8 @@
 import type { StatusBadgeTone } from "@/components/dashboard/dashboard-formatters";
+import {
+  getWorkerRelevanceScore,
+  type WorkerRankingDebugItem,
+} from "@/lib/tracking";
 import type { WorkerProfile } from "@/lib/worker-profile";
 
 type WorkerCtaInput = {
@@ -48,6 +52,10 @@ export type WorkerComparisonItem = {
 export type WorkerRankingContext = {
   ratingRankById: Record<string, number>;
   priceRankById: Record<string, number>;
+  relevanceRankById: Record<string, number>;
+  relevanceScoreById: Record<string, number>;
+  rankingReasonById: Record<string, string>;
+  topWorkersDebug: WorkerRankingDebugItem[];
 };
 
 function normalizeRating(value: number | string): number {
@@ -57,7 +65,10 @@ function normalizeRating(value: number | string): number {
 
 export function buildWorkerRankingContext(
   workers: WorkerProfile[],
+  behaviorVersion?: number,
 ): WorkerRankingContext {
+  void behaviorVersion;
+
   const rated = [...workers]
     .filter((worker) => worker.ratingCount > 0)
     .sort((a, b) => {
@@ -83,9 +94,75 @@ export function buildWorkerRankingContext(
     return acc;
   }, {});
 
+  const relevanceRows = workers
+    .map((worker) => {
+      const relevance = getWorkerRelevanceScore({
+        workerId: worker.id,
+        ratingAvg: worker.ratingAvg,
+        ratingCount: worker.ratingCount,
+      });
+
+      return {
+        workerId: worker.id,
+        score: relevance.score,
+        reasons: relevance.reasons,
+        ratingValue: normalizeRating(worker.ratingAvg),
+        ratingCount: worker.ratingCount,
+      };
+    })
+    .sort((a, b) => {
+      const scoreDiff = b.score - a.score;
+      if (scoreDiff !== 0) {
+        return scoreDiff;
+      }
+
+      const ratingDiff = b.ratingValue - a.ratingValue;
+      if (ratingDiff !== 0) {
+        return ratingDiff;
+      }
+
+      return b.ratingCount - a.ratingCount;
+    });
+
+  const relevanceRankById = relevanceRows.reduce<Record<string, number>>(
+    (acc, row, index) => {
+      acc[row.workerId] = index + 1;
+      return acc;
+    },
+    {},
+  );
+
+  const relevanceScoreById = relevanceRows.reduce<Record<string, number>>(
+    (acc, row) => {
+      acc[row.workerId] = row.score;
+      return acc;
+    },
+    {},
+  );
+
+  const rankingReasonById = relevanceRows.reduce<Record<string, string>>(
+    (acc, row) => {
+      acc[row.workerId] = row.reasons[0] ?? "Ranking por equilíbrio de confiança";
+      return acc;
+    },
+    {},
+  );
+
+  const topWorkersDebug: WorkerRankingDebugItem[] = relevanceRows
+    .slice(0, 3)
+    .map((row) => ({
+      workerId: row.workerId,
+      score: row.score,
+      reasons: row.reasons,
+    }));
+
   return {
     ratingRankById,
     priceRankById,
+    relevanceRankById,
+    relevanceScoreById,
+    rankingReasonById,
+    topWorkersDebug,
   };
 }
 
