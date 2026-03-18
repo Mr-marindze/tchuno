@@ -22,6 +22,10 @@ import {
 } from "@/components/dashboard/dashboard-formatters";
 import { useMarketplaceDiscovery } from "@/components/marketplace/use-marketplace-discovery";
 import { MarketplaceWorkerCard } from "@/components/marketplace/marketplace-worker-card";
+import {
+  getWorkerCtaCopy,
+  getWorkerRelevance,
+} from "@/components/marketplace/marketplace-worker-presenter";
 import { ToastTone, useToast } from "@/components/toast-provider";
 import { humanizeUnknownError } from "@/lib/http-errors";
 
@@ -226,25 +230,42 @@ export default function Home() {
           </header>
 
           <div className="actions actions--inline marketplace-hero-actions">
-            {hasSession ? (
-              <Link href="/dashboard/jobs" className="primary">
-                Criar pedido agora
-              </Link>
-            ) : (
-              <button type="button" className="primary" onClick={() => focusAuth("login")}>
-                Entrar para contratar
-              </button>
-            )}
-
-            {hasSession ? (
-              <Link href="/dashboard/workers" className="primary primary--ghost">
-                Explorar profissionais
-              </Link>
-            ) : (
-              <button type="button" onClick={() => focusAuth("register")}>
-                Criar conta gratuita
-              </button>
-            )}
+            <div className="actions actions--inline marketplace-hero-actions-main">
+              {hasSession ? (
+                <Link href="/dashboard/jobs" className="primary">
+                  Criar pedido agora
+                </Link>
+              ) : (
+                <button
+                  type="button"
+                  className="primary"
+                  onClick={() => focusAuth("login")}
+                >
+                  Entrar para contratar
+                </button>
+              )}
+            </div>
+            <p className="marketplace-hero-secondary">
+              {hasSession ? (
+                <>
+                  Preferes explorar primeiro?{" "}
+                  <Link href="/dashboard/workers" className="nav-link">
+                    Ver catálogo de profissionais
+                  </Link>
+                </>
+              ) : (
+                <>
+                  Ainda sem conta?{" "}
+                  <button
+                    type="button"
+                    className="marketplace-inline-link"
+                    onClick={() => focusAuth("register")}
+                  >
+                    Criar conta gratuita
+                  </button>
+                </>
+              )}
+            </p>
           </div>
 
           <p className={`status status--${getStatusTone(discoveryMessage)}`}>
@@ -328,58 +349,85 @@ export default function Home() {
                   ou remove a categoria selecionada.
                 </p>
               ) : (
-                visibleWorkers.map((worker) => (
-                  <MarketplaceWorkerCard
-                    key={worker.id}
-                    title={`Profissional ${shortenId(worker.userId)}`}
-                    availabilityTone={worker.isAvailable ? "is-ok" : "is-muted"}
-                    availabilityLabel={worker.isAvailable ? "Disponível" : "Indisponível"}
-                    details={[
-                      {
-                        label: "Localização",
-                        value: worker.location ?? "Não indicada",
-                      },
-                      {
-                        label: "Reputação",
-                        value: `${formatStars(worker.ratingAvg)} ${formatRatingValue(
-                          worker.ratingAvg,
-                        )} (${worker.ratingCount} reviews)`,
-                      },
-                      {
-                        label: "Preço/hora",
-                        value: formatCurrencyMzn(worker.hourlyRate),
-                      },
-                      {
-                        label: "Categorias",
-                        value:
-                          worker.categories.length > 0
-                            ? worker.categories.map((item) => item.name).join(", ")
-                            : "Sem categorias",
-                      },
-                    ]}
-                    note={worker.bio ?? undefined}
-                    actions={
-                      <>
-                        {hasSession ? (
-                          <Link href="/dashboard/jobs#job-create" className="primary">
-                            Pedir serviço
+                visibleWorkers.map((worker, index) => {
+                  const hasHourlyRate = typeof worker.hourlyRate === "number";
+                  const ctaCopy = getWorkerCtaCopy({
+                    isAvailable: worker.isAvailable,
+                    hasHourlyRate,
+                  });
+                  const relevance = getWorkerRelevance({
+                    isAvailable: worker.isAvailable,
+                    ratingValue: Number(worker.ratingAvg || 0),
+                    ratingCount: worker.ratingCount,
+                  });
+                  const guestPrimaryLabel = ctaCopy.primaryLabel.startsWith("Contactar")
+                    ? "Entrar para contactar"
+                    : `Entrar para ${ctaCopy.primaryLabel.toLowerCase()}`;
+
+                  return (
+                    <MarketplaceWorkerCard
+                      key={worker.id}
+                      title={`Profissional ${shortenId(worker.userId)}`}
+                      highlighted={index < 2 || relevance.highlighted}
+                      relevanceLabel={relevance.label ?? undefined}
+                      availabilityTone={worker.isAvailable ? "is-ok" : "is-muted"}
+                      availabilityLabel={worker.isAvailable ? "Disponível" : "Indisponível"}
+                      rating={{
+                        stars: formatStars(worker.ratingAvg),
+                        value: formatRatingValue(worker.ratingAvg),
+                        reviewCount: worker.ratingCount,
+                      }}
+                      trustSignals={[
+                        {
+                          label: "Avaliações",
+                          value: worker.ratingCount,
+                        },
+                        {
+                          label: "Experiência",
+                          value: `${worker.experienceYears} anos`,
+                        },
+                      ]}
+                      details={[
+                        {
+                          label: "Localização",
+                          value: worker.location ?? "Não indicada",
+                        },
+                        {
+                          label: "Preço/hora",
+                          value: formatCurrencyMzn(worker.hourlyRate),
+                        },
+                        {
+                          label: "Categorias",
+                          value:
+                            worker.categories.length > 0
+                              ? worker.categories.map((item) => item.name).join(", ")
+                              : "Sem categorias",
+                        },
+                      ]}
+                      note={worker.bio ?? undefined}
+                      actions={
+                        <>
+                          {hasSession ? (
+                            <Link href="/dashboard/jobs#job-create" className="primary">
+                              {ctaCopy.primaryLabel}
+                            </Link>
+                          ) : (
+                            <button
+                              type="button"
+                              className="primary"
+                              onClick={() => focusAuth("login")}
+                            >
+                              {guestPrimaryLabel}
+                            </button>
+                          )}
+                          <Link href="/dashboard/workers" className="primary primary--ghost">
+                            Ver catálogo completo
                           </Link>
-                        ) : (
-                          <button
-                            type="button"
-                            className="primary"
-                            onClick={() => focusAuth("login")}
-                          >
-                            Entrar para pedir serviço
-                          </button>
-                        )}
-                        <Link href="/dashboard/workers" className="primary primary--ghost">
-                          Ver catálogo completo
-                        </Link>
-                      </>
-                    }
-                  />
-                ))
+                        </>
+                      }
+                    />
+                  );
+                })
               )}
             </div>
           </section>

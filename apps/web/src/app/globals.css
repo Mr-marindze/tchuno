@@ -63,6 +63,15 @@ body {
   gap: 1rem;
 }
 
+.marketplace-hero {
+  border: 1px solid rgba(125, 211, 252, 0.28);
+  border-radius: 16px;
+  padding: 0.95rem;
+  background:
+    radial-gradient(circle at 15% 20%, rgba(14, 116, 144, 0.32), transparent 42%),
+    rgba(15, 23, 42, 0.46);
+}
+
 .marketplace-auth {
   display: grid;
   gap: 0.8rem;
@@ -75,12 +84,42 @@ body {
 .marketplace-section {
   border: 1px solid rgba(125, 211, 252, 0.18);
   border-radius: 14px;
-  background: rgba(15, 23, 42, 0.42);
+  background:
+    linear-gradient(165deg, rgba(15, 23, 42, 0.58), rgba(15, 23, 42, 0.38));
   padding: 0.8rem;
 }
 
 .marketplace-hero-actions {
-  margin-top: 0.2rem;
+  margin-top: 0.45rem;
+  display: grid;
+  gap: 0.35rem;
+}
+
+.marketplace-hero-actions-main {
+  margin-top: 0;
+}
+
+.marketplace-hero-actions-main .primary {
+  font-size: 0.95rem;
+  padding-inline: 1rem;
+  box-shadow: 0 8px 24px rgba(8, 145, 178, 0.22);
+}
+
+.marketplace-hero-secondary {
+  margin: 0;
+  color: #bfdbfe;
+  font-size: 0.82rem;
+}
+
+.marketplace-inline-link {
+  border: none;
+  background: transparent;
+  color: #86efac;
+  font-weight: 700;
+  padding: 0;
+  cursor: pointer;
+  text-decoration: underline;
+  text-underline-offset: 0.15rem;
 }
 
 .marketplace-search-toolbar {
@@ -117,7 +156,74 @@ body {
 
 .marketplace-worker-card {
   display: grid;
-  gap: 0.3rem;
+  gap: 0.35rem;
+}
+
+.marketplace-worker-card.is-highlighted {
+  border-color: rgba(34, 197, 94, 0.52);
+  background:
+    linear-gradient(150deg, rgba(21, 128, 61, 0.24), rgba(15, 23, 42, 0.42)),
+    rgba(15, 23, 42, 0.38);
+}
+
+.marketplace-worker-card-head {
+  display: grid;
+  gap: 0.22rem;
+}
+
+.marketplace-worker-relevance {
+  margin: 0;
+  color: #bbf7d0;
+  font-size: 0.74rem;
+  font-weight: 700;
+  letter-spacing: 0.01em;
+}
+
+.marketplace-worker-rating {
+  display: grid;
+  gap: 0.15rem;
+}
+
+.marketplace-worker-rating-stars {
+  margin: 0;
+  font-size: 1rem;
+  line-height: 1;
+}
+
+.marketplace-worker-rating-value {
+  margin: 0;
+  display: flex;
+  align-items: baseline;
+  gap: 0.36rem;
+  font-size: 1.05rem;
+  font-weight: 700;
+  color: #ecfeff;
+}
+
+.marketplace-worker-rating-count {
+  font-size: 0.76rem;
+  font-weight: 500;
+  color: #bae6fd;
+}
+
+.marketplace-worker-trust-grid {
+  display: grid;
+  gap: 0.4rem;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+
+.marketplace-worker-trust-item {
+  border: 1px solid rgba(125, 211, 252, 0.18);
+  border-radius: 10px;
+  background: rgba(15, 23, 42, 0.42);
+  padding: 0.38rem 0.46rem;
+}
+
+.marketplace-worker-trust-value {
+  margin: 0.14rem 0 0;
+  color: #ecfeff;
+  font-size: 0.9rem;
+  font-weight: 700;
 }
 
 .marketplace-worker-actions {
@@ -886,6 +992,14 @@ pre {
 
   .marketplace-auth {
     order: -1;
+  }
+
+  .marketplace-hero {
+    padding: 0.78rem;
+  }
+
+  .marketplace-worker-trust-grid {
+    grid-template-columns: 1fr;
   }
 
   .dashboard-nav a {

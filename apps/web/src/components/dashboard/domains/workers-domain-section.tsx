@@ -18,6 +18,10 @@ import {
   DashboardSummaryCard,
 } from "@/components/dashboard/ui/dashboard-primitives";
 import { MarketplaceWorkerCard } from "@/components/marketplace/marketplace-worker-card";
+import {
+  getWorkerCtaCopy,
+  getWorkerRelevance,
+} from "@/components/marketplace/marketplace-worker-presenter";
 import { Category } from "@/lib/categories";
 import { PaginationMeta } from "@/lib/pagination";
 import { WorkerProfile } from "@/lib/worker-profile";
@@ -295,13 +299,41 @@ export function WorkersDomainSection({
                 profile.ratingAvg,
                 profile.ratingCount,
               );
+              const hasHourlyRate = typeof profile.hourlyRate === "number";
+              const ctaCopy = getWorkerCtaCopy({
+                isOwnProfile: isMe,
+                isAvailable: profile.isAvailable,
+                hasHourlyRate,
+              });
+              const relevance = getWorkerRelevance({
+                isAvailable: profile.isAvailable,
+                ratingValue: Number(profile.ratingAvg || 0),
+                ratingCount: profile.ratingCount,
+              });
 
               return (
                 <MarketplaceWorkerCard
                   key={profile.id}
                   title={isMe ? "O teu perfil" : `Worker ${shortenId(profile.userId)}`}
+                  highlighted={!isMe && relevance.highlighted}
+                  relevanceLabel={isMe ? "Perfil próprio" : relevance.label ?? undefined}
                   availabilityTone={profile.isAvailable ? "is-ok" : "is-muted"}
                   availabilityLabel={profile.isAvailable ? "Disponível" : "Indisponível"}
+                  rating={{
+                    stars: formatStars(profile.ratingAvg),
+                    value: formatRatingValue(profile.ratingAvg),
+                    reviewCount: profile.ratingCount,
+                  }}
+                  trustSignals={[
+                    {
+                      label: "Avaliações",
+                      value: profile.ratingCount,
+                    },
+                    {
+                      label: "Experiência",
+                      value: `${profile.experienceYears} anos`,
+                    },
+                  ]}
                   badges={
                     <>
                       <DashboardBadge
@@ -319,12 +351,6 @@ export function WorkersDomainSection({
                   }
                   details={[
                     {
-                      label: "Rating",
-                      value: `${formatStars(profile.ratingAvg)} ${formatRatingValue(
-                        profile.ratingAvg,
-                      )} (${profile.ratingCount})`,
-                    },
-                    {
                       label: "Tarifa",
                       value:
                         typeof profile.hourlyRate === "number"
@@ -336,12 +362,8 @@ export function WorkersDomainSection({
                       value: `${profile.experienceYears} anos`,
                     },
                     {
-                      label: "Cidade",
-                      value: profileCompleteness.location.city,
-                    },
-                    {
-                      label: "Bairro",
-                      value: profileCompleteness.location.neighborhood,
+                      label: "Localização",
+                      value: `${profileCompleteness.location.city}, ${profileCompleteness.location.neighborhood}`,
                     },
                     {
                       label: "Categorias",
@@ -359,14 +381,17 @@ export function WorkersDomainSection({
                   footer={`Atualizado: ${formatDate(profile.updatedAt)}`}
                   actions={
                     <>
-                      <Link href="/dashboard/jobs#job-create" className="primary">
-                        {isMe ? "Criar job de teste" : "Pedir serviço"}
+                      <Link
+                        href={isMe ? "/dashboard/profile" : "/dashboard/jobs#job-create"}
+                        className="primary"
+                      >
+                        {ctaCopy.primaryLabel}
                       </Link>
                       <Link
-                        href={isMe ? "/dashboard/profile" : "/dashboard/jobs"}
+                        href="/dashboard/jobs#job-create"
                         className="primary primary--ghost"
                       >
-                        {isMe ? "Gerir meu perfil" : "Ver fluxo de contratação"}
+                        {ctaCopy.secondaryLabel}
                       </Link>
                     </>
                   }
