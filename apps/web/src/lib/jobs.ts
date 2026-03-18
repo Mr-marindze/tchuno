@@ -1,5 +1,6 @@
 import { API_URL } from "@/lib/auth";
 import { readApiError } from "@/lib/http-errors";
+import { PaginatedResponse } from "@/lib/pagination";
 
 export type JobStatus =
   | "REQUESTED"
@@ -18,6 +19,7 @@ export type Job = {
   description: string;
   budget: number | null;
   quotedAmount: number | null;
+  quoteMessage: string | null;
   status: JobStatus;
   acceptedAt: string | null;
   startedAt: string | null;
@@ -42,8 +44,10 @@ export type CreateJobInput = {
 
 export type ListJobsQuery = {
   status?: JobStatus;
+  search?: string;
+  sort?: "createdAt:asc" | "createdAt:desc" | "budget:asc" | "budget:desc";
+  page?: number;
   limit?: number;
-  offset?: number;
 };
 
 function buildQueryString(query?: ListJobsQuery): string {
@@ -53,12 +57,20 @@ function buildQueryString(query?: ListJobsQuery): string {
     params.set("status", query.status);
   }
 
-  if (typeof query?.limit === "number") {
-    params.set("limit", String(query.limit));
+  if (query?.search) {
+    params.set("search", query.search);
   }
 
-  if (typeof query?.offset === "number") {
-    params.set("offset", String(query.offset));
+  if (query?.sort) {
+    params.set("sort", query.sort);
+  }
+
+  if (typeof query?.page === "number") {
+    params.set("page", String(query.page));
+  }
+
+  if (typeof query?.limit === "number") {
+    params.set("limit", String(query.limit));
   }
 
   return params.size > 0 ? `?${params.toString()}` : "";
@@ -87,7 +99,7 @@ export async function createJob(
 export async function listMyClientJobs(
   accessToken: string,
   query?: ListJobsQuery,
-): Promise<Job[]> {
+): Promise<PaginatedResponse<Job>> {
   const response = await fetch(
     `${API_URL}/jobs/me/client${buildQueryString(query)}`,
     {
@@ -101,13 +113,13 @@ export async function listMyClientJobs(
     throw new Error(await readApiError(response));
   }
 
-  return (await response.json()) as Job[];
+  return (await response.json()) as PaginatedResponse<Job>;
 }
 
 export async function listMyWorkerJobs(
   accessToken: string,
   query?: ListJobsQuery,
-): Promise<Job[]> {
+): Promise<PaginatedResponse<Job>> {
   const response = await fetch(
     `${API_URL}/jobs/me/worker${buildQueryString(query)}`,
     {
@@ -118,14 +130,48 @@ export async function listMyWorkerJobs(
   );
 
   if (response.status === 404) {
-    return [];
+    return {
+      data: [],
+      meta: {
+        total: 0,
+        page: query?.page ?? 1,
+        limit: query?.limit ?? 20,
+        hasNext: false,
+      },
+    };
   }
 
   if (!response.ok) {
     throw new Error(await readApiError(response));
   }
 
-  return (await response.json()) as Job[];
+  return (await response.json()) as PaginatedResponse<Job>;
+}
+
+export type ProposeJobQuoteInput = {
+  quotedAmount: number;
+  quoteMessage?: string;
+};
+
+export async function proposeJobQuote(
+  accessToken: string,
+  jobId: string,
+  input: ProposeJobQuoteInput,
+): Promise<Job> {
+  const response = await fetch(`${API_URL}/jobs/${jobId}/quote`, {
+    method: "PATCH",
+    headers: {
+      Authorization: `Bearer ${accessToken}`,
+      "Content-Type": "application/json",
+    },
+    body: JSON.stringify(input),
+  });
+
+  if (!response.ok) {
+    throw new Error(await readApiError(response));
+  }
+
+  return (await response.json()) as Job;
 }
 
 export async function updateJobStatus(

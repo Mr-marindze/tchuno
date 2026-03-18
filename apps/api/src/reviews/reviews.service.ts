@@ -6,9 +6,14 @@ import {
   NotFoundException,
 } from '@nestjs/common';
 import { Prisma } from '@prisma/client';
+import {
+  buildPaginatedResponse,
+  resolvePagination,
+} from '../common/pagination/pagination';
 import { MetricsService } from '../observability/metrics.service';
 import { PrismaService } from '../prisma/prisma.service';
 import { CreateReviewDto } from './dto/create-review.dto';
+import { ListReviewsQueryDto } from './dto/list-reviews-query.dto';
 
 @Injectable()
 export class ReviewsService {
@@ -110,18 +115,76 @@ export class ReviewsService {
     return review;
   }
 
-  async listByWorkerProfile(workerProfileId: string) {
-    return this.prisma.review.findMany({
-      where: { workerProfileId },
-      orderBy: [{ createdAt: 'desc' }],
+  async listByWorkerProfile(
+    workerProfileId: string,
+    query: ListReviewsQueryDto,
+  ) {
+    const { page, limit, skip } = resolvePagination(query);
+    const where = this.buildWhere({ workerProfileId }, query);
+    const sort = query.sort ?? 'createdAt:desc';
+
+    const [total, data] = await this.prisma.$transaction([
+      this.prisma.review.count({ where }),
+      this.prisma.review.findMany({
+        where,
+        orderBy: this.buildOrderBy(sort),
+        take: limit,
+        skip,
+      }),
+    ]);
+
+    return buildPaginatedResponse({
+      data,
+      total,
+      page,
+      limit,
     });
   }
 
-  async listMine(reviewerId: string) {
-    return this.prisma.review.findMany({
-      where: { reviewerId },
-      orderBy: [{ createdAt: 'desc' }],
+  async listMine(reviewerId: string, query: ListReviewsQueryDto) {
+    const { page, limit, skip } = resolvePagination(query);
+    const where = this.buildWhere({ reviewerId }, query);
+    const sort = query.sort ?? 'createdAt:desc';
+
+    const [total, data] = await this.prisma.$transaction([
+      this.prisma.review.count({ where }),
+      this.prisma.review.findMany({
+        where,
+        orderBy: this.buildOrderBy(sort),
+        take: limit,
+        skip,
+      }),
+    ]);
+
+    return buildPaginatedResponse({
+      data,
+      total,
+      page,
+      limit,
     });
+  }
+
+  private buildWhere(
+    baseWhere: Prisma.ReviewWhereInput,
+    query: ListReviewsQueryDto,
+  ): Prisma.ReviewWhereInput {
+    return {
+      ...baseWhere,
+      ...(query.rating !== undefined ? { rating: query.rating } : {}),
+    };
+  }
+
+  private buildOrderBy(sort: string): Prisma.ReviewOrderByWithRelationInput[] {
+    const [sortField, sortDirection] = sort.split(':') as [
+      'createdAt' | 'rating',
+      Prisma.SortOrder,
+    ];
+
+    if (sortField === 'rating') {
+      return [{ rating: sortDirection }, { createdAt: 'desc' }, { id: 'desc' }];
+    }
+
+    return [{ createdAt: sortDirection }, { id: 'desc' }];
   }
 
   private audit(event: string, context: Record<string, unknown>): void {

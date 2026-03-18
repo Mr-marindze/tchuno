@@ -1,5 +1,6 @@
 import { API_URL } from "@/lib/auth";
 import { readApiError } from "@/lib/http-errors";
+import { PaginatedResponse } from "@/lib/pagination";
 
 export type WorkerProfileCategoryItem = {
   id: string;
@@ -25,8 +26,16 @@ export type WorkerProfile = {
 export type ListWorkerProfilesQuery = {
   categorySlug?: string;
   isAvailable?: boolean;
+  search?: string;
+  sort?:
+    | "updatedAt:asc"
+    | "updatedAt:desc"
+    | "rating:asc"
+    | "rating:desc"
+    | "hourlyRate:asc"
+    | "hourlyRate:desc";
+  page?: number;
   limit?: number;
-  offset?: number;
 };
 
 export type UpsertWorkerProfileInput = {
@@ -40,7 +49,7 @@ export type UpsertWorkerProfileInput = {
 
 export async function listWorkerProfiles(
   query?: ListWorkerProfilesQuery,
-): Promise<WorkerProfile[]> {
+): Promise<PaginatedResponse<WorkerProfile>> {
   const params = new URLSearchParams();
 
   if (query?.categorySlug) {
@@ -51,12 +60,20 @@ export async function listWorkerProfiles(
     params.set("isAvailable", String(query.isAvailable));
   }
 
-  if (typeof query?.limit === "number") {
-    params.set("limit", String(query.limit));
+  if (query?.search) {
+    params.set("search", query.search);
   }
 
-  if (typeof query?.offset === "number") {
-    params.set("offset", String(query.offset));
+  if (query?.sort) {
+    params.set("sort", query.sort);
+  }
+
+  if (typeof query?.page === "number") {
+    params.set("page", String(query.page));
+  }
+
+  if (typeof query?.limit === "number") {
+    params.set("limit", String(query.limit));
   }
 
   const path = params.size > 0 ? `?${params.toString()}` : "";
@@ -66,7 +83,7 @@ export async function listWorkerProfiles(
     throw new Error(await readApiError(response));
   }
 
-  return (await response.json()) as WorkerProfile[];
+  return (await response.json()) as PaginatedResponse<WorkerProfile>;
 }
 
 export async function getMyWorkerProfile(

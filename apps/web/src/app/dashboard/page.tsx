@@ -2,7 +2,14 @@
 
 import Link from "next/link";
 import { useRouter } from "next/navigation";
-import { FormEvent, useCallback, useEffect, useMemo, useRef, useState } from "react";
+import {
+  FormEvent,
+  useCallback,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+} from "react";
 import {
   AuthResponse,
   clearTokens,
@@ -38,6 +45,7 @@ import {
   JobStatus,
   listMyClientJobs,
   listMyWorkerJobs,
+  proposeJobQuote,
   updateJobStatus,
 } from "@/lib/jobs";
 import {
@@ -48,6 +56,7 @@ import {
 } from "@/lib/reviews";
 import { ToastTone, useToast } from "@/components/toast-provider";
 import { humanizeUnknownError } from "@/lib/http-errors";
+import { PaginationMeta } from "@/lib/pagination";
 
 type DashboardState = {
   me: unknown;
@@ -64,16 +73,16 @@ const jobStatuses: JobStatus[] = [
 
 type StatusTone = "loading" | "success" | "error";
 
-function getWorkerAllowedTransitions(status: JobStatus): JobStatus[] {
-  if (status === "REQUESTED") {
+function getWorkerAllowedTransitions(job: Job): JobStatus[] {
+  if (job.status === "REQUESTED" && job.pricingMode === "FIXED_PRICE") {
     return ["ACCEPTED"];
   }
 
-  if (status === "ACCEPTED") {
+  if (job.status === "ACCEPTED") {
     return ["IN_PROGRESS"];
   }
 
-  if (status === "IN_PROGRESS") {
+  if (job.status === "IN_PROGRESS") {
     return ["COMPLETED"];
   }
 
@@ -228,40 +237,56 @@ function getJobFlowStepState(
   return "is-todo";
 }
 
-function getClientFlowHint(status: JobStatus): string {
-  if (status === "REQUESTED") {
+function getClientFlowHint(job: Job): string {
+  if (job.status === "REQUESTED" && job.pricingMode === "QUOTE_REQUEST") {
+    return job.quotedAmount
+      ? "Proposta recebida. Revê o valor e aceita para avançar o serviço."
+      : "Aguardar proposta do worker antes da aceitação.";
+  }
+
+  if (job.status === "REQUESTED") {
     return "Aguardar aceitação do worker ou cancelar se necessário.";
   }
 
-  if (status === "ACCEPTED") {
+  if (job.status === "ACCEPTED" && job.pricingMode === "QUOTE_REQUEST") {
+    return "Proposta aceita. Próximo passo é iniciar execução.";
+  }
+
+  if (job.status === "ACCEPTED") {
     return "Worker aceitou. Próximo passo é iniciar execução.";
   }
 
-  if (status === "IN_PROGRESS") {
+  if (job.status === "IN_PROGRESS") {
     return "Serviço em execução. Próximo passo é conclusão.";
   }
 
-  if (status === "COMPLETED") {
+  if (job.status === "COMPLETED") {
     return "Serviço concluído. Próximo passo é publicar review.";
   }
 
   return "Fluxo encerrado por cancelamento.";
 }
 
-function getWorkerFlowHint(status: JobStatus): string {
-  if (status === "REQUESTED") {
+function getWorkerFlowHint(job: Job): string {
+  if (job.status === "REQUESTED" && job.pricingMode === "QUOTE_REQUEST") {
+    return job.quotedAmount
+      ? "Proposta enviada. Aguarda aceitação do cliente."
+      : "Próximo passo: enviar proposta com valor para o cliente.";
+  }
+
+  if (job.status === "REQUESTED") {
     return "Próximo passo: aceitar job para iniciar o fluxo.";
   }
 
-  if (status === "ACCEPTED") {
+  if (job.status === "ACCEPTED") {
     return "Próximo passo: marcar como Em progresso quando começares.";
   }
 
-  if (status === "IN_PROGRESS") {
+  if (job.status === "IN_PROGRESS") {
     return "Próximo passo: marcar como Concluído ao terminar.";
   }
 
-  if (status === "COMPLETED") {
+  if (job.status === "COMPLETED") {
     return "Fluxo concluído. Aguardar review do cliente.";
   }
 
@@ -323,7 +348,8 @@ function getProfileReputation(
   ratingValue: number | string,
   ratingCount: number,
 ): ProfileReputation {
-  const avg = typeof ratingValue === "number" ? ratingValue : Number(ratingValue);
+  const avg =
+    typeof ratingValue === "number" ? ratingValue : Number(ratingValue);
 
   if (ratingCount >= 10 && avg >= 4.6) {
     return { label: "Top reputação", tone: "is-ok" };
@@ -396,8 +422,11 @@ export default function DashboardPage() {
   const currentDeviceId = useMemo(() => getOrCreateDeviceId(), []);
   const [state, setState] = useState<DashboardState | null>(null);
   const [sessions, setSessions] = useState<DeviceSession[]>([]);
-  const [sessionsMeta, setSessionsMeta] = useState<SessionListMeta | null>(null);
-  const [statusFilter, setStatusFilter] = useState<SessionListQuery["status"]>("active");
+  const [sessionsMeta, setSessionsMeta] = useState<SessionListMeta | null>(
+    null,
+  );
+  const [statusFilter, setStatusFilter] =
+    useState<SessionListQuery["status"]>("active");
   const [sort, setSort] = useState<SessionListQuery["sort"]>("lastUsedAt:desc");
   const [limit, setLimit] = useState(20);
   const [offset, setOffset] = useState(0);
@@ -418,7 +447,9 @@ export default function DashboardPage() {
   >("sortOrder:asc");
   const [categoryPage, setCategoryPage] = useState(1);
   const [categoryPageSize, setCategoryPageSize] = useState(10);
-  const [workerProfile, setWorkerProfile] = useState<WorkerProfile | null>(null);
+  const [workerProfile, setWorkerProfile] = useState<WorkerProfile | null>(
+    null,
+  );
   const [workerProfileStatus, setWorkerProfileStatus] = useState(
     "Perfil profissional não carregado.",
   );
@@ -430,6 +461,8 @@ export default function DashboardPage() {
   const [profileIsAvailable, setProfileIsAvailable] = useState(true);
   const [profileCategoryIds, setProfileCategoryIds] = useState<string[]>([]);
   const [workerProfiles, setWorkerProfiles] = useState<WorkerProfile[]>([]);
+  const [workerProfilesMeta, setWorkerProfilesMeta] =
+    useState<PaginationMeta | null>(null);
   const [workerProfilesStatus, setWorkerProfilesStatus] = useState(
     "Pronto para procurar profissionais.",
   );
@@ -439,34 +472,65 @@ export default function DashboardPage() {
     "all" | "true" | "false"
   >("all");
   const [workerLimit, setWorkerLimit] = useState(10);
-  const [workerOffset, setWorkerOffset] = useState(0);
+  const [workerPage, setWorkerPage] = useState(1);
   const [workerSortMode, setWorkerSortMode] = useState<
-    "updatedAt:desc" | "rating:desc" | "hourlyRate:asc" | "hourlyRate:desc"
+    | "updatedAt:asc"
+    | "updatedAt:desc"
+    | "rating:asc"
+    | "rating:desc"
+    | "hourlyRate:asc"
+    | "hourlyRate:desc"
   >("updatedAt:desc");
   const [workerSearch, setWorkerSearch] = useState("");
   const [jobsStatus, setJobsStatus] = useState("Pronto para gerir jobs.");
   const [jobsLoading, setJobsLoading] = useState(false);
   const [clientJobs, setClientJobs] = useState<Job[]>([]);
+  const [clientJobsMeta, setClientJobsMeta] = useState<PaginationMeta | null>(
+    null,
+  );
   const [workerJobs, setWorkerJobs] = useState<Job[]>([]);
-  const [jobStatusFilter, setJobStatusFilter] = useState<"ALL" | JobStatus>("ALL");
+  const [workerJobsMeta, setWorkerJobsMeta] = useState<PaginationMeta | null>(
+    null,
+  );
+  const [jobStatusFilter, setJobStatusFilter] = useState<"ALL" | JobStatus>(
+    "ALL",
+  );
   const [jobLimit, setJobLimit] = useState(10);
-  const [jobOffset, setJobOffset] = useState(0);
+  const [jobPage, setJobPage] = useState(1);
   const [jobWorkerOptions, setJobWorkerOptions] = useState<WorkerProfile[]>([]);
   const [jobWorkerProfileId, setJobWorkerProfileId] = useState("");
   const [jobCategoryId, setJobCategoryId] = useState("");
+  const [jobPricingMode, setJobPricingMode] = useState<
+    "FIXED_PRICE" | "QUOTE_REQUEST"
+  >("FIXED_PRICE");
   const [jobTitle, setJobTitle] = useState("");
   const [jobDescription, setJobDescription] = useState("");
   const [jobBudget, setJobBudget] = useState("");
   const [jobScheduledFor, setJobScheduledFor] = useState("");
   const [jobSearch, setJobSearch] = useState("");
   const [jobSortMode, setJobSortMode] = useState<
-    "createdAt:desc" | "budget:asc" | "budget:desc"
+    "createdAt:asc" | "createdAt:desc" | "budget:asc" | "budget:desc"
   >("createdAt:desc");
-  const [reviewsStatus, setReviewsStatus] = useState("Pronto para gerir reviews.");
+  const [jobQuoteDraftAmount, setJobQuoteDraftAmount] = useState<
+    Record<string, string>
+  >({});
+  const [jobQuoteDraftMessage, setJobQuoteDraftMessage] = useState<
+    Record<string, string>
+  >({});
+  const [reviewsStatus, setReviewsStatus] = useState(
+    "Pronto para gerir reviews.",
+  );
   const [reviewsLoading, setReviewsLoading] = useState(false);
   const [myReviews, setMyReviews] = useState<Review[]>([]);
+  const [myReviewsMeta, setMyReviewsMeta] = useState<PaginationMeta | null>(
+    null,
+  );
   const [workerReviews, setWorkerReviews] = useState<Review[]>([]);
-  const [reviewWorkerOptions, setReviewWorkerOptions] = useState<WorkerProfile[]>([]);
+  const [workerReviewsMeta, setWorkerReviewsMeta] =
+    useState<PaginationMeta | null>(null);
+  const [reviewWorkerOptions, setReviewWorkerOptions] = useState<
+    WorkerProfile[]
+  >([]);
   const [reviewWorkerProfileId, setReviewWorkerProfileId] = useState("");
   const [completedClientJobs, setCompletedClientJobs] = useState<Job[]>([]);
   const [reviewJobId, setReviewJobId] = useState("");
@@ -478,6 +542,8 @@ export default function DashboardPage() {
   const [reviewRatingFilter, setReviewRatingFilter] = useState<
     "all" | "5" | "4" | "3" | "2" | "1"
   >("all");
+  const [reviewPage, setReviewPage] = useState(1);
+  const [reviewLimit, setReviewLimit] = useState(10);
   const [loading, setLoading] = useState(true);
   const isAuthenticated = Boolean(state?.auth.accessToken);
   const isAdmin = state?.auth.user.role === "ADMIN";
@@ -486,7 +552,9 @@ export default function DashboardPage() {
     [categories],
   );
   const selectedJobWorkerProfile = useMemo(
-    () => jobWorkerOptions.find((profile) => profile.id === jobWorkerProfileId) ?? null,
+    () =>
+      jobWorkerOptions.find((profile) => profile.id === jobWorkerProfileId) ??
+      null,
     [jobWorkerOptions, jobWorkerProfileId],
   );
   const availableJobCategories = useMemo(() => {
@@ -552,7 +620,9 @@ export default function DashboardPage() {
     () =>
       Math.max(
         1,
-        Math.ceil(filteredSortedCategories.length / Math.max(1, categoryPageSize)),
+        Math.ceil(
+          filteredSortedCategories.length / Math.max(1, categoryPageSize),
+        ),
       ),
     [filteredSortedCategories.length, categoryPageSize],
   );
@@ -567,163 +637,18 @@ export default function DashboardPage() {
     categoryPageSize,
     filteredSortedCategories,
   ]);
-  const visibleWorkerProfiles = useMemo(() => {
-    const search = workerSearch.trim().toLowerCase();
-    const data = workerProfiles
-      .filter((profile) => {
-        if (!search) {
-          return true;
-        }
-
-        return (
-          profile.userId.toLowerCase().includes(search) ||
-          (profile.location ?? "").toLowerCase().includes(search) ||
-          profile.categories.some((item) =>
-            item.name.toLowerCase().includes(search),
-          )
-        );
-      })
-      .slice();
-
-    data.sort((a, b) => {
-      if (workerSortMode === "rating:desc") {
-        return Number(b.ratingAvg) - Number(a.ratingAvg);
-      }
-
-      if (workerSortMode === "hourlyRate:asc") {
-        const left = a.hourlyRate ?? Number.MAX_SAFE_INTEGER;
-        const right = b.hourlyRate ?? Number.MAX_SAFE_INTEGER;
-        return left - right;
-      }
-
-      if (workerSortMode === "hourlyRate:desc") {
-        const left = a.hourlyRate ?? -1;
-        const right = b.hourlyRate ?? -1;
-        return right - left;
-      }
-
-      return (
-        new Date(b.updatedAt).getTime() - new Date(a.updatedAt).getTime()
-      );
-    });
-
-    return data;
-  }, [workerProfiles, workerSearch, workerSortMode]);
-  const visibleClientJobs = useMemo(() => {
-    const search = jobSearch.trim().toLowerCase();
-    const data = clientJobs
-      .filter((job) => {
-        if (!search) {
-          return true;
-        }
-
-        return (
-          job.title.toLowerCase().includes(search) ||
-          job.description.toLowerCase().includes(search)
-        );
-      })
-      .slice();
-
-    data.sort((a, b) => {
-      if (jobSortMode === "budget:asc") {
-        return a.budget - b.budget;
-      }
-
-      if (jobSortMode === "budget:desc") {
-        return b.budget - a.budget;
-      }
-
-      return new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime();
-    });
-
-    return data;
-  }, [clientJobs, jobSearch, jobSortMode]);
-  const visibleWorkerJobs = useMemo(() => {
-    const search = jobSearch.trim().toLowerCase();
-    const data = workerJobs
-      .filter((job) => {
-        if (!search) {
-          return true;
-        }
-
-        return (
-          job.title.toLowerCase().includes(search) ||
-          job.description.toLowerCase().includes(search)
-        );
-      })
-      .slice();
-
-    data.sort((a, b) => {
-      if (jobSortMode === "budget:asc") {
-        return a.budget - b.budget;
-      }
-
-      if (jobSortMode === "budget:desc") {
-        return b.budget - a.budget;
-      }
-
-      return new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime();
-    });
-
-    return data;
-  }, [workerJobs, jobSearch, jobSortMode]);
-  const visibleMyReviews = useMemo(() => {
-    const data = myReviews
-      .filter((review) => {
-        if (reviewRatingFilter === "all") {
-          return true;
-        }
-
-        return review.rating === Number(reviewRatingFilter);
-      })
-      .slice();
-
-    data.sort((a, b) => {
-      if (reviewSortMode === "rating:asc") {
-        return a.rating - b.rating;
-      }
-
-      if (reviewSortMode === "rating:desc") {
-        return b.rating - a.rating;
-      }
-
-      return new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime();
-    });
-
-    return data;
-  }, [myReviews, reviewRatingFilter, reviewSortMode]);
-  const visibleWorkerReviews = useMemo(() => {
-    const data = workerReviews
-      .filter((review) => {
-        if (reviewRatingFilter === "all") {
-          return true;
-        }
-
-        return review.rating === Number(reviewRatingFilter);
-      })
-      .slice();
-
-    data.sort((a, b) => {
-      if (reviewSortMode === "rating:asc") {
-        return a.rating - b.rating;
-      }
-
-      if (reviewSortMode === "rating:desc") {
-        return b.rating - a.rating;
-      }
-
-      return new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime();
-    });
-
-    return data;
-  }, [reviewRatingFilter, reviewSortMode, workerReviews]);
+  const visibleWorkerProfiles = workerProfiles;
+  const visibleClientJobs = clientJobs;
+  const visibleWorkerJobs = workerJobs;
+  const visibleMyReviews = myReviews;
+  const visibleWorkerReviews = workerReviews;
   const activeSessionCount = useMemo(
     () => sessions.filter((session) => !session.revokedAt).length,
     [sessions],
   );
   const myCompletedJobsCount = useMemo(
-    () => clientJobs.filter((job) => job.status === "COMPLETED").length,
-    [clientJobs],
+    () => completedClientJobs.length,
+    [completedClientJobs],
   );
   const selectedWorkerReviewAverage = useMemo(() => {
     if (visibleWorkerReviews.length === 0) {
@@ -754,7 +679,11 @@ export default function DashboardPage() {
         help: "Escolhe um worker com categoria compatível com o pedido.",
       },
     ],
-    [activeCategories.length, availableJobCategories.length, jobWorkerOptions.length],
+    [
+      activeCategories.length,
+      availableJobCategories.length,
+      jobWorkerOptions.length,
+    ],
   );
   const myProfileCompleteness = useMemo(
     () => (workerProfile ? getProfileCompleteness(workerProfile) : null),
@@ -763,13 +692,15 @@ export default function DashboardPage() {
   const myProfileReputation = useMemo(
     () =>
       workerProfile
-        ? getProfileReputation(workerProfile.ratingAvg, workerProfile.ratingCount)
+        ? getProfileReputation(
+            workerProfile.ratingAvg,
+            workerProfile.ratingCount,
+          )
         : null,
     [workerProfile],
   );
   const myProfileLocation = useMemo(
-    () =>
-      workerProfile ? parseLocationParts(workerProfile.location) : null,
+    () => (workerProfile ? parseLocationParts(workerProfile.location) : null),
     [workerProfile],
   );
   const workerDiscoveryStats = useMemo(() => {
@@ -878,25 +809,30 @@ export default function DashboardPage() {
         workerAvailabilityFilter === "all"
           ? undefined
           : workerAvailabilityFilter === "true",
+      search: workerSearch.trim() || undefined,
+      sort: workerSortMode,
+      page: workerPage,
       limit: workerLimit,
-      offset: workerOffset,
     });
-    setWorkerProfiles(result);
+    setWorkerProfiles(result.data);
+    setWorkerProfilesMeta(result.meta);
     return result;
   }, [
     workerAvailabilityFilter,
     workerCategorySlugFilter,
+    workerPage,
     workerLimit,
-    workerOffset,
+    workerSearch,
+    workerSortMode,
   ]);
 
   const loadJobWorkerOptions = useCallback(async () => {
     const result = await listWorkerProfiles({
       isAvailable: true,
+      page: 1,
       limit: 100,
-      offset: 0,
     });
-    setJobWorkerOptions(result);
+    setJobWorkerOptions(result.data);
     return result;
   }, []);
 
@@ -904,8 +840,10 @@ export default function DashboardPage() {
     async (accessToken: string) => {
       const query = {
         status: jobStatusFilter === "ALL" ? undefined : jobStatusFilter,
+        search: jobSearch.trim() || undefined,
+        sort: jobSortMode,
+        page: jobPage,
         limit: jobLimit,
-        offset: jobOffset,
       };
 
       const [client, worker] = await Promise.all([
@@ -913,46 +851,72 @@ export default function DashboardPage() {
         listMyWorkerJobs(accessToken, query),
       ]);
 
-      setClientJobs(client);
-      setWorkerJobs(worker);
-      return { clientCount: client.length, workerCount: worker.length };
+      setClientJobs(client.data);
+      setClientJobsMeta(client.meta);
+      setWorkerJobs(worker.data);
+      setWorkerJobsMeta(worker.meta);
+      return { clientCount: client.meta.total, workerCount: worker.meta.total };
     },
-    [jobLimit, jobOffset, jobStatusFilter],
+    [jobLimit, jobPage, jobSearch, jobSortMode, jobStatusFilter],
   );
 
   const loadReviewWorkerOptions = useCallback(async () => {
     const result = await listWorkerProfiles({
+      page: 1,
       limit: 100,
-      offset: 0,
     });
-    setReviewWorkerOptions(result);
+    setReviewWorkerOptions(result.data);
     return result;
   }, []);
 
   const loadCompletedClientJobs = useCallback(async (accessToken: string) => {
     const result = await listMyClientJobs(accessToken, {
       status: "COMPLETED",
+      page: 1,
       limit: 100,
-      offset: 0,
     });
-    setCompletedClientJobs(result);
+    setCompletedClientJobs(result.data);
     return result;
   }, []);
 
   const loadReviewsData = useCallback(
     async (accessToken: string) => {
+      const reviewQuery = {
+        rating:
+          reviewRatingFilter === "all" ? undefined : Number(reviewRatingFilter),
+        sort: reviewSortMode,
+        page: reviewPage,
+        limit: reviewLimit,
+      };
+
       const [mine, worker] = await Promise.all([
-        listMyReviews(accessToken),
+        listMyReviews(accessToken, reviewQuery),
         reviewWorkerProfileId
-          ? listWorkerReviews(reviewWorkerProfileId)
-          : Promise.resolve([] as Review[]),
+          ? listWorkerReviews(reviewWorkerProfileId, reviewQuery)
+          : Promise.resolve({
+              data: [] as Review[],
+              meta: {
+                total: 0,
+                page: reviewPage,
+                limit: reviewLimit,
+                hasNext: false,
+              },
+            }),
       ]);
 
-      setMyReviews(mine);
-      setWorkerReviews(worker);
-      return { myCount: mine.length, workerCount: worker.length };
+      setMyReviews(mine.data);
+      setMyReviewsMeta(mine.meta);
+      setWorkerReviews(worker.data);
+      setWorkerReviewsMeta(worker.meta);
+      return { myCount: mine.meta.total, workerCount: worker.meta.total };
     },
-    [reviewWorkerProfileId],
+    [
+      reviewLimit,
+      reviewPage,
+      reviewRatingFilter,
+      reviewSortMode,
+      reviewWorkerProfileId,
+    ],
   );
 
   useEffect(() => {
@@ -1045,7 +1009,10 @@ export default function DashboardPage() {
       })
       .catch((error) => {
         setWorkerProfileStatus(
-          humanizeUnknownError(error, "Falha ao carregar o teu perfil profissional."),
+          humanizeUnknownError(
+            error,
+            "Falha ao carregar o teu perfil profissional.",
+          ),
         );
       })
       .finally(() => {
@@ -1062,8 +1029,8 @@ export default function DashboardPage() {
     loadWorkerProfilesData()
       .then((profiles) => {
         setWorkerProfilesStatus(
-          profiles.length > 0
-            ? "Profissionais carregados."
+          profiles.meta.total > 0
+            ? `Profissionais carregados. Total: ${profiles.meta.total}.`
             : "Nenhum profissional encontrado para os filtros atuais.",
         );
       })
@@ -1155,6 +1122,24 @@ export default function DashboardPage() {
   }, [categorySearch, categorySortMode, categoryPageSize]);
 
   useEffect(() => {
+    setWorkerPage(1);
+  }, [
+    workerAvailabilityFilter,
+    workerCategorySlugFilter,
+    workerLimit,
+    workerSearch,
+    workerSortMode,
+  ]);
+
+  useEffect(() => {
+    setJobPage(1);
+  }, [jobLimit, jobSearch, jobSortMode, jobStatusFilter]);
+
+  useEffect(() => {
+    setReviewPage(1);
+  }, [reviewLimit, reviewRatingFilter, reviewSortMode, reviewWorkerProfileId]);
+
+  useEffect(() => {
     if (!state?.auth.accessToken) {
       return;
     }
@@ -1167,7 +1152,9 @@ export default function DashboardPage() {
         );
       })
       .catch((error) => {
-        setReviewsStatus(humanizeUnknownError(error, "Falha ao carregar reviews."));
+        setReviewsStatus(
+          humanizeUnknownError(error, "Falha ao carregar reviews."),
+        );
       })
       .finally(() => {
         setReviewsLoading(false);
@@ -1181,7 +1168,10 @@ export default function DashboardPage() {
 
     loadCompletedClientJobs(state.auth.accessToken).catch((error) => {
       setReviewsStatus(
-        humanizeUnknownError(error, "Falha ao carregar jobs completos para review."),
+        humanizeUnknownError(
+          error,
+          "Falha ao carregar jobs completos para review.",
+        ),
       );
     });
   }, [state?.auth.accessToken, loadCompletedClientJobs]);
@@ -1193,7 +1183,10 @@ export default function DashboardPage() {
 
     loadReviewWorkerOptions().catch((error) => {
       setReviewsStatus(
-        humanizeUnknownError(error, "Falha ao carregar opções de worker para reviews."),
+        humanizeUnknownError(
+          error,
+          "Falha ao carregar opções de worker para reviews.",
+        ),
       );
     });
   }, [isAuthenticated, loadReviewWorkerOptions]);
@@ -1381,7 +1374,8 @@ export default function DashboardPage() {
       return;
     }
 
-    const accessToken = state?.auth.accessToken ?? getStoredTokens().accessToken;
+    const accessToken =
+      state?.auth.accessToken ?? getStoredTokens().accessToken;
     if (!accessToken) {
       setCategoryStatus("Access token ausente.");
       return;
@@ -1407,7 +1401,9 @@ export default function DashboardPage() {
     }
 
     if (normalizedDescription.length > 280) {
-      setCategoryStatus("Descrição da categoria deve ter no máximo 280 caracteres.");
+      setCategoryStatus(
+        "Descrição da categoria deve ter no máximo 280 caracteres.",
+      );
       return;
     }
 
@@ -1417,7 +1413,9 @@ export default function DashboardPage() {
       parsedSortOrder < 0 ||
       parsedSortOrder > 10_000
     ) {
-      setCategoryStatus("Ordem da categoria deve ser um inteiro entre 0 e 10000.");
+      setCategoryStatus(
+        "Ordem da categoria deve ser um inteiro entre 0 e 10000.",
+      );
       return;
     }
 
@@ -1439,7 +1437,9 @@ export default function DashboardPage() {
       await loadCategories();
       setCategoryStatus("Categoria criada com sucesso.");
     } catch (error) {
-      setCategoryStatus(humanizeUnknownError(error, "Falha ao criar categoria."));
+      setCategoryStatus(
+        humanizeUnknownError(error, "Falha ao criar categoria."),
+      );
     } finally {
       setCategoriesLoading(false);
     }
@@ -1451,7 +1451,8 @@ export default function DashboardPage() {
       return;
     }
 
-    const accessToken = state?.auth.accessToken ?? getStoredTokens().accessToken;
+    const accessToken =
+      state?.auth.accessToken ?? getStoredTokens().accessToken;
     if (!accessToken) {
       setCategoryStatus("Access token ausente.");
       return;
@@ -1476,7 +1477,9 @@ export default function DashboardPage() {
   function toggleProfileCategory(categoryId: string, checked: boolean) {
     setProfileCategoryIds((current) => {
       if (checked) {
-        return current.includes(categoryId) ? current : [...current, categoryId];
+        return current.includes(categoryId)
+          ? current
+          : [...current, categoryId];
       }
 
       return current.filter((id) => id !== categoryId);
@@ -1484,7 +1487,8 @@ export default function DashboardPage() {
   }
 
   async function handleReloadMyWorkerProfile() {
-    const accessToken = state?.auth.accessToken ?? getStoredTokens().accessToken;
+    const accessToken =
+      state?.auth.accessToken ?? getStoredTokens().accessToken;
     if (!accessToken) {
       setWorkerProfileStatus("Access token ausente.");
       return;
@@ -1496,11 +1500,16 @@ export default function DashboardPage() {
     try {
       const profile = await loadMyWorkerProfileData(accessToken);
       setWorkerProfileStatus(
-        profile ? "Perfil profissional recarregado." : "Ainda não tens perfil profissional.",
+        profile
+          ? "Perfil profissional recarregado."
+          : "Ainda não tens perfil profissional.",
       );
     } catch (error) {
       setWorkerProfileStatus(
-        humanizeUnknownError(error, "Falha ao carregar o teu perfil profissional."),
+        humanizeUnknownError(
+          error,
+          "Falha ao carregar o teu perfil profissional.",
+        ),
       );
     } finally {
       setWorkerProfileLoading(false);
@@ -1510,7 +1519,8 @@ export default function DashboardPage() {
   async function handleSaveWorkerProfile(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
 
-    const accessToken = state?.auth.accessToken ?? getStoredTokens().accessToken;
+    const accessToken =
+      state?.auth.accessToken ?? getStoredTokens().accessToken;
     if (!accessToken) {
       setWorkerProfileStatus("Access token ausente.");
       return;
@@ -1563,7 +1573,9 @@ export default function DashboardPage() {
       return;
     }
 
-    const activeCategoryIdSet = new Set(activeCategories.map((item) => item.id));
+    const activeCategoryIdSet = new Set(
+      activeCategories.map((item) => item.id),
+    );
     const validCategoryIds = profileCategoryIds.filter((id) =>
       activeCategoryIdSet.has(id),
     );
@@ -1606,8 +1618,8 @@ export default function DashboardPage() {
     try {
       const profiles = await loadWorkerProfilesData();
       setWorkerProfilesStatus(
-        profiles.length > 0
-          ? "Profissionais recarregados."
+        profiles.meta.total > 0
+          ? `Profissionais recarregados. Total: ${profiles.meta.total}.`
           : "Nenhum profissional encontrado para os filtros atuais.",
       );
     } catch (error) {
@@ -1620,7 +1632,8 @@ export default function DashboardPage() {
   }
 
   async function handleReloadJobs() {
-    const accessToken = state?.auth.accessToken ?? getStoredTokens().accessToken;
+    const accessToken =
+      state?.auth.accessToken ?? getStoredTokens().accessToken;
     if (!accessToken) {
       setJobsStatus("Access token ausente.");
       return;
@@ -1644,7 +1657,8 @@ export default function DashboardPage() {
   async function handleCreateJob(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
 
-    const accessToken = state?.auth.accessToken ?? getStoredTokens().accessToken;
+    const accessToken =
+      state?.auth.accessToken ?? getStoredTokens().accessToken;
     if (!accessToken) {
       setJobsStatus("Access token ausente.");
       return;
@@ -1667,7 +1681,10 @@ export default function DashboardPage() {
       return;
     }
 
-    if (normalizedDescription.length < 10 || normalizedDescription.length > 2000) {
+    if (
+      normalizedDescription.length < 10 ||
+      normalizedDescription.length > 2000
+    ) {
       setJobsStatus("Descrição do job deve ter entre 10 e 2000 caracteres.");
       return;
     }
@@ -1682,10 +1699,35 @@ export default function DashboardPage() {
       return;
     }
 
-    const parsedBudget = Number(jobBudget.trim());
-    if (!Number.isInteger(parsedBudget) || parsedBudget < 0 || parsedBudget > 100_000_000) {
-      setJobsStatus("Orçamento deve ser um inteiro entre 0 e 100000000.");
-      return;
+    const normalizedBudget = jobBudget.trim();
+    let parsedBudget: number | undefined;
+    if (jobPricingMode === "FIXED_PRICE") {
+      if (normalizedBudget.length === 0) {
+        setJobsStatus("Orçamento é obrigatório para jobs de preço fixo.");
+        return;
+      }
+
+      parsedBudget = Number(normalizedBudget);
+      if (
+        !Number.isInteger(parsedBudget) ||
+        parsedBudget <= 0 ||
+        parsedBudget > 100_000_000
+      ) {
+        setJobsStatus("Orçamento deve ser um inteiro entre 1 e 100000000.");
+        return;
+      }
+    } else if (normalizedBudget.length > 0) {
+      parsedBudget = Number(normalizedBudget);
+      if (
+        !Number.isInteger(parsedBudget) ||
+        parsedBudget < 0 ||
+        parsedBudget > 100_000_000
+      ) {
+        setJobsStatus(
+          "No modo de cotação, orçamento opcional deve ser inteiro entre 0 e 100000000.",
+        );
+        return;
+      }
     }
 
     let scheduledForIso: string | undefined;
@@ -1711,6 +1753,7 @@ export default function DashboardPage() {
         categoryId: jobCategoryId,
         title: normalizedTitle,
         description: normalizedDescription,
+        pricingMode: jobPricingMode,
         budget: parsedBudget,
         scheduledFor: scheduledForIso,
       });
@@ -1736,18 +1779,25 @@ export default function DashboardPage() {
     jobId: string,
     nextStatus: JobStatus,
     roleLabel: "client" | "worker",
+    options?: {
+      quotedAmount?: number;
+      cancelReason?: string;
+    },
   ) {
-    const accessToken = state?.auth.accessToken ?? getStoredTokens().accessToken;
+    const accessToken =
+      state?.auth.accessToken ?? getStoredTokens().accessToken;
     if (!accessToken) {
       setJobsStatus("Access token ausente.");
       return;
     }
 
     setJobsLoading(true);
-    setJobsStatus(`A atualizar job (${roleLabel}) para ${formatJobStatus(nextStatus)}...`);
+    setJobsStatus(
+      `A atualizar job (${roleLabel}) para ${formatJobStatus(nextStatus)}...`,
+    );
 
     try {
-      await updateJobStatus(accessToken, jobId, nextStatus);
+      await updateJobStatus(accessToken, jobId, nextStatus, options);
       const { clientCount, workerCount } = await loadJobsData(accessToken);
       await loadCompletedClientJobs(accessToken);
       setJobsStatus(
@@ -1762,8 +1812,56 @@ export default function DashboardPage() {
     }
   }
 
+  async function handleProposeQuote(jobId: string) {
+    const accessToken =
+      state?.auth.accessToken ?? getStoredTokens().accessToken;
+    if (!accessToken) {
+      setJobsStatus("Access token ausente.");
+      return;
+    }
+
+    const amountRaw = (jobQuoteDraftAmount[jobId] ?? "").trim();
+    const parsedAmount = Number(amountRaw);
+    if (
+      amountRaw.length === 0 ||
+      !Number.isInteger(parsedAmount) ||
+      parsedAmount <= 0 ||
+      parsedAmount > 100_000_000
+    ) {
+      setJobsStatus("Proposta deve ser um inteiro entre 1 e 100000000.");
+      return;
+    }
+
+    const message = (jobQuoteDraftMessage[jobId] ?? "").trim();
+    if (message.length > 280) {
+      setJobsStatus("Mensagem da proposta deve ter no máximo 280 caracteres.");
+      return;
+    }
+
+    setJobsLoading(true);
+    setJobsStatus("A enviar proposta...");
+
+    try {
+      await proposeJobQuote(accessToken, jobId, {
+        quotedAmount: parsedAmount,
+        quoteMessage: message || undefined,
+      });
+      const { clientCount, workerCount } = await loadJobsData(accessToken);
+      setJobsStatus(
+        `Proposta enviada com sucesso. Cliente: ${clientCount} | Worker: ${workerCount}.`,
+      );
+    } catch (error) {
+      setJobsStatus(
+        humanizeUnknownError(error, "Falha ao enviar proposta de cotação."),
+      );
+    } finally {
+      setJobsLoading(false);
+    }
+  }
+
   async function handleReloadReviews() {
-    const accessToken = state?.auth.accessToken ?? getStoredTokens().accessToken;
+    const accessToken =
+      state?.auth.accessToken ?? getStoredTokens().accessToken;
     if (!accessToken) {
       setReviewsStatus("Access token ausente.");
       return;
@@ -1778,7 +1876,7 @@ export default function DashboardPage() {
         loadCompletedClientJobs(accessToken),
       ]);
       setReviewsStatus(
-        `Reviews recarregadas. Minhas: ${myCount} | Worker selecionado: ${workerCount} | Jobs completos: ${reviewJobs.length}.`,
+        `Reviews recarregadas. Minhas: ${myCount} | Worker selecionado: ${workerCount} | Jobs completos: ${reviewJobs.meta.total}.`,
       );
     } catch (error) {
       setReviewsStatus(
@@ -1792,7 +1890,8 @@ export default function DashboardPage() {
   async function handleCreateReview(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
 
-    const accessToken = state?.auth.accessToken ?? getStoredTokens().accessToken;
+    const accessToken =
+      state?.auth.accessToken ?? getStoredTokens().accessToken;
     if (!accessToken) {
       setReviewsStatus("Access token ausente.");
       return;
@@ -1803,14 +1902,22 @@ export default function DashboardPage() {
       return;
     }
 
-    const canReviewSelectedJob = reviewableJobs.some((job) => job.id === reviewJobId);
+    const canReviewSelectedJob = reviewableJobs.some(
+      (job) => job.id === reviewJobId,
+    );
     if (!canReviewSelectedJob) {
-      setReviewsStatus("Este job já foi avaliado ou não está elegível para review.");
+      setReviewsStatus(
+        "Este job já foi avaliado ou não está elegível para review.",
+      );
       return;
     }
 
     const parsedRating = Number(reviewRating);
-    if (!Number.isInteger(parsedRating) || parsedRating < 1 || parsedRating > 5) {
+    if (
+      !Number.isInteger(parsedRating) ||
+      parsedRating < 1 ||
+      parsedRating > 5
+    ) {
       setReviewsStatus("Rating deve ser um inteiro entre 1 e 5.");
       return;
     }
@@ -1842,7 +1949,7 @@ export default function DashboardPage() {
       ]);
 
       setReviewsStatus(
-        `Review criada com sucesso. Minhas: ${myCount} | Worker selecionado: ${workerCount} | Jobs restantes para review: ${reviewJobs.length}.`,
+        `Review criada com sucesso. Minhas: ${myCount} | Worker selecionado: ${workerCount} | Jobs completos: ${reviewJobs.meta.total}.`,
       );
     } catch (error) {
       setReviewsStatus(humanizeUnknownError(error, "Falha ao criar review."));
@@ -1938,7 +2045,8 @@ export default function DashboardPage() {
               <p className="metric-label">Reviews pendentes</p>
               <p className="metric-value">{reviewableJobs.length}</p>
               <p className="metric-note">
-                Fecha o ciclo com feedback para melhorar confiança da plataforma.
+                Fecha o ciclo com feedback para melhorar confiança da
+                plataforma.
               </p>
             </article>
           </div>
@@ -1956,7 +2064,9 @@ export default function DashboardPage() {
           </button>
         </div>
 
-        <p className={`status status--${getStatusTone(status)}`}>Status: {status}</p>
+        <p className={`status status--${getStatusTone(status)}`}>
+          Status: {status}
+        </p>
 
         <details className="debug-panel">
           <summary>Debug de sessão</summary>
@@ -1988,7 +2098,9 @@ export default function DashboardPage() {
                 value={statusFilter}
                 onChange={(event) => {
                   setOffset(0);
-                  setStatusFilter(event.target.value as SessionListQuery["status"]);
+                  setStatusFilter(
+                    event.target.value as SessionListQuery["status"],
+                  );
                 }}
               >
                 <option value="active">Ativas</option>
@@ -2032,7 +2144,9 @@ export default function DashboardPage() {
           <div className="meta-row">
             <button
               type="button"
-              onClick={() => setOffset((current) => Math.max(0, current - limit))}
+              onClick={() =>
+                setOffset((current) => Math.max(0, current - limit))
+              }
               disabled={!sessionsMeta?.hasPrev}
             >
               Página anterior
@@ -2047,14 +2161,17 @@ export default function DashboardPage() {
             <p className="status">
               Página: {sessionsMeta?.page ?? 1}/{sessionsMeta?.pageCount ?? 1}
             </p>
-            <p className="status">Total: {sessionsMeta?.total ?? sessions.length}</p>
+            <p className="status">
+              Total: {sessionsMeta?.total ?? sessions.length}
+            </p>
           </div>
 
           <div className="result">
             {sessions.length === 0 ? (
               <p className="empty-state">
-                Ainda não há sessões neste filtro. Usa <strong>Todas</strong> para
-                validar histórico e garantir que só tens dispositivos confiáveis.
+                Ainda não há sessões neste filtro. Usa <strong>Todas</strong>{" "}
+                para validar histórico e garantir que só tens dispositivos
+                confiáveis.
               </p>
             ) : (
               sessions.map((session) => {
@@ -2064,7 +2181,9 @@ export default function DashboardPage() {
                   <article key={session.id} className="list-item session-item">
                     <p className="item-title">
                       {isCurrentDevice ? "Dispositivo atual" : "Dispositivo"}
-                      <span className={`status-pill ${isRevoked ? "is-danger" : "is-ok"}`}>
+                      <span
+                        className={`status-pill ${isRevoked ? "is-danger" : "is-ok"}`}
+                      >
                         {isRevoked ? "Revogada" : "Ativa"}
                       </span>
                     </p>
@@ -2078,7 +2197,8 @@ export default function DashboardPage() {
                       <strong>Criada:</strong> {formatDate(session.createdAt)}
                     </p>
                     <p>
-                      <strong>Último uso:</strong> {formatDate(session.lastUsedAt)}
+                      <strong>Último uso:</strong>{" "}
+                      {formatDate(session.lastUsedAt)}
                     </p>
                     <button
                       type="button"
@@ -2104,7 +2224,9 @@ export default function DashboardPage() {
             {categoryStatus}
           </p>
           {!isAdmin ? (
-            <p className="status">Modo leitura: gestão de categorias é admin only.</p>
+            <p className="status">
+              Modo leitura: gestão de categorias é admin only.
+            </p>
           ) : null}
 
           <div className="section-toolbar">
@@ -2149,7 +2271,9 @@ export default function DashboardPage() {
               Itens/página
               <select
                 value={String(categoryPageSize)}
-                onChange={(event) => setCategoryPageSize(Number(event.target.value))}
+                onChange={(event) =>
+                  setCategoryPageSize(Number(event.target.value))
+                }
               >
                 <option value="5">5</option>
                 <option value="10">10</option>
@@ -2168,7 +2292,9 @@ export default function DashboardPage() {
           <div className="meta-row">
             <button
               type="button"
-              onClick={() => setCategoryPage((current) => Math.max(1, current - 1))}
+              onClick={() =>
+                setCategoryPage((current) => Math.max(1, current - 1))
+              }
               disabled={categoryPage <= 1 || categoriesLoading}
             >
               Página anterior
@@ -2176,7 +2302,9 @@ export default function DashboardPage() {
             <button
               type="button"
               onClick={() =>
-                setCategoryPage((current) => Math.min(categoryPageCount, current + 1))
+                setCategoryPage((current) =>
+                  Math.min(categoryPageCount, current + 1),
+                )
               }
               disabled={categoryPage >= categoryPageCount || categoriesLoading}
             >
@@ -2186,7 +2314,8 @@ export default function DashboardPage() {
               Página: {categoryPage}/{categoryPageCount}
             </p>
             <p className="status">
-              Visíveis: {visibleCategories.length}/{filteredSortedCategories.length}
+              Visíveis: {visibleCategories.length}/
+              {filteredSortedCategories.length}
             </p>
           </div>
 
@@ -2258,7 +2387,9 @@ export default function DashboardPage() {
                 <article key={category.id} className="list-item">
                   <p className="item-title">
                     {category.name}
-                    <span className={`status-pill ${category.isActive ? "is-ok" : "is-muted"}`}>
+                    <span
+                      className={`status-pill ${category.isActive ? "is-ok" : "is-muted"}`}
+                    >
                       {category.isActive ? "Ativa" : "Inativa"}
                     </span>
                   </p>
@@ -2270,12 +2401,15 @@ export default function DashboardPage() {
                     <strong>Ordem:</strong> {category.sortOrder}
                   </p>
                   <p>
-                    <strong>Atualizada:</strong> {formatDate(category.updatedAt)}
+                    <strong>Atualizada:</strong>{" "}
+                    {formatDate(category.updatedAt)}
                   </p>
                   <button
                     type="button"
                     onClick={() => handleDeactivateCategory(category.id)}
-                    disabled={categoriesLoading || !category.isActive || !isAdmin}
+                    disabled={
+                      categoriesLoading || !category.isActive || !isAdmin
+                    }
                   >
                     {category.isActive ? "Desativar categoria" : "Inativa"}
                   </button>
@@ -2307,7 +2441,9 @@ export default function DashboardPage() {
               <input
                 type="checkbox"
                 checked={profileIsAvailable}
-                onChange={(event) => setProfileIsAvailable(event.target.checked)}
+                onChange={(event) =>
+                  setProfileIsAvailable(event.target.checked)
+                }
               />
               Disponível para trabalhos
             </label>
@@ -2387,7 +2523,9 @@ export default function DashboardPage() {
               <input
                 type="number"
                 value={profileExperienceYears}
-                onChange={(event) => setProfileExperienceYears(event.target.value)}
+                onChange={(event) =>
+                  setProfileExperienceYears(event.target.value)
+                }
                 min={0}
                 max={80}
                 step={1}
@@ -2410,7 +2548,10 @@ export default function DashboardPage() {
                         type="checkbox"
                         checked={profileCategoryIds.includes(category.id)}
                         onChange={(event) =>
-                          toggleProfileCategory(category.id, event.target.checked)
+                          toggleProfileCategory(
+                            category.id,
+                            event.target.checked,
+                          )
                         }
                       />
                       {category.name} ({category.slug})
@@ -2420,8 +2561,14 @@ export default function DashboardPage() {
               )}
             </div>
 
-            <button type="submit" className="primary" disabled={workerProfileLoading}>
-              {workerProfileLoading ? "Aguarda..." : "Guardar perfil profissional"}
+            <button
+              type="submit"
+              className="primary"
+              disabled={workerProfileLoading}
+            >
+              {workerProfileLoading
+                ? "Aguarda..."
+                : "Guardar perfil profissional"}
             </button>
           </form>
 
@@ -2462,7 +2609,8 @@ export default function DashboardPage() {
                     : "Não definida"}
                 </p>
                 <p>
-                  <strong>Experiência:</strong> {workerProfile.experienceYears} anos
+                  <strong>Experiência:</strong> {workerProfile.experienceYears}{" "}
+                  anos
                 </p>
                 <p>
                   <strong>Cidade:</strong>{" "}
@@ -2470,25 +2618,30 @@ export default function DashboardPage() {
                 </p>
                 <p>
                   <strong>Bairro:</strong>{" "}
-                  {myProfileLocation ? myProfileLocation.neighborhood : "Não indicado"}
+                  {myProfileLocation
+                    ? myProfileLocation.neighborhood
+                    : "Não indicado"}
                 </p>
                 <p>
                   <strong>Rating:</strong>{" "}
                   {formatStars(workerProfile.ratingAvg)}{" "}
-                  {formatRatingValue(workerProfile.ratingAvg)} ({workerProfile.ratingCount})
+                  {formatRatingValue(workerProfile.ratingAvg)} (
+                  {workerProfile.ratingCount})
                 </p>
                 <p>
                   <strong>Categorias:</strong>{" "}
                   {workerProfile.categories.length > 0
-                    ? workerProfile.categories.map((item) => item.name).join(", ")
+                    ? workerProfile.categories
+                        .map((item) => item.name)
+                        .join(", ")
                     : "Sem categorias"}
                 </p>
                 {workerProfile.bio ? <p>{workerProfile.bio}</p> : null}
               </article>
             ) : (
               <p className="empty-state">
-                Ainda não tens perfil profissional. Preenche o formulário acima e
-                publica o teu perfil para aparecer na busca de clientes.
+                Ainda não tens perfil profissional. Preenche o formulário acima
+                e publica o teu perfil para aparecer na busca de clientes.
               </p>
             )}
           </div>
@@ -2500,7 +2653,9 @@ export default function DashboardPage() {
             Esta vista simula o perfil público que um cliente usa para decidir
             em quem confiar.
           </p>
-          <p className={`status status--${getStatusTone(workerProfilesStatus)}`}>
+          <p
+            className={`status status--${getStatusTone(workerProfilesStatus)}`}
+          >
             {workerProfilesStatus}
           </p>
 
@@ -2510,7 +2665,7 @@ export default function DashboardPage() {
               <select
                 value={workerCategorySlugFilter}
                 onChange={(event) => {
-                  setWorkerOffset(0);
+                  setWorkerPage(1);
                   setWorkerCategorySlugFilter(event.target.value);
                 }}
               >
@@ -2527,7 +2682,7 @@ export default function DashboardPage() {
               <select
                 value={workerAvailabilityFilter}
                 onChange={(event) => {
-                  setWorkerOffset(0);
+                  setWorkerPage(1);
                   setWorkerAvailabilityFilter(
                     event.target.value as "all" | "true" | "false",
                   );
@@ -2543,7 +2698,7 @@ export default function DashboardPage() {
               <select
                 value={String(workerLimit)}
                 onChange={(event) => {
-                  setWorkerOffset(0);
+                  setWorkerPage(1);
                   setWorkerLimit(Number(event.target.value));
                 }}
               >
@@ -2557,7 +2712,10 @@ export default function DashboardPage() {
               <input
                 type="search"
                 value={workerSearch}
-                onChange={(event) => setWorkerSearch(event.target.value)}
+                onChange={(event) => {
+                  setWorkerPage(1);
+                  setWorkerSearch(event.target.value);
+                }}
                 placeholder="userId, localização ou categoria"
               />
             </label>
@@ -2565,17 +2723,22 @@ export default function DashboardPage() {
               Ordenar
               <select
                 value={workerSortMode}
-                onChange={(event) =>
+                onChange={(event) => {
+                  setWorkerPage(1);
                   setWorkerSortMode(
                     event.target.value as
+                      | "updatedAt:asc"
                       | "updatedAt:desc"
+                      | "rating:asc"
                       | "rating:desc"
                       | "hourlyRate:asc"
                       | "hourlyRate:desc",
-                  )
-                }
+                  );
+                }}
               >
+                <option value="updatedAt:asc">Atualização (asc)</option>
                 <option value="updatedAt:desc">Atualização (desc)</option>
+                <option value="rating:asc">Rating (asc)</option>
                 <option value="rating:desc">Rating (desc)</option>
                 <option value="hourlyRate:asc">Tarifa (asc)</option>
                 <option value="hourlyRate:desc">Tarifa (desc)</option>
@@ -2594,23 +2757,26 @@ export default function DashboardPage() {
             <button
               type="button"
               onClick={() =>
-                setWorkerOffset((current) => Math.max(0, current - workerLimit))
+                setWorkerPage((current) => Math.max(1, current - 1))
               }
-              disabled={workerProfilesLoading || workerOffset === 0}
+              disabled={workerProfilesLoading || workerPage <= 1}
             >
               Página anterior
             </button>
             <button
               type="button"
-              onClick={() => setWorkerOffset((current) => current + workerLimit)}
-              disabled={workerProfilesLoading || workerProfiles.length < workerLimit}
+              onClick={() => setWorkerPage((current) => current + 1)}
+              disabled={workerProfilesLoading || !workerProfilesMeta?.hasNext}
             >
               Próxima página
             </button>
-            <p className="status">Página: {Math.floor(workerOffset / workerLimit) + 1}</p>
             <p className="status">
-              Visíveis: {visibleWorkerProfiles.length}/{workerProfiles.length}
+              Página: {workerProfilesMeta?.page ?? workerPage}
             </p>
+            <p className="status">
+              Total API: {workerProfilesMeta?.total ?? 0}
+            </p>
+            <p className="status">Visíveis: {visibleWorkerProfiles.length}</p>
             <p className="status">
               Disponíveis: {workerDiscoveryStats.availableCount}
             </p>
@@ -2643,7 +2809,9 @@ export default function DashboardPage() {
                   return (
                     <article key={profile.id} className="worker-card">
                       <p className="item-title">
-                        {isMe ? "O teu perfil" : `Worker ${shortenId(profile.userId)}`}
+                        {isMe
+                          ? "O teu perfil"
+                          : `Worker ${shortenId(profile.userId)}`}
                         <span
                           className={`status-pill ${
                             profile.isAvailable ? "is-ok" : "is-muted"
@@ -2655,7 +2823,9 @@ export default function DashboardPage() {
                       <div className="pill-row">
                         <span
                           className={`status-pill ${
-                            profileCompleteness.score >= 5 ? "is-ok" : "is-muted"
+                            profileCompleteness.score >= 5
+                              ? "is-ok"
+                              : "is-muted"
                           }`}
                         >
                           Completude {profileCompleteness.percent}%
@@ -2665,8 +2835,10 @@ export default function DashboardPage() {
                         </span>
                       </div>
                       <p>
-                        <strong>Rating:</strong> {formatStars(profile.ratingAvg)}{" "}
-                        {formatRatingValue(profile.ratingAvg)} ({profile.ratingCount})
+                        <strong>Rating:</strong>{" "}
+                        {formatStars(profile.ratingAvg)}{" "}
+                        {formatRatingValue(profile.ratingAvg)} (
+                        {profile.ratingCount})
                       </p>
                       <p>
                         <strong>Tarifa:</strong>{" "}
@@ -2675,10 +2847,12 @@ export default function DashboardPage() {
                           : "Não definida"}
                       </p>
                       <p>
-                        <strong>Experiência:</strong> {profile.experienceYears} anos
+                        <strong>Experiência:</strong> {profile.experienceYears}{" "}
+                        anos
                       </p>
                       <p>
-                        <strong>Cidade:</strong> {profileCompleteness.location.city}
+                        <strong>Cidade:</strong>{" "}
+                        {profileCompleteness.location.city}
                       </p>
                       <p>
                         <strong>Bairro:</strong>{" "}
@@ -2687,17 +2861,24 @@ export default function DashboardPage() {
                       <p>
                         <strong>Categorias:</strong>{" "}
                         {profile.categories.length > 0
-                          ? profile.categories.map((item) => item.name).join(", ")
+                          ? profile.categories
+                              .map((item) => item.name)
+                              .join(", ")
                           : "Sem categorias"}
                       </p>
                       {profileCompleteness.missing.length > 0 ? (
                         <p className="muted">
-                          Falta para perfil completo: {profileCompleteness.missing[0]}.
+                          Falta para perfil completo:{" "}
+                          {profileCompleteness.missing[0]}.
                         </p>
                       ) : (
-                        <p className="muted">Perfil com sinais fortes de confiança.</p>
+                        <p className="muted">
+                          Perfil com sinais fortes de confiança.
+                        </p>
                       )}
-                      <p className="muted">Atualizado: {formatDate(profile.updatedAt)}</p>
+                      <p className="muted">
+                        Atualizado: {formatDate(profile.updatedAt)}
+                      </p>
                     </article>
                   );
                 })}
@@ -2709,10 +2890,12 @@ export default function DashboardPage() {
         <section id="jobs" className="dashboard-section">
           <h2 className="section-title">Jobs</h2>
           <p className="section-lead">
-            Criação guiada: confirma pré-requisitos, publica o pedido e acompanha
-            as transições de estado.
+            Criação guiada: confirma pré-requisitos, publica o pedido e
+            acompanha as transições de estado.
           </p>
-          <p className={`status status--${getStatusTone(jobsStatus)}`}>{jobsStatus}</p>
+          <p className={`status status--${getStatusTone(jobsStatus)}`}>
+            {jobsStatus}
+          </p>
 
           <div className="result">
             <p className="item-title">
@@ -2726,7 +2909,8 @@ export default function DashboardPage() {
               <article className="flow-summary-item">
                 <p className="metric-label">Em execução</p>
                 <p className="metric-value">
-                  {clientJobFlowCounts.ACCEPTED + clientJobFlowCounts.IN_PROGRESS}
+                  {clientJobFlowCounts.ACCEPTED +
+                    clientJobFlowCounts.IN_PROGRESS}
                 </p>
               </article>
               <article className="flow-summary-item">
@@ -2761,9 +2945,12 @@ export default function DashboardPage() {
             <p className="item-title">Checklist antes de criar job</p>
             <ul className="checklist">
               {jobCreationChecklist.map((item) => (
-                <li key={item.label} className={item.ready ? "is-ready" : "is-blocked"}>
-                  <strong>{item.ready ? "Pronto" : "Pendente"}:</strong> {item.label}.{" "}
-                  {item.help}
+                <li
+                  key={item.label}
+                  className={item.ready ? "is-ready" : "is-blocked"}
+                >
+                  <strong>{item.ready ? "Pronto" : "Pendente"}:</strong>{" "}
+                  {item.label}. {item.help}
                 </li>
               ))}
             </ul>
@@ -2776,7 +2963,8 @@ export default function DashboardPage() {
                 : "Nenhum"}
             </p>
             <p className="muted">
-              Categorias compatíveis com o worker: {availableJobCategories.length}
+              Categorias compatíveis com o worker:{" "}
+              {availableJobCategories.length}
             </p>
           </div>
 
@@ -2786,7 +2974,7 @@ export default function DashboardPage() {
               <select
                 value={jobStatusFilter}
                 onChange={(event) => {
-                  setJobOffset(0);
+                  setJobPage(1);
                   setJobStatusFilter(event.target.value as "ALL" | JobStatus);
                 }}
               >
@@ -2803,7 +2991,7 @@ export default function DashboardPage() {
               <select
                 value={String(jobLimit)}
                 onChange={(event) => {
-                  setJobOffset(0);
+                  setJobPage(1);
                   setJobLimit(Number(event.target.value));
                 }}
               >
@@ -2817,7 +3005,10 @@ export default function DashboardPage() {
               <input
                 type="search"
                 value={jobSearch}
-                onChange={(event) => setJobSearch(event.target.value)}
+                onChange={(event) => {
+                  setJobPage(1);
+                  setJobSearch(event.target.value);
+                }}
                 placeholder="Título ou descrição"
               />
             </label>
@@ -2825,21 +3016,28 @@ export default function DashboardPage() {
               Ordenar
               <select
                 value={jobSortMode}
-                onChange={(event) =>
+                onChange={(event) => {
+                  setJobPage(1);
                   setJobSortMode(
                     event.target.value as
+                      | "createdAt:asc"
                       | "createdAt:desc"
                       | "budget:asc"
                       | "budget:desc",
-                  )
-                }
+                  );
+                }}
               >
+                <option value="createdAt:asc">Criação (asc)</option>
                 <option value="createdAt:desc">Criação (desc)</option>
                 <option value="budget:asc">Orçamento (asc)</option>
                 <option value="budget:desc">Orçamento (desc)</option>
               </select>
             </label>
-            <button type="button" onClick={handleReloadJobs} disabled={jobsLoading}>
+            <button
+              type="button"
+              onClick={handleReloadJobs}
+              disabled={jobsLoading}
+            >
               Recarregar
             </button>
           </div>
@@ -2847,25 +3045,27 @@ export default function DashboardPage() {
           <div className="meta-row">
             <button
               type="button"
-              onClick={() => setJobOffset((current) => Math.max(0, current - jobLimit))}
-              disabled={jobsLoading || jobOffset === 0}
+              onClick={() => setJobPage((current) => Math.max(1, current - 1))}
+              disabled={jobsLoading || jobPage <= 1}
             >
               Página anterior
             </button>
             <button
               type="button"
-              onClick={() => setJobOffset((current) => current + jobLimit)}
+              onClick={() => setJobPage((current) => current + 1)}
               disabled={
                 jobsLoading ||
-                (clientJobs.length < jobLimit && workerJobs.length < jobLimit)
+                !(clientJobsMeta?.hasNext || workerJobsMeta?.hasNext)
               }
             >
               Próxima página
             </button>
-            <p className="status">Página: {Math.floor(jobOffset / jobLimit) + 1}</p>
             <p className="status">
-              Cliente {visibleClientJobs.length}/{clientJobs.length} | Worker{" "}
-              {visibleWorkerJobs.length}/{workerJobs.length}
+              Página: {clientJobsMeta?.page ?? workerJobsMeta?.page ?? jobPage}
+            </p>
+            <p className="status">
+              Cliente {visibleClientJobs.length}/{clientJobsMeta?.total ?? 0} |
+              Worker {visibleWorkerJobs.length}/{workerJobsMeta?.total ?? 0}
             </p>
           </div>
 
@@ -2907,6 +3107,20 @@ export default function DashboardPage() {
               </select>
             </label>
             <label>
+              Modo de preço
+              <select
+                value={jobPricingMode}
+                onChange={(event) =>
+                  setJobPricingMode(
+                    event.target.value as "FIXED_PRICE" | "QUOTE_REQUEST",
+                  )
+                }
+              >
+                <option value="FIXED_PRICE">Preço fixo</option>
+                <option value="QUOTE_REQUEST">Sob cotação</option>
+              </select>
+            </label>
+            <label>
               Título
               <input
                 type="text"
@@ -2928,15 +3142,17 @@ export default function DashboardPage() {
               />
             </label>
             <label>
-              Orçamento
+              {jobPricingMode === "FIXED_PRICE"
+                ? "Orçamento (obrigatório)"
+                : "Orçamento máximo (opcional)"}
               <input
                 type="number"
                 value={jobBudget}
                 onChange={(event) => setJobBudget(event.target.value)}
-                min={0}
+                min={jobPricingMode === "FIXED_PRICE" ? 1 : 0}
                 max={100_000_000}
                 step={1}
-                required
+                required={jobPricingMode === "FIXED_PRICE"}
               />
             </label>
             <label>
@@ -2975,6 +3191,11 @@ export default function DashboardPage() {
                 visibleClientJobs.map((job) => {
                   const canCancel =
                     job.status !== "COMPLETED" && job.status !== "CANCELED";
+                  const canAcceptQuote =
+                    job.pricingMode === "QUOTE_REQUEST" &&
+                    job.status === "REQUESTED" &&
+                    typeof job.quotedAmount === "number" &&
+                    job.quotedAmount > 0;
                   return (
                     <article key={job.id} className="list-item job-card">
                       <p className="item-title">
@@ -2984,10 +3205,32 @@ export default function DashboardPage() {
                         </span>
                       </p>
                       <p>
-                        <strong>Orçamento:</strong> {formatCurrencyMzn(job.budget)}
+                        <strong>Orçamento:</strong>{" "}
+                        {formatCurrencyMzn(job.budget)}
                       </p>
                       <p>
-                        <strong>Worker:</strong> {shortenId(job.workerProfileId)}
+                        <strong>Modo de preço:</strong>{" "}
+                        {job.pricingMode === "QUOTE_REQUEST"
+                          ? "Sob cotação"
+                          : "Preço fixo"}
+                      </p>
+                      {job.pricingMode === "QUOTE_REQUEST" &&
+                      typeof job.quotedAmount === "number" ? (
+                        <p>
+                          <strong>Proposta:</strong>{" "}
+                          {formatCurrencyMzn(job.quotedAmount)}
+                        </p>
+                      ) : null}
+                      {job.pricingMode === "QUOTE_REQUEST" &&
+                      job.quoteMessage ? (
+                        <p>
+                          <strong>Mensagem da proposta:</strong>{" "}
+                          {job.quoteMessage}
+                        </p>
+                      ) : null}
+                      <p>
+                        <strong>Worker:</strong>{" "}
+                        {shortenId(job.workerProfileId)}
                       </p>
                       <p>
                         <strong>Categoria:</strong> {shortenId(job.categoryId)}
@@ -2997,40 +3240,67 @@ export default function DashboardPage() {
                       </p>
                       {job.scheduledFor ? (
                         <p>
-                          <strong>Agendado:</strong> {formatDate(job.scheduledFor)}
+                          <strong>Agendado:</strong>{" "}
+                          {formatDate(job.scheduledFor)}
                         </p>
                       ) : null}
                       {job.status === "CANCELED" ? (
-                        <p className="muted">Fluxo encerrado por cancelamento.</p>
+                        <p className="muted">
+                          Fluxo encerrado por cancelamento.
+                        </p>
                       ) : (
                         <ol className="flow-steps">
                           {jobFlowOrder.map((stepStatus) => (
                             <li
                               key={`${job.id}-${stepStatus}`}
-                              className={getJobFlowStepState(job.status, stepStatus)}
+                              className={getJobFlowStepState(
+                                job.status,
+                                stepStatus,
+                              )}
                             >
                               {formatJobStatus(stepStatus)}
                             </li>
                           ))}
                         </ol>
                       )}
-                      <p className="flow-hint">{getClientFlowHint(job.status)}</p>
-                      {job.status === "COMPLETED" && reviewableJobIdSet.has(job.id) ? (
+                      <p className="flow-hint">{getClientFlowHint(job)}</p>
+                      {job.status === "COMPLETED" &&
+                      reviewableJobIdSet.has(job.id) ? (
                         <p className="status" style={{ marginTop: "0.35rem" }}>
                           <a href="#reviews" className="nav-link">
                             Job concluído: publicar review agora
                           </a>
                         </p>
                       ) : null}
-                      <button
-                        type="button"
-                        onClick={() =>
-                          handleUpdateJobStatus(job.id, "CANCELED", "client")
-                        }
-                        disabled={!canCancel || jobsLoading}
-                      >
-                        {canCancel ? "Cancelar job" : "Finalizado"}
-                      </button>
+                      <div className="actions" style={{ marginTop: "0.5rem" }}>
+                        {canAcceptQuote ? (
+                          <button
+                            type="button"
+                            onClick={() =>
+                              handleUpdateJobStatus(
+                                job.id,
+                                "ACCEPTED",
+                                "client",
+                                {
+                                  quotedAmount: job.quotedAmount ?? undefined,
+                                },
+                              )
+                            }
+                            disabled={jobsLoading}
+                          >
+                            Aceitar proposta
+                          </button>
+                        ) : null}
+                        <button
+                          type="button"
+                          onClick={() =>
+                            handleUpdateJobStatus(job.id, "CANCELED", "client")
+                          }
+                          disabled={!canCancel || jobsLoading}
+                        >
+                          {canCancel ? "Cancelar job" : "Finalizado"}
+                        </button>
+                      </div>
                     </article>
                   );
                 })
@@ -3049,7 +3319,17 @@ export default function DashboardPage() {
                 </p>
               ) : (
                 visibleWorkerJobs.map((job) => {
-                  const transitions = getWorkerAllowedTransitions(job.status);
+                  const transitions = getWorkerAllowedTransitions(job);
+                  const quoteAmountInput =
+                    jobQuoteDraftAmount[job.id] ??
+                    (typeof job.quotedAmount === "number"
+                      ? String(job.quotedAmount)
+                      : "");
+                  const quoteMessageInput =
+                    jobQuoteDraftMessage[job.id] ?? job.quoteMessage ?? "";
+                  const shouldShowQuoteForm =
+                    job.pricingMode === "QUOTE_REQUEST" &&
+                    job.status === "REQUESTED";
                   return (
                     <article key={job.id} className="list-item job-card">
                       <p className="item-title">
@@ -3059,8 +3339,29 @@ export default function DashboardPage() {
                         </span>
                       </p>
                       <p>
-                        <strong>Orçamento:</strong> {formatCurrencyMzn(job.budget)}
+                        <strong>Orçamento:</strong>{" "}
+                        {formatCurrencyMzn(job.budget)}
                       </p>
+                      <p>
+                        <strong>Modo de preço:</strong>{" "}
+                        {job.pricingMode === "QUOTE_REQUEST"
+                          ? "Sob cotação"
+                          : "Preço fixo"}
+                      </p>
+                      {job.pricingMode === "QUOTE_REQUEST" &&
+                      typeof job.quotedAmount === "number" ? (
+                        <p>
+                          <strong>Proposta enviada:</strong>{" "}
+                          {formatCurrencyMzn(job.quotedAmount)}
+                        </p>
+                      ) : null}
+                      {job.pricingMode === "QUOTE_REQUEST" &&
+                      job.quoteMessage ? (
+                        <p>
+                          <strong>Mensagem da proposta:</strong>{" "}
+                          {job.quoteMessage}
+                        </p>
+                      ) : null}
                       <p>
                         <strong>Cliente:</strong> {shortenId(job.clientId)}
                       </p>
@@ -3072,24 +3373,70 @@ export default function DashboardPage() {
                       </p>
                       {job.completedAt ? (
                         <p>
-                          <strong>Concluído:</strong> {formatDate(job.completedAt)}
+                          <strong>Concluído:</strong>{" "}
+                          {formatDate(job.completedAt)}
                         </p>
                       ) : null}
                       {job.status === "CANCELED" ? (
-                        <p className="muted">Fluxo encerrado por cancelamento.</p>
+                        <p className="muted">
+                          Fluxo encerrado por cancelamento.
+                        </p>
                       ) : (
                         <ol className="flow-steps">
                           {jobFlowOrder.map((stepStatus) => (
                             <li
                               key={`${job.id}-${stepStatus}`}
-                              className={getJobFlowStepState(job.status, stepStatus)}
+                              className={getJobFlowStepState(
+                                job.status,
+                                stepStatus,
+                              )}
                             >
                               {formatJobStatus(stepStatus)}
                             </li>
                           ))}
                         </ol>
                       )}
-                      <p className="flow-hint">{getWorkerFlowHint(job.status)}</p>
+                      <p className="flow-hint">{getWorkerFlowHint(job)}</p>
+                      {shouldShowQuoteForm ? (
+                        <div className="form" style={{ marginTop: "0.5rem" }}>
+                          <label>
+                            Valor da proposta (MZN)
+                            <input
+                              type="number"
+                              value={quoteAmountInput}
+                              onChange={(event) =>
+                                setJobQuoteDraftAmount((current) => ({
+                                  ...current,
+                                  [job.id]: event.target.value,
+                                }))
+                              }
+                              min={1}
+                              max={100_000_000}
+                              step={1}
+                            />
+                          </label>
+                          <label>
+                            Mensagem (opcional)
+                            <textarea
+                              value={quoteMessageInput}
+                              onChange={(event) =>
+                                setJobQuoteDraftMessage((current) => ({
+                                  ...current,
+                                  [job.id]: event.target.value,
+                                }))
+                              }
+                              maxLength={280}
+                            />
+                          </label>
+                          <button
+                            type="button"
+                            onClick={() => handleProposeQuote(job.id)}
+                            disabled={jobsLoading}
+                          >
+                            Enviar proposta
+                          </button>
+                        </div>
+                      ) : null}
                       <div
                         className="actions"
                         style={{
@@ -3100,7 +3447,11 @@ export default function DashboardPage() {
                       >
                         {transitions.length === 0 ? (
                           <button type="button" disabled>
-                            Sem transições disponíveis
+                            {shouldShowQuoteForm
+                              ? typeof job.quotedAmount === "number"
+                                ? "Aguardando cliente aceitar proposta"
+                                : "Envia proposta para avançar"
+                              : "Sem transições disponíveis"}
                           </button>
                         ) : (
                           transitions.map((nextStatus) => (
@@ -3108,7 +3459,11 @@ export default function DashboardPage() {
                               key={nextStatus}
                               type="button"
                               onClick={() =>
-                                handleUpdateJobStatus(job.id, nextStatus, "worker")
+                                handleUpdateJobStatus(
+                                  job.id,
+                                  nextStatus,
+                                  "worker",
+                                )
                               }
                               disabled={jobsLoading}
                             >
@@ -3144,7 +3499,9 @@ export default function DashboardPage() {
               </article>
               <article className="flow-summary-item">
                 <p className="metric-label">Reviews já criadas</p>
-                <p className="metric-value">{myReviews.length}</p>
+                <p className="metric-value">
+                  {myReviewsMeta?.total ?? myReviews.length}
+                </p>
               </article>
               <article className="flow-summary-item">
                 <p className="metric-label">Pendentes de review</p>
@@ -3153,12 +3510,13 @@ export default function DashboardPage() {
             </div>
             {reviewableJobs.length === 0 ? (
               <p className="muted">
-                Sem pendências. O fluxo está fechado para os teus jobs concluídos.
+                Sem pendências. O fluxo está fechado para os teus jobs
+                concluídos.
               </p>
             ) : (
               <p className="flow-hint">
-                Seleciona um job concluído no formulário abaixo para fechar o ciclo
-                com avaliação.
+                Seleciona um job concluído no formulário abaixo para fechar o
+                ciclo com avaliação.
               </p>
             )}
           </div>
@@ -3168,7 +3526,10 @@ export default function DashboardPage() {
               Worker
               <select
                 value={reviewWorkerProfileId}
-                onChange={(event) => setReviewWorkerProfileId(event.target.value)}
+                onChange={(event) => {
+                  setReviewPage(1);
+                  setReviewWorkerProfileId(event.target.value);
+                }}
               >
                 {reviewWorkerOptions.length === 0 ? (
                   <option value="">Sem workers para consultar reviews</option>
@@ -3185,11 +3546,12 @@ export default function DashboardPage() {
               Filtro rating
               <select
                 value={reviewRatingFilter}
-                onChange={(event) =>
+                onChange={(event) => {
+                  setReviewPage(1);
                   setReviewRatingFilter(
                     event.target.value as "all" | "5" | "4" | "3" | "2" | "1",
-                  )
-                }
+                  );
+                }}
               >
                 <option value="all">Todos</option>
                 <option value="5">5</option>
@@ -3200,17 +3562,32 @@ export default function DashboardPage() {
               </select>
             </label>
             <label>
+              Limite API
+              <select
+                value={String(reviewLimit)}
+                onChange={(event) => {
+                  setReviewPage(1);
+                  setReviewLimit(Number(event.target.value));
+                }}
+              >
+                <option value="5">5</option>
+                <option value="10">10</option>
+                <option value="20">20</option>
+              </select>
+            </label>
+            <label>
               Ordenar
               <select
                 value={reviewSortMode}
-                onChange={(event) =>
+                onChange={(event) => {
+                  setReviewPage(1);
                   setReviewSortMode(
                     event.target.value as
                       | "createdAt:desc"
                       | "rating:desc"
                       | "rating:asc",
-                  )
-                }
+                  );
+                }}
               >
                 <option value="createdAt:desc">Data (desc)</option>
                 <option value="rating:desc">Rating (desc)</option>
@@ -3227,11 +3604,34 @@ export default function DashboardPage() {
           </div>
 
           <div className="meta-row">
+            <button
+              type="button"
+              onClick={() =>
+                setReviewPage((current) => Math.max(1, current - 1))
+              }
+              disabled={reviewsLoading || reviewPage <= 1}
+            >
+              Página anterior
+            </button>
+            <button
+              type="button"
+              onClick={() => setReviewPage((current) => current + 1)}
+              disabled={
+                reviewsLoading ||
+                !(myReviewsMeta?.hasNext || workerReviewsMeta?.hasNext)
+              }
+            >
+              Próxima página
+            </button>
             <p className="status">
-              Minhas: {visibleMyReviews.length}/{myReviews.length}
+              Página: {myReviewsMeta?.page ?? reviewPage}
             </p>
             <p className="status">
-              Worker: {visibleWorkerReviews.length}/{workerReviews.length}
+              Minhas: {visibleMyReviews.length}/{myReviewsMeta?.total ?? 0}
+            </p>
+            <p className="status">
+              Worker: {visibleWorkerReviews.length}/
+              {workerReviewsMeta?.total ?? 0}
             </p>
             <p className="status">
               Média worker filtrado: {selectedWorkerReviewAverage}/5 (
@@ -3248,7 +3648,9 @@ export default function DashboardPage() {
                 required
               >
                 {reviewableJobs.length === 0 ? (
-                  <option value="">Sem jobs completos pendentes de review</option>
+                  <option value="">
+                    Sem jobs completos pendentes de review
+                  </option>
                 ) : (
                   reviewableJobs.map((job) => (
                     <option key={job.id} value={job.id}>
@@ -3309,10 +3711,13 @@ export default function DashboardPage() {
                       <strong>Job:</strong> {shortenId(review.jobId)}
                     </p>
                     <p>
-                      <strong>Worker:</strong> {shortenId(review.workerProfileId)}
+                      <strong>Worker:</strong>{" "}
+                      {shortenId(review.workerProfileId)}
                     </p>
                     <p>{review.comment ?? "Sem comentário textual."}</p>
-                    <p className="muted">Criada em {formatDate(review.createdAt)}</p>
+                    <p className="muted">
+                      Criada em {formatDate(review.createdAt)}
+                    </p>
                   </article>
                 ))
               )}
@@ -3341,7 +3746,9 @@ export default function DashboardPage() {
                       <strong>Reviewer:</strong> {shortenId(review.reviewerId)}
                     </p>
                     <p>{review.comment ?? "Sem comentário textual."}</p>
-                    <p className="muted">Criada em {formatDate(review.createdAt)}</p>
+                    <p className="muted">
+                      Criada em {formatDate(review.createdAt)}
+                    </p>
                   </article>
                 ))
               )}

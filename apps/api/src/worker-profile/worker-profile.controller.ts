@@ -26,6 +26,7 @@ import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
 import { ListWorkerProfilesQueryDto } from './dto/list-worker-profiles-query.dto';
 import { UpdateWorkerProfileDto } from './dto/update-worker-profile.dto';
 import { UpsertWorkerProfileDto } from './dto/upsert-worker-profile.dto';
+import { WorkerProfileListResponseDto } from './dto/worker-profile-list-response.dto';
 import { WorkerProfileDto } from './dto/worker-profile.dto';
 import { WorkerProfileService } from './worker-profile.service';
 
@@ -40,7 +41,7 @@ export class WorkerProfileController {
 
   @Get()
   @ApiOperation({ summary: 'List worker profiles' })
-  @ApiOkResponse({ type: WorkerProfileDto, isArray: true })
+  @ApiOkResponse({ type: WorkerProfileListResponseDto })
   list(@Query() query: ListWorkerProfilesQueryDto) {
     return this.workerProfileService.list(query);
   }

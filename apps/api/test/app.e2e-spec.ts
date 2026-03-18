@@ -62,6 +62,16 @@ type ReviewPayload = {
   rating: number;
 };
 
+type PaginatedResponse<T> = {
+  data: T[];
+  meta: {
+    total: number;
+    page: number;
+    limit: number;
+    hasNext: boolean;
+  };
+};
+
 describe('Auth and Sessions (e2e)', () => {
   let app: INestApplication<App>;
   let prisma: PrismaClient;
@@ -392,8 +402,8 @@ describe('Auth and Sessions (e2e)', () => {
       .get('/jobs/me/worker')
       .set('Authorization', `Bearer ${workerAuth.accessToken}`)
       .expect(200);
-    const workerJobs = workerJobsResponse.body as JobPayload[];
-    expect(workerJobs.some((item) => item.id === job.id)).toBe(true);
+    const workerJobs = workerJobsResponse.body as PaginatedResponse<JobPayload>;
+    expect(workerJobs.data.some((item) => item.id === job.id)).toBe(true);
 
     await request(app.getHttpServer())
       .patch(`/jobs/${job.id}/status`)
@@ -437,9 +447,84 @@ describe('Auth and Sessions (e2e)', () => {
     const workerReviewsResponse = await request(app.getHttpServer())
       .get(`/reviews/worker/${workerProfile.id}`)
       .expect(200);
-    const workerReviews = workerReviewsResponse.body as ReviewPayload[];
-    expect(workerReviews.length).toBeGreaterThanOrEqual(1);
-    expect(workerReviews[0]?.jobId).toBe(job.id);
+    const workerReviews =
+      workerReviewsResponse.body as PaginatedResponse<ReviewPayload>;
+    expect(workerReviews.data.length).toBeGreaterThanOrEqual(1);
+    expect(workerReviews.data[0]?.jobId).toBe(job.id);
+    const createQuoteJobResponse = await request(app.getHttpServer())
+      .post('/jobs')
+      .set('Authorization', `Bearer ${clientAuth.accessToken}`)
+      .send({
+        workerProfileId: workerProfile.id,
+        categoryId: category.id,
+        pricingMode: 'QUOTE_REQUEST',
+        title: 'Diagnostico de fuga de agua',
+        description: 'Preciso de visita tecnica e proposta para reparacao.',
+      })
+      .expect(201);
+
+    const quoteJob = createQuoteJobResponse.body as JobPayload & {
+      pricingMode: 'FIXED_PRICE' | 'QUOTE_REQUEST';
+    };
+    expect(quoteJob.pricingMode).toBe('QUOTE_REQUEST');
+
+    await request(app.getHttpServer())
+      .patch(`/jobs/${quoteJob.id}/status`)
+      .set('Authorization', `Bearer ${workerAuth.accessToken}`)
+      .send({ status: 'ACCEPTED' })
+      .expect(409);
+
+    await request(app.getHttpServer())
+      .patch(`/jobs/${quoteJob.id}/status`)
+      .set('Authorization', `Bearer ${clientAuth.accessToken}`)
+      .send({ status: 'ACCEPTED' })
+      .expect(400);
+
+    const proposedQuoteResponse = await request(app.getHttpServer())
+      .patch(`/jobs/${quoteJob.id}/quote`)
+      .set('Authorization', `Bearer ${workerAuth.accessToken}`)
+      .send({
+        quotedAmount: 4500,
+        quoteMessage: 'Inclui material e deslocacao',
+      })
+      .expect(200);
+
+    const proposedQuote = proposedQuoteResponse.body as JobPayload & {
+      quotedAmount: number | null;
+      quoteMessage: string | null;
+    };
+    expect(proposedQuote.quotedAmount).toBe(4500);
+    expect(proposedQuote.quoteMessage).toBe('Inclui material e deslocacao');
+
+    const clientJobsResponse = await request(app.getHttpServer())
+      .get('/jobs/me/client?status=REQUESTED&page=1&limit=10')
+      .set('Authorization', `Bearer ${clientAuth.accessToken}`)
+      .expect(200);
+    const clientJobs = clientJobsResponse.body as PaginatedResponse<
+      JobPayload & { quotedAmount: number | null }
+    >;
+    const quoteJobInList = clientJobs.data.find(
+      (item) => item.id === quoteJob.id,
+    );
+    expect(quoteJobInList?.quotedAmount).toBe(4500);
+
+    await request(app.getHttpServer())
+      .patch(`/jobs/${quoteJob.id}/status`)
+      .set('Authorization', `Bearer ${clientAuth.accessToken}`)
+      .send({ status: 'ACCEPTED', quotedAmount: 4500 })
+      .expect(200);
+
+    await request(app.getHttpServer())
+      .patch(`/jobs/${quoteJob.id}/status`)
+      .set('Authorization', `Bearer ${workerAuth.accessToken}`)
+      .send({ status: 'IN_PROGRESS' })
+      .expect(200);
+
+    await request(app.getHttpServer())
+      .patch(`/jobs/${quoteJob.id}/status`)
+      .set('Authorization', `Bearer ${workerAuth.accessToken}`)
+      .send({ status: 'COMPLETED' })
+      .expect(200);
   });
 
   it('chaos flow: rejects invalid actions and handles multi-session revocation', async () => {

@@ -6,11 +6,16 @@ import {
   Logger,
   NotFoundException,
 } from '@nestjs/common';
-import { JobStatus, Prisma } from '@prisma/client';
+import { JobPricingMode, JobStatus, Prisma } from '@prisma/client';
+import {
+  buildPaginatedResponse,
+  resolvePagination,
+} from '../common/pagination/pagination';
 import { MetricsService } from '../observability/metrics.service';
 import { PrismaService } from '../prisma/prisma.service';
 import { CreateJobDto } from './dto/create-job.dto';
 import { ListJobsQueryDto } from './dto/list-jobs-query.dto';
+import { ProposeQuoteDto } from './dto/propose-quote.dto';
 import { UpdateJobStatusDto } from './dto/update-job-status.dto';
 
 @Injectable()
@@ -186,17 +191,25 @@ export class JobsService {
   }
 
   async listMyClientJobs(clientId: string, query: ListJobsQueryDto) {
-    const limit = query.limit ?? 20;
-    const offset = query.offset ?? 0;
+    const { page, limit, skip } = resolvePagination(query);
+    const where = this.buildListWhere({ clientId }, query);
+    const sort = query.sort ?? 'createdAt:desc';
 
-    return this.prisma.job.findMany({
-      where: {
-        clientId,
-        ...(query.status ? { status: query.status } : {}),
-      },
-      orderBy: [{ createdAt: 'desc' }],
-      take: limit,
-      skip: offset,
+    const [total, data] = await this.prisma.$transaction([
+      this.prisma.job.count({ where }),
+      this.prisma.job.findMany({
+        where,
+        orderBy: this.buildOrderBy(sort),
+        take: limit,
+        skip,
+      }),
+    ]);
+
+    return buildPaginatedResponse({
+      data,
+      total,
+      page,
+      limit,
     });
   }
 
@@ -210,18 +223,76 @@ export class JobsService {
       throw new NotFoundException('Worker profile not found');
     }
 
-    const limit = query.limit ?? 20;
-    const offset = query.offset ?? 0;
+    const { page, limit, skip } = resolvePagination(query);
+    const where = this.buildListWhere({ workerProfileId: profile.id }, query);
+    const sort = query.sort ?? 'createdAt:desc';
 
-    return this.prisma.job.findMany({
-      where: {
-        workerProfileId: profile.id,
-        ...(query.status ? { status: query.status } : {}),
-      },
-      orderBy: [{ createdAt: 'desc' }],
-      take: limit,
-      skip: offset,
+    const [total, data] = await this.prisma.$transaction([
+      this.prisma.job.count({ where }),
+      this.prisma.job.findMany({
+        where,
+        orderBy: this.buildOrderBy(sort),
+        take: limit,
+        skip,
+      }),
+    ]);
+
+    return buildPaginatedResponse({
+      data,
+      total,
+      page,
+      limit,
     });
+  }
+
+  async proposeQuote(jobId: string, requesterId: string, dto: ProposeQuoteDto) {
+    const job = await this.prisma.job.findUnique({
+      where: { id: jobId },
+      include: {
+        workerProfile: {
+          select: { userId: true },
+        },
+      },
+    });
+
+    if (!job) {
+      throw new NotFoundException('Job not found');
+    }
+
+    const isWorker = job.workerProfile.userId === requesterId;
+    if (!isWorker) {
+      throw new ForbiddenException(
+        'Only the assigned worker can propose quote',
+      );
+    }
+
+    if (job.pricingMode !== 'QUOTE_REQUEST') {
+      throw new ConflictException(
+        'Quote proposal is only available for QUOTE_REQUEST jobs',
+      );
+    }
+
+    if (job.status !== 'REQUESTED') {
+      throw new ConflictException(
+        'Quote proposal is only allowed while job is REQUESTED',
+      );
+    }
+
+    const updatedJob = await this.prisma.job.update({
+      where: { id: jobId },
+      data: {
+        quotedAmount: dto.quotedAmount,
+        quoteMessage: dto.quoteMessage?.trim() || null,
+      },
+    });
+
+    this.audit('job_quote_proposed', {
+      jobId,
+      requesterId,
+      quotedAmount: dto.quotedAmount,
+    });
+
+    return updatedJob;
   }
 
   async updateStatus(
@@ -252,7 +323,15 @@ export class JobsService {
     const current = job.status;
     const next = dto.status as JobStatus;
 
-    if (!this.isTransitionAllowed(current, next, isClient, isWorker)) {
+    if (
+      !this.isTransitionAllowed(
+        current,
+        next,
+        isClient,
+        isWorker,
+        job.pricingMode,
+      )
+    ) {
       this.auditWarn('job_status_transition_rejected', {
         jobId,
         requesterId,
@@ -271,14 +350,35 @@ export class JobsService {
       );
     }
 
-    if (next === 'ACCEPTED' && job.pricingMode === 'QUOTE_REQUEST') {
-      if (!dto.quotedAmount || dto.quotedAmount <= 0) {
-        this.auditWarn('job_status_quote_missing_on_accept', {
-          jobId,
-          requesterId,
-        });
+    if (next === 'ACCEPTED') {
+      if (job.pricingMode === 'QUOTE_REQUEST') {
+        if (!isClient) {
+          throw new ConflictException(
+            'Only client can accept a QUOTE_REQUEST proposal',
+          );
+        }
+
+        if (job.quotedAmount === null) {
+          this.auditWarn('job_status_quote_missing_on_accept', {
+            jobId,
+            requesterId,
+          });
+          throw new BadRequestException(
+            'Worker quote proposal is required before accepting QUOTE_REQUEST jobs',
+          );
+        }
+
+        if (
+          dto.quotedAmount !== undefined &&
+          dto.quotedAmount !== job.quotedAmount
+        ) {
+          throw new ConflictException(
+            'quotedAmount does not match the latest worker proposal',
+          );
+        }
+      } else if (dto.quotedAmount !== undefined) {
         throw new BadRequestException(
-          'quotedAmount is required when accepting QUOTE_REQUEST jobs',
+          'quotedAmount can only be provided for QUOTE_REQUEST jobs',
         );
       }
     }
@@ -304,7 +404,7 @@ export class JobsService {
     }
 
     if (next === 'ACCEPTED' && job.pricingMode === 'QUOTE_REQUEST') {
-      data.quotedAmount = dto.quotedAmount ?? null;
+      data.quotedAmount = job.quotedAmount;
     }
 
     if (next === 'IN_PROGRESS' && !job.startedAt) {
@@ -344,11 +444,55 @@ export class JobsService {
     return updatedJob;
   }
 
+  private buildListWhere(
+    baseWhere: Prisma.JobWhereInput,
+    query: ListJobsQueryDto,
+  ): Prisma.JobWhereInput {
+    const normalizedSearch = query.search?.trim();
+
+    return {
+      ...baseWhere,
+      ...(query.status ? { status: query.status } : {}),
+      ...(normalizedSearch
+        ? {
+            OR: [
+              {
+                title: {
+                  contains: normalizedSearch,
+                  mode: 'insensitive',
+                },
+              },
+              {
+                description: {
+                  contains: normalizedSearch,
+                  mode: 'insensitive',
+                },
+              },
+            ],
+          }
+        : {}),
+    };
+  }
+
+  private buildOrderBy(sort: string): Prisma.JobOrderByWithRelationInput[] {
+    const [sortField, sortDirection] = sort.split(':') as [
+      'createdAt' | 'budget',
+      Prisma.SortOrder,
+    ];
+
+    if (sortField === 'budget') {
+      return [{ budget: sortDirection }, { createdAt: 'desc' }, { id: 'desc' }];
+    }
+
+    return [{ createdAt: sortDirection }, { id: 'desc' }];
+  }
+
   private isTransitionAllowed(
     current: JobStatus,
     next: JobStatus,
     isClient: boolean,
     isWorker: boolean,
+    pricingMode: JobPricingMode,
   ) {
     if (current === next) {
       return false;
@@ -358,24 +502,24 @@ export class JobsService {
       return false;
     }
 
-    if (isWorker) {
-      if (current === 'REQUESTED' && next === 'ACCEPTED') {
-        return true;
+    if (current === 'REQUESTED' && next === 'ACCEPTED') {
+      if (pricingMode === 'QUOTE_REQUEST') {
+        return isClient;
       }
 
-      if (current === 'ACCEPTED' && next === 'IN_PROGRESS') {
-        return true;
-      }
-
-      if (current === 'IN_PROGRESS' && next === 'COMPLETED') {
-        return true;
-      }
+      return isWorker;
     }
 
-    if (isClient) {
-      if (next === 'CANCELED') {
-        return true;
-      }
+    if (isWorker && current === 'ACCEPTED' && next === 'IN_PROGRESS') {
+      return true;
+    }
+
+    if (isWorker && current === 'IN_PROGRESS' && next === 'COMPLETED') {
+      return true;
+    }
+
+    if (isClient && next === 'CANCELED') {
+      return true;
     }
 
     return false;

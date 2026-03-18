@@ -28,6 +28,9 @@ export class JobDto {
   @ApiProperty({ nullable: true })
   quotedAmount!: number | null;
 
+  @ApiProperty({ nullable: true })
+  quoteMessage!: string | null;
+
   @ApiProperty({
     enum: ['REQUESTED', 'ACCEPTED', 'IN_PROGRESS', 'COMPLETED', 'CANCELED'],
   })

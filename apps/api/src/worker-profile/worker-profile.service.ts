@@ -4,6 +4,10 @@ import {
   NotFoundException,
 } from '@nestjs/common';
 import { Prisma } from '@prisma/client';
+import {
+  buildPaginatedResponse,
+  resolvePagination,
+} from '../common/pagination/pagination';
 import { PrismaService } from '../prisma/prisma.service';
 import { ListWorkerProfilesQueryDto } from './dto/list-worker-profiles-query.dto';
 import { UpdateWorkerProfileDto } from './dto/update-worker-profile.dto';
@@ -26,34 +30,75 @@ export class WorkerProfileService {
   constructor(private readonly prisma: PrismaService) {}
 
   async list(query: ListWorkerProfilesQueryDto) {
-    const limit = query.limit ?? 20;
-    const offset = query.offset ?? 0;
+    const { page, limit, skip } = resolvePagination(query);
+    const sort = query.sort ?? 'updatedAt:desc';
+    const normalizedSearch = query.search?.trim();
 
-    const profiles = await this.prisma.workerProfile.findMany({
-      where: {
-        ...(query.isAvailable !== undefined
-          ? { isAvailable: query.isAvailable }
-          : {}),
-        ...(query.categorySlug
-          ? {
-              categories: {
-                some: {
-                  category: {
-                    slug: query.categorySlug,
-                    isActive: true,
+    const where: Prisma.WorkerProfileWhereInput = {
+      ...(query.isAvailable !== undefined
+        ? { isAvailable: query.isAvailable }
+        : {}),
+      ...(query.categorySlug
+        ? {
+            categories: {
+              some: {
+                category: {
+                  slug: query.categorySlug,
+                  isActive: true,
+                },
+              },
+            },
+          }
+        : {}),
+      ...(normalizedSearch
+        ? {
+            OR: [
+              {
+                userId: {
+                  contains: normalizedSearch,
+                  mode: 'insensitive',
+                },
+              },
+              {
+                location: {
+                  contains: normalizedSearch,
+                  mode: 'insensitive',
+                },
+              },
+              {
+                categories: {
+                  some: {
+                    category: {
+                      name: {
+                        contains: normalizedSearch,
+                        mode: 'insensitive',
+                      },
+                    },
                   },
                 },
               },
-            }
-          : {}),
-      },
-      include: workerProfileInclude,
-      orderBy: [{ isAvailable: 'desc' }, { updatedAt: 'desc' }],
-      take: limit,
-      skip: offset,
-    });
+            ],
+          }
+        : {}),
+    };
 
-    return profiles.map((profile) => this.toDto(profile));
+    const [total, profiles] = await this.prisma.$transaction([
+      this.prisma.workerProfile.count({ where }),
+      this.prisma.workerProfile.findMany({
+        where,
+        include: workerProfileInclude,
+        orderBy: this.buildOrderBy(sort),
+        take: limit,
+        skip,
+      }),
+    ]);
+
+    return buildPaginatedResponse({
+      data: profiles.map((profile) => this.toDto(profile)),
+      total,
+      page,
+      limit,
+    });
   }
 
   async getPublicByUserId(userId: string) {
@@ -207,6 +252,34 @@ export class WorkerProfileService {
         'One or more categories are invalid or inactive',
       );
     }
+  }
+
+  private buildOrderBy(
+    sort: string,
+  ): Prisma.WorkerProfileOrderByWithRelationInput[] {
+    const [sortField, sortDirection] = sort.split(':') as [
+      'updatedAt' | 'rating' | 'hourlyRate',
+      Prisma.SortOrder,
+    ];
+
+    if (sortField === 'rating') {
+      return [
+        { ratingAvg: sortDirection },
+        { ratingCount: 'desc' },
+        { updatedAt: 'desc' },
+        { id: 'desc' },
+      ];
+    }
+
+    if (sortField === 'hourlyRate') {
+      return [
+        { hourlyRate: sortDirection },
+        { updatedAt: 'desc' },
+        { id: 'desc' },
+      ];
+    }
+
+    return [{ updatedAt: sortDirection }, { id: 'desc' }];
   }
 
   private toDto(profile: WorkerProfileWithRelations) {

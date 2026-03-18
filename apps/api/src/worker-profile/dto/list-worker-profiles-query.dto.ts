@@ -1,15 +1,13 @@
 import { ApiPropertyOptional } from '@nestjs/swagger';
-import { Transform, Type } from 'class-transformer';
+import { Transform } from 'class-transformer';
 import {
   IsBoolean,
-  IsInt,
   IsOptional,
   IsString,
   Matches,
-  Max,
   MaxLength,
-  Min,
 } from 'class-validator';
+import { PaginationQueryDto } from '../../common/dto/pagination-query.dto';
 
 function toBoolean(value: unknown): unknown {
   if (typeof value === 'boolean') {
@@ -30,7 +28,7 @@ function toBoolean(value: unknown): unknown {
   return value;
 }
 
-export class ListWorkerProfilesQueryDto {
+export class ListWorkerProfilesQueryDto extends PaginationQueryDto {
   @ApiPropertyOptional()
   @IsOptional()
   @Transform(({ value }: { value: unknown }) =>
@@ -47,18 +45,23 @@ export class ListWorkerProfilesQueryDto {
   @IsBoolean()
   isAvailable?: boolean;
 
-  @ApiPropertyOptional({ default: 20, minimum: 1, maximum: 100 })
+  @ApiPropertyOptional({
+    description: 'Search by user id, location, or category name',
+  })
   @IsOptional()
-  @Type(() => Number)
-  @IsInt()
-  @Min(1)
-  @Max(100)
-  limit?: number;
+  @Transform(({ value }: { value: unknown }) =>
+    typeof value === 'string' ? value.trim() : value,
+  )
+  @IsString()
+  @MaxLength(120)
+  search?: string;
 
-  @ApiPropertyOptional({ default: 0, minimum: 0 })
+  @ApiPropertyOptional({
+    default: 'updatedAt:desc',
+    description:
+      'Allowed: updatedAt:asc|desc, rating:asc|desc, hourlyRate:asc|desc',
+  })
   @IsOptional()
-  @Type(() => Number)
-  @IsInt()
-  @Min(0)
-  offset?: number;
+  @Matches(/^(updatedAt|rating|hourlyRate):(asc|desc)$/)
+  sort?: string;
 }

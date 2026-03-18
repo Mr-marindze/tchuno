@@ -4,6 +4,7 @@ import {
   Get,
   Param,
   Post,
+  Query,
   Req,
   UseGuards,
 } from '@nestjs/common';
@@ -22,6 +23,8 @@ import { Throttle } from '@nestjs/throttler';
 import { ErrorResponseDto } from '../auth/dto/error-response.dto';
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
 import { CreateReviewDto } from './dto/create-review.dto';
+import { ListReviewsQueryDto } from './dto/list-reviews-query.dto';
+import { ReviewListResponseDto } from './dto/review-list-response.dto';
 import { ReviewDto } from './dto/review.dto';
 import { ReviewsService } from './reviews.service';
 
@@ -37,19 +40,25 @@ export class ReviewsController {
   @Get('worker/:workerProfileId')
   @ApiOperation({ summary: 'List reviews by worker profile' })
   @ApiParam({ name: 'workerProfileId', type: String })
-  @ApiOkResponse({ type: ReviewDto, isArray: true })
-  listByWorker(@Param('workerProfileId') workerProfileId: string) {
-    return this.reviewsService.listByWorkerProfile(workerProfileId);
+  @ApiOkResponse({ type: ReviewListResponseDto })
+  listByWorker(
+    @Param('workerProfileId') workerProfileId: string,
+    @Query() query: ListReviewsQueryDto,
+  ) {
+    return this.reviewsService.listByWorkerProfile(workerProfileId, query);
   }
 
   @UseGuards(JwtAuthGuard)
   @ApiBearerAuth()
   @Get('me')
   @ApiOperation({ summary: 'List reviews created by current user' })
-  @ApiOkResponse({ type: ReviewDto, isArray: true })
+  @ApiOkResponse({ type: ReviewListResponseDto })
   @ApiUnauthorizedResponse({ type: ErrorResponseDto })
-  listMine(@Req() req: AuthenticatedRequest) {
-    return this.reviewsService.listMine(req.user.sub);
+  listMine(
+    @Req() req: AuthenticatedRequest,
+    @Query() query: ListReviewsQueryDto,
+  ) {
+    return this.reviewsService.listMine(req.user.sub, query);
   }
 
   @UseGuards(JwtAuthGuard)

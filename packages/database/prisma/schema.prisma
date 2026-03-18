@@ -78,6 +78,7 @@ model Job {
   description     String
   budget          Int?
   quotedAmount    Int?
+  quoteMessage    String?
   status          JobStatus    @default(REQUESTED)
   acceptedAt      DateTime?
   startedAt       DateTime?

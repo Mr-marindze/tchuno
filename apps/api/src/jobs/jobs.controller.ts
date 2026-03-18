@@ -24,8 +24,10 @@ import { Throttle } from '@nestjs/throttler';
 import { ErrorResponseDto } from '../auth/dto/error-response.dto';
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
 import { CreateJobDto } from './dto/create-job.dto';
+import { JobListResponseDto } from './dto/job-list-response.dto';
 import { JobDto } from './dto/job.dto';
 import { ListJobsQueryDto } from './dto/list-jobs-query.dto';
+import { ProposeQuoteDto } from './dto/propose-quote.dto';
 import { UpdateJobStatusDto } from './dto/update-job-status.dto';
 import { JobsService } from './jobs.service';
 
@@ -54,7 +56,7 @@ export class JobsController {
 
   @Get('me/client')
   @ApiOperation({ summary: 'List jobs where current user is the client' })
-  @ApiOkResponse({ type: JobDto, isArray: true })
+  @ApiOkResponse({ type: JobListResponseDto })
   @ApiUnauthorizedResponse({ type: ErrorResponseDto })
   listMyClientJobs(
     @Req() req: AuthenticatedRequest,
@@ -65,7 +67,7 @@ export class JobsController {
 
   @Get('me/worker')
   @ApiOperation({ summary: 'List jobs assigned to current worker profile' })
-  @ApiOkResponse({ type: JobDto, isArray: true })
+  @ApiOkResponse({ type: JobListResponseDto })
   @ApiUnauthorizedResponse({ type: ErrorResponseDto })
   @ApiNotFoundResponse({ type: ErrorResponseDto })
   listMyWorkerJobs(
@@ -83,6 +85,25 @@ export class JobsController {
   @ApiNotFoundResponse({ type: ErrorResponseDto })
   getById(@Req() req: AuthenticatedRequest, @Param('id') id: string) {
     return this.jobsService.getById(id, req.user.sub);
+  }
+
+  @Patch(':id/quote')
+  @Throttle({ default: { limit: 40, ttl: 60_000 } })
+  @ApiOperation({
+    summary: 'Send or update quote proposal for QUOTE_REQUEST job',
+  })
+  @ApiParam({ name: 'id', type: String })
+  @ApiOkResponse({ type: JobDto })
+  @ApiUnauthorizedResponse({ type: ErrorResponseDto })
+  @ApiConflictResponse({ type: ErrorResponseDto })
+  @ApiNotFoundResponse({ type: ErrorResponseDto })
+  @ApiTooManyRequestsResponse({ type: ErrorResponseDto })
+  proposeQuote(
+    @Req() req: AuthenticatedRequest,
+    @Param('id') id: string,
+    @Body() dto: ProposeQuoteDto,
+  ) {
+    return this.jobsService.proposeQuote(id, req.user.sub, dto);
   }
 
   @Patch(':id/status')
