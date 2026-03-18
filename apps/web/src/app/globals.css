@@ -48,6 +48,86 @@ body {
   width: min(1100px, 100%);
 }
 
+.marketplace-shell {
+  align-items: start;
+}
+
+.marketplace-layout {
+  display: grid;
+  gap: 1rem;
+  grid-template-columns: minmax(0, 1.55fr) minmax(300px, 1fr);
+}
+
+.marketplace-main {
+  display: grid;
+  gap: 1rem;
+}
+
+.marketplace-auth {
+  display: grid;
+  gap: 0.8rem;
+  border-radius: 16px;
+  border: 1px solid rgba(186, 230, 253, 0.2);
+  background: rgba(15, 23, 42, 0.42);
+  padding: 0.8rem;
+}
+
+.marketplace-section {
+  border: 1px solid rgba(125, 211, 252, 0.18);
+  border-radius: 14px;
+  background: rgba(15, 23, 42, 0.42);
+  padding: 0.8rem;
+}
+
+.marketplace-hero-actions {
+  margin-top: 0.2rem;
+}
+
+.marketplace-search-toolbar {
+  margin-bottom: 0.5rem;
+}
+
+.marketplace-search-toolbar label {
+  min-width: min(420px, 100%);
+}
+
+.marketplace-chip-grid {
+  margin-top: 0.3rem;
+}
+
+.marketplace-chip {
+  border: 1px solid rgba(125, 211, 252, 0.35);
+  border-radius: 999px;
+  padding: 0.35rem 0.75rem;
+  color: #e0f2fe;
+  background: rgba(15, 23, 42, 0.45);
+  font-size: 0.84rem;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.marketplace-chip.is-active {
+  background: rgba(8, 145, 178, 0.8);
+  border-color: rgba(186, 230, 253, 0.45);
+}
+
+.marketplace-worker-grid {
+  grid-template-columns: repeat(auto-fit, minmax(230px, 1fr));
+}
+
+.marketplace-worker-card {
+  display: grid;
+  gap: 0.3rem;
+}
+
+.marketplace-worker-actions {
+  margin-top: 0.35rem;
+}
+
+.marketplace-journey .flow-summary-item {
+  min-height: 112px;
+}
+
 .card::before {
   content: "";
   position: absolute;
@@ -558,6 +638,41 @@ a.primary.primary--ghost {
   font-size: 1.15rem;
 }
 
+.job-create-form {
+  margin-top: 0.85rem;
+}
+
+.form-step {
+  border: 1px solid rgba(125, 211, 252, 0.24);
+  border-radius: 12px;
+  padding: 0.7rem;
+  display: grid;
+  gap: 0.7rem;
+}
+
+.form-step legend {
+  padding: 0 0.3rem;
+  color: #bae6fd;
+  font-size: 0.81rem;
+  font-weight: 700;
+  letter-spacing: 0.02em;
+}
+
+.dashboard-progress {
+  margin-top: 0.5rem;
+  height: 8px;
+  border-radius: 999px;
+  border: 1px solid rgba(125, 211, 252, 0.2);
+  background: rgba(15, 23, 42, 0.55);
+  overflow: hidden;
+}
+
+.dashboard-progress-fill {
+  height: 100%;
+  background: linear-gradient(90deg, rgba(8, 145, 178, 0.95), rgba(34, 197, 94, 0.92));
+  transition: width 180ms ease;
+}
+
 .job-timeline {
   margin: 0.54rem 0 0;
   padding: 0;
@@ -763,6 +878,14 @@ pre {
   .card {
     border-radius: 18px;
     padding: 1rem;
+  }
+
+  .marketplace-layout {
+    grid-template-columns: 1fr;
+  }
+
+  .marketplace-auth {
+    order: -1;
   }
 
   .dashboard-nav a {

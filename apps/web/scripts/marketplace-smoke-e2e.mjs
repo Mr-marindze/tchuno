@@ -12,7 +12,7 @@ const WEB_URL = `http://127.0.0.1:${WEB_PORT}`;
 const CHROME_PATH = process.env.CHROME_PATH ?? "/usr/bin/google-chrome";
 const SMOKE_SCREENSHOT_DIR = path.join(
   ROOT_DIR,
-  "apps/web/test-results/dashboard-smoke",
+  "apps/web/test-results/marketplace-smoke",
 );
 
 const corsHeaders = {
@@ -343,7 +343,7 @@ function resolveMockBody(url) {
 
 function routePathToScreenshotName(routePath) {
   const normalized = routePath.replace(/^\/+/, "").replaceAll("/", "-");
-  return normalized.length > 0 ? normalized : "dashboard-home";
+  return normalized.length > 0 ? normalized : "landing";
 }
 
 async function hasRoleWithName(page, role, name) {
@@ -362,10 +362,10 @@ async function assertDashboardA11yBasics(page, check, viewportName) {
   const h1Count = await page.getByRole("heading", { level: 1 }).count();
   assert(h1Count === 1, `${viewportName} ${check.path} deve ter um único <h1>`);
 
-  const namedNavCount = await page.locator("nav[aria-label]").count();
+  const namedNavCount = await page.locator("[aria-label]").count();
   assert(
     namedNavCount >= 1,
-    `${viewportName} ${check.path} sem navegação com aria-label`,
+    `${viewportName} ${check.path} sem elemento com aria-label`,
   );
 
   const hasButtonCta = await hasRoleWithName(page, "button", check.cta);
@@ -404,6 +404,38 @@ async function assertDashboardA11yBasics(page, check, viewportName) {
   );
 }
 
+async function assertRouteSpecificContent(page, check, viewportName) {
+  if (!Array.isArray(check.mustHave)) {
+    return;
+  }
+
+  for (const requirement of check.mustHave) {
+    if (requirement.type === "text") {
+      await page.getByText(requirement.value, { exact: false }).first().waitFor({
+        timeout: 20_000,
+      });
+      continue;
+    }
+
+    if (requirement.type === "label") {
+      await page.getByLabel(requirement.value).first().waitFor({
+        timeout: 20_000,
+      });
+      continue;
+    }
+
+    if (requirement.type === "aria") {
+      const ariaCount = await page
+        .locator(`[aria-label="${requirement.value}"]`)
+        .count();
+      assert(
+        ariaCount >= 1,
+        `${viewportName} ${check.path} sem elemento aria-label="${requirement.value}"`,
+      );
+    }
+  }
+}
+
 async function run() {
   await runCommand("yarn", ["workspace", "@tchuno/web", "build"]);
 
@@ -422,6 +454,17 @@ async function run() {
 
     try {
       const checks = [
+        {
+          path: "/",
+          heading: "Encontra profissionais locais e contrata com confiança",
+          block: "Descoberta de serviços",
+          cta: /Entrar para contratar|Criar pedido agora/,
+          mustHave: [
+            { type: "label", value: "Pesquisa principal" },
+            { type: "aria", value: "Categorias" },
+            { type: "text", value: "Profissionais em destaque" },
+          ],
+        },
         {
           path: "/dashboard",
           heading: "Home Operacional",
@@ -519,6 +562,7 @@ async function run() {
           });
 
           await assertDashboardA11yBasics(page, check, viewportConfig.name);
+          await assertRouteSpecificContent(page, check, viewportConfig.name);
 
           const bodyText = await page.locator("body").innerText();
           assert(

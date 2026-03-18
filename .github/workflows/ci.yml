@@ -144,15 +144,15 @@ jobs:
         id: setup-chrome
         uses: browser-actions/setup-chrome@v1
 
-      - name: Run dashboard smoke (desktop/mobile)
+      - name: Run marketplace smoke (desktop/mobile)
         env:
           CHROME_PATH: ${{ steps.setup-chrome.outputs.chrome-path }}
         run: yarn workspace @tchuno/web test:smoke
 
-      - name: Upload dashboard smoke screenshots
+      - name: Upload marketplace smoke screenshots
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: dashboard-smoke-screenshots
-          path: apps/web/test-results/dashboard-smoke
+          name: marketplace-smoke-screenshots
+          path: apps/web/test-results/marketplace-smoke
           if-no-files-found: warn

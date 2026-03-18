@@ -13,6 +13,15 @@ import {
   register,
   saveTokens,
 } from "@/lib/auth";
+import {
+  formatCurrencyMzn,
+  formatRatingValue,
+  formatStars,
+  getStatusTone,
+  shortenId,
+} from "@/components/dashboard/dashboard-formatters";
+import { useMarketplaceDiscovery } from "@/components/marketplace/use-marketplace-discovery";
+import { MarketplaceWorkerCard } from "@/components/marketplace/marketplace-worker-card";
 import { ToastTone, useToast } from "@/components/toast-provider";
 import { humanizeUnknownError } from "@/lib/http-errors";
 
@@ -28,9 +37,23 @@ export default function Home() {
   const [result, setResult] = useState<AuthResponse | null>(null);
   const [message, setMessage] = useState("Ready");
   const [hasSession, setHasSession] = useState(false);
+  const {
+    discoveryLoading,
+    discoveryMessage,
+    discoverySearch,
+    discoveryCategory,
+    marketCategories,
+    visibleCategories,
+    visibleWorkers,
+    trustSummary,
+    onDiscoverySearchChange,
+    onToggleDiscoveryCategory,
+    onResetDiscoveryFilters,
+  } = useMarketplaceDiscovery();
 
   const title = useMemo(
-    () => (mode === "login" ? "Entrar no Tchuno" : "Criar conta no Tchuno"),
+    () =>
+      mode === "login" ? "Entrar no Tchuno" : "Criar conta e contratar serviços",
     [mode],
   );
 
@@ -39,6 +62,15 @@ export default function Home() {
     const refreshToken = localStorage.getItem("tchuno_refresh_token");
     setHasSession(Boolean(accessToken || refreshToken));
   }, []);
+
+  function focusAuth(targetMode: Mode = "login"): void {
+    setMode(targetMode);
+    if (typeof document !== "undefined") {
+      document
+        .getElementById("auth-panel")
+        ?.scrollIntoView({ behavior: "smooth", block: "start" });
+    }
+  }
 
   function setFeedback(nextMessage: string, tone: ToastTone = "info"): void {
     setMessage(nextMessage);
@@ -106,7 +138,8 @@ export default function Home() {
   }
 
   async function onRefresh() {
-    const refreshToken = result?.refreshToken ?? localStorage.getItem("tchuno_refresh_token");
+    const refreshToken =
+      result?.refreshToken ?? localStorage.getItem("tchuno_refresh_token");
 
     if (!refreshToken) {
       setFeedback("Nenhum refresh token disponível.", "error");
@@ -130,7 +163,8 @@ export default function Home() {
   }
 
   async function onLogout() {
-    const refreshToken = result?.refreshToken ?? localStorage.getItem("tchuno_refresh_token");
+    const refreshToken =
+      result?.refreshToken ?? localStorage.getItem("tchuno_refresh_token");
 
     setIsSubmitting(true);
     setMessage("A terminar sessão...");
@@ -151,7 +185,8 @@ export default function Home() {
   }
 
   async function onLogoutAll() {
-    const accessToken = result?.accessToken ?? localStorage.getItem("tchuno_access_token");
+    const accessToken =
+      result?.accessToken ?? localStorage.getItem("tchuno_access_token");
 
     if (!accessToken) {
       setFeedback("Access token ausente.", "error");
@@ -178,109 +213,307 @@ export default function Home() {
   }
 
   return (
-    <main className="shell">
-      <section className="card">
-        <header className="header">
-          <p className="kicker">Tchuno Auth</p>
-          <h1>{title}</h1>
-          <p className="subtitle">API alvo: {API_URL}</p>
-        </header>
+    <main className="shell marketplace-shell">
+      <section className="card card--wide marketplace-layout">
+        <div className="marketplace-main">
+          <header className="header marketplace-hero">
+            <p className="kicker">Tchuno Marketplace</p>
+            <h1>Encontra profissionais locais e contrata com confiança</h1>
+            <p className="subtitle">
+              Descobre serviços por categoria, valida reputação e cria pedidos com
+              acompanhamento claro do início à conclusão.
+            </p>
+          </header>
 
-        <div className="mode-switch">
-          <button
-            type="button"
-            className={mode === "login" ? "active" : ""}
-            onClick={() => setMode("login")}
-          >
-            Login
-          </button>
-          <button
-            type="button"
-            className={mode === "register" ? "active" : ""}
-            onClick={() => setMode("register")}
-          >
-            Register
-          </button>
+          <div className="actions actions--inline marketplace-hero-actions">
+            {hasSession ? (
+              <Link href="/dashboard/jobs" className="primary">
+                Criar pedido agora
+              </Link>
+            ) : (
+              <button type="button" className="primary" onClick={() => focusAuth("login")}>
+                Entrar para contratar
+              </button>
+            )}
+
+            {hasSession ? (
+              <Link href="/dashboard/workers" className="primary primary--ghost">
+                Explorar profissionais
+              </Link>
+            ) : (
+              <button type="button" onClick={() => focusAuth("register")}>
+                Criar conta gratuita
+              </button>
+            )}
+          </div>
+
+          <p className={`status status--${getStatusTone(discoveryMessage)}`}>
+            {discoveryMessage}
+          </p>
+
+          <section className="marketplace-section" id="discover">
+            <h2 className="section-title">Descoberta de serviços</h2>
+            <p className="section-lead">
+              Pesquisa por serviço, localização ou categoria. Depois abre o dashboard
+              para avançar com pedido e contratação.
+            </p>
+
+            <div className="section-toolbar marketplace-search-toolbar">
+              <label>
+                Pesquisa principal
+                <input
+                  type="search"
+                  value={discoverySearch}
+                  onChange={(event) => onDiscoverySearchChange(event.target.value)}
+                  placeholder="Ex.: eletricista, canalização, Matola"
+                />
+              </label>
+              <button type="button" onClick={onResetDiscoveryFilters}>
+                Limpar pesquisa
+              </button>
+            </div>
+
+            <div className="dashboard-nav marketplace-chip-grid" aria-label="Categorias">
+              {visibleCategories.length === 0 ? (
+                <span className="empty-state">Sem categorias para este termo.</span>
+              ) : (
+                visibleCategories.map((category) => (
+                  <button
+                    key={category.id}
+                    type="button"
+                    className={`marketplace-chip${
+                      discoveryCategory === category.slug ? " is-active" : ""
+                    }`}
+                    onClick={() => onToggleDiscoveryCategory(category.slug)}
+                  >
+                    {category.name}
+                  </button>
+                ))
+              )}
+            </div>
+          </section>
+
+          <section className="marketplace-section">
+            <h2 className="section-title">Profissionais em destaque</h2>
+            <p className="section-lead">
+              Catálogo rápido com sinais de confiança para acelerar a decisão de
+              contratação.
+            </p>
+
+            <div className="overview-grid">
+              <article className="metric-card">
+                <p className="metric-label">Disponíveis</p>
+                <p className="metric-value">{trustSummary.availableCount}</p>
+              </article>
+              <article className="metric-card">
+                <p className="metric-label">Com avaliações</p>
+                <p className="metric-value">{trustSummary.ratedCount}</p>
+              </article>
+              <article className="metric-card">
+                <p className="metric-label">Rating médio</p>
+                <p className="metric-value">{trustSummary.avgRating}/5</p>
+              </article>
+              <article className="metric-card">
+                <p className="metric-label">Categorias ativas</p>
+                <p className="metric-value">{marketCategories.length}</p>
+              </article>
+            </div>
+
+            <div className="panel-grid marketplace-worker-grid">
+              {discoveryLoading ? (
+                <p className="status">A carregar profissionais...</p>
+              ) : visibleWorkers.length === 0 ? (
+                <p className="empty-state">
+                  Não encontrámos profissionais para este filtro. Ajusta a pesquisa
+                  ou remove a categoria selecionada.
+                </p>
+              ) : (
+                visibleWorkers.map((worker) => (
+                  <MarketplaceWorkerCard
+                    key={worker.id}
+                    title={`Profissional ${shortenId(worker.userId)}`}
+                    availabilityTone={worker.isAvailable ? "is-ok" : "is-muted"}
+                    availabilityLabel={worker.isAvailable ? "Disponível" : "Indisponível"}
+                    details={[
+                      {
+                        label: "Localização",
+                        value: worker.location ?? "Não indicada",
+                      },
+                      {
+                        label: "Reputação",
+                        value: `${formatStars(worker.ratingAvg)} ${formatRatingValue(
+                          worker.ratingAvg,
+                        )} (${worker.ratingCount} reviews)`,
+                      },
+                      {
+                        label: "Preço/hora",
+                        value: formatCurrencyMzn(worker.hourlyRate),
+                      },
+                      {
+                        label: "Categorias",
+                        value:
+                          worker.categories.length > 0
+                            ? worker.categories.map((item) => item.name).join(", ")
+                            : "Sem categorias",
+                      },
+                    ]}
+                    note={worker.bio ?? undefined}
+                    actions={
+                      <>
+                        {hasSession ? (
+                          <Link href="/dashboard/jobs#job-create" className="primary">
+                            Pedir serviço
+                          </Link>
+                        ) : (
+                          <button
+                            type="button"
+                            className="primary"
+                            onClick={() => focusAuth("login")}
+                          >
+                            Entrar para pedir serviço
+                          </button>
+                        )}
+                        <Link href="/dashboard/workers" className="primary primary--ghost">
+                          Ver catálogo completo
+                        </Link>
+                      </>
+                    }
+                  />
+                ))
+              )}
+            </div>
+          </section>
+
+          <section className="marketplace-section marketplace-journey">
+            <h2 className="section-title">Como funciona no Tchuno</h2>
+            <div className="flow-summary">
+              <article className="flow-summary-item">
+                <p className="metric-label">1. Descobrir</p>
+                <p className="metric-note">
+                  Escolhe categoria e profissional com base em reputação,
+                  disponibilidade e localização.
+                </p>
+              </article>
+              <article className="flow-summary-item">
+                <p className="metric-label">2. Pedir</p>
+                <p className="metric-note">
+                  Cria o pedido com descrição clara e orçamento em preço fixo ou
+                  cotação.
+                </p>
+              </article>
+              <article className="flow-summary-item">
+                <p className="metric-label">3. Acompanhar</p>
+                <p className="metric-note">
+                  Segue estado, timeline e próxima ação até concluir e avaliar.
+                </p>
+              </article>
+            </div>
+          </section>
         </div>
 
-        <form onSubmit={onSubmit} className="form">
-          <label>
-            Email
-            <input
-              type="email"
-              value={email}
-              onChange={(event) => setEmail(event.target.value)}
-              required
-            />
-          </label>
+        <aside id="auth-panel" className="marketplace-auth">
+          <header className="header">
+            <p className="kicker">Acesso</p>
+            <h2>{title}</h2>
+            <p className="subtitle">API alvo: {API_URL}</p>
+          </header>
 
-          <label>
-            Password
-            <input
-              type="password"
-              value={password}
-              onChange={(event) => setPassword(event.target.value)}
-              minLength={8}
-              pattern="(?=.*[A-Za-z])(?=.*[0-9]).{8,}"
-              title="Use pelo menos 8 caracteres, incluindo 1 letra e 1 número."
-              required
-            />
-          </label>
+          <div className="mode-switch">
+            <button
+              type="button"
+              className={mode === "login" ? "active" : ""}
+              onClick={() => setMode("login")}
+            >
+              Login
+            </button>
+            <button
+              type="button"
+              className={mode === "register" ? "active" : ""}
+              onClick={() => setMode("register")}
+            >
+              Registar
+            </button>
+          </div>
 
-          {mode === "register" ? (
+          <form onSubmit={onSubmit} className="form">
             <label>
-              Name
+              Email
               <input
-                type="text"
-                value={name}
-                onChange={(event) => setName(event.target.value)}
-                maxLength={80}
+                type="email"
+                value={email}
+                onChange={(event) => setEmail(event.target.value)}
+                required
               />
             </label>
-          ) : null}
 
-          <button type="submit" disabled={isSubmitting} className="primary">
-            {isSubmitting ? "Aguarda..." : mode === "login" ? "Entrar" : "Criar conta"}
-          </button>
-        </form>
+            <label>
+              Password
+              <input
+                type="password"
+                value={password}
+                onChange={(event) => setPassword(event.target.value)}
+                minLength={8}
+                pattern="(?=.*[A-Za-z])(?=.*[0-9]).{8,}"
+                title="Use pelo menos 8 caracteres, incluindo 1 letra e 1 número."
+                required
+              />
+            </label>
 
-        <div className="actions">
-          <button type="button" onClick={onRefresh} disabled={isSubmitting}>
-            Refresh
-          </button>
-          <button type="button" onClick={onLogout} disabled={isSubmitting}>
-            Logout
-          </button>
-          <button type="button" onClick={onLogoutAll} disabled={isSubmitting}>
-            Logout All
-          </button>
-        </div>
+            {mode === "register" ? (
+              <label>
+                Nome
+                <input
+                  type="text"
+                  value={name}
+                  onChange={(event) => setName(event.target.value)}
+                  maxLength={80}
+                />
+              </label>
+            ) : null}
 
-        <p className="status">Status: {message}</p>
+            <button type="submit" disabled={isSubmitting} className="primary">
+              {isSubmitting ? "Aguarda..." : mode === "login" ? "Entrar" : "Criar conta"}
+            </button>
+          </form>
 
-        <pre className="result">
-          {result
-            ? JSON.stringify(
-                {
-                  user: result.user,
-                  accessToken: `${result.accessToken.slice(0, 24)}...`,
-                  refreshToken: `${result.refreshToken.slice(0, 24)}...`,
-                },
-                null,
-                2,
-              )
-            : "Sem sessão ativa"}
-        </pre>
+          <div className="actions">
+            <button type="button" onClick={onRefresh} disabled={isSubmitting}>
+              Renovar sessão
+            </button>
+            <button type="button" onClick={onLogout} disabled={isSubmitting}>
+              Terminar sessão
+            </button>
+            <button type="button" onClick={onLogoutAll} disabled={isSubmitting}>
+              Terminar todas
+            </button>
+          </div>
 
-        {hasSession ? (
-          <p className="status">
-            <Link href="/dashboard" className="nav-link">
-              Ir para dashboard protegido
-            </Link>
-          </p>
-        ) : (
-          <p className="status">Faz login para aceder ao dashboard protegido.</p>
-        )}
+          <p className="status">Status: {message}</p>
+
+          <pre className="result">
+            {result
+              ? JSON.stringify(
+                  {
+                    user: result.user,
+                    accessToken: `${result.accessToken.slice(0, 24)}...`,
+                    refreshToken: `${result.refreshToken.slice(0, 24)}...`,
+                  },
+                  null,
+                  2,
+                )
+              : "Sem sessão ativa"}
+          </pre>
+
+          {hasSession ? (
+            <p className="status">
+              <Link href="/dashboard" className="nav-link">
+                Ir para dashboard protegido
+              </Link>
+            </p>
+          ) : (
+            <p className="status">Faz login para aceder ao dashboard protegido.</p>
+          )}
+        </aside>
       </section>
     </main>
   );

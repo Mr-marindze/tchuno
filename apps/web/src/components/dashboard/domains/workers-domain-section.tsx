@@ -17,6 +17,7 @@ import {
   DashboardSectionHeader,
   DashboardSummaryCard,
 } from "@/components/dashboard/ui/dashboard-primitives";
+import { MarketplaceWorkerCard } from "@/components/marketplace/marketplace-worker-card";
 import { Category } from "@/lib/categories";
 import { PaginationMeta } from "@/lib/pagination";
 import { WorkerProfile } from "@/lib/worker-profile";
@@ -296,58 +297,80 @@ export function WorkersDomainSection({
               );
 
               return (
-                <article key={profile.id} className="worker-card">
-                  <p className="item-title">
-                    {isMe ? "O teu perfil" : `Worker ${shortenId(profile.userId)}`}
-                    <DashboardBadge tone={profile.isAvailable ? "is-ok" : "is-muted"}>
-                      {profile.isAvailable ? "Disponível" : "Indisponível"}
-                    </DashboardBadge>
-                  </p>
-                  <div className="pill-row">
-                    <DashboardBadge
-                      tone={profileCompleteness.score >= 5 ? "is-ok" : "is-muted"}
-                    >
-                      Completude {profileCompleteness.percent}%
-                    </DashboardBadge>
-                    <DashboardBadge tone={getRatingBadgeTone(profile.ratingAvg)}>
-                      Rating {formatRatingValue(profile.ratingAvg)}/5
-                    </DashboardBadge>
-                    <DashboardBadge tone={reputation.tone}>{reputation.label}</DashboardBadge>
-                  </div>
-                  <p>
-                    <strong>Rating:</strong> {formatStars(profile.ratingAvg)}{" "}
-                    {formatRatingValue(profile.ratingAvg)} ({profile.ratingCount})
-                  </p>
-                  <p>
-                    <strong>Tarifa:</strong>{" "}
-                    {typeof profile.hourlyRate === "number"
-                      ? formatCurrencyMzn(profile.hourlyRate)
-                      : "Não definida"}
-                  </p>
-                  <p>
-                    <strong>Experiência:</strong> {profile.experienceYears} anos
-                  </p>
-                  <p>
-                    <strong>Cidade:</strong> {profileCompleteness.location.city}
-                  </p>
-                  <p>
-                    <strong>Bairro:</strong> {profileCompleteness.location.neighborhood}
-                  </p>
-                  <p>
-                    <strong>Categorias:</strong>{" "}
-                    {profile.categories.length > 0
-                      ? profile.categories.map((item) => item.name).join(", ")
-                      : "Sem categorias"}
-                  </p>
-                  {profileCompleteness.missing.length > 0 ? (
-                    <p className="muted">
-                      Falta para perfil completo: {profileCompleteness.missing[0]}.
-                    </p>
-                  ) : (
-                    <p className="muted">Perfil com sinais fortes de confiança.</p>
-                  )}
-                  <p className="muted">Atualizado: {formatDate(profile.updatedAt)}</p>
-                </article>
+                <MarketplaceWorkerCard
+                  key={profile.id}
+                  title={isMe ? "O teu perfil" : `Worker ${shortenId(profile.userId)}`}
+                  availabilityTone={profile.isAvailable ? "is-ok" : "is-muted"}
+                  availabilityLabel={profile.isAvailable ? "Disponível" : "Indisponível"}
+                  badges={
+                    <>
+                      <DashboardBadge
+                        tone={profileCompleteness.score >= 5 ? "is-ok" : "is-muted"}
+                      >
+                        Completude {profileCompleteness.percent}%
+                      </DashboardBadge>
+                      <DashboardBadge tone={getRatingBadgeTone(profile.ratingAvg)}>
+                        Rating {formatRatingValue(profile.ratingAvg)}/5
+                      </DashboardBadge>
+                      <DashboardBadge tone={reputation.tone}>
+                        {reputation.label}
+                      </DashboardBadge>
+                    </>
+                  }
+                  details={[
+                    {
+                      label: "Rating",
+                      value: `${formatStars(profile.ratingAvg)} ${formatRatingValue(
+                        profile.ratingAvg,
+                      )} (${profile.ratingCount})`,
+                    },
+                    {
+                      label: "Tarifa",
+                      value:
+                        typeof profile.hourlyRate === "number"
+                          ? formatCurrencyMzn(profile.hourlyRate)
+                          : "Não definida",
+                    },
+                    {
+                      label: "Experiência",
+                      value: `${profile.experienceYears} anos`,
+                    },
+                    {
+                      label: "Cidade",
+                      value: profileCompleteness.location.city,
+                    },
+                    {
+                      label: "Bairro",
+                      value: profileCompleteness.location.neighborhood,
+                    },
+                    {
+                      label: "Categorias",
+                      value:
+                        profile.categories.length > 0
+                          ? profile.categories.map((item) => item.name).join(", ")
+                          : "Sem categorias",
+                    },
+                  ]}
+                  note={
+                    profileCompleteness.missing.length > 0
+                      ? `Falta para perfil completo: ${profileCompleteness.missing[0]}.`
+                      : "Perfil com sinais fortes de confiança."
+                  }
+                  footer={`Atualizado: ${formatDate(profile.updatedAt)}`}
+                  actions={
+                    <>
+                      <Link href="/dashboard/jobs#job-create" className="primary">
+                        {isMe ? "Criar job de teste" : "Pedir serviço"}
+                      </Link>
+                      <Link
+                        href={isMe ? "/dashboard/profile" : "/dashboard/jobs"}
+                        className="primary primary--ghost"
+                      >
+                        {isMe ? "Gerir meu perfil" : "Ver fluxo de contratação"}
+                      </Link>
+                    </>
+                  }
+                />
               );
             })}
           </div>

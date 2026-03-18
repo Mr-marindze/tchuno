@@ -7,6 +7,9 @@ import {
   DashboardActionPanel,
   DashboardBadge,
   DashboardEmptyState,
+  DashboardMetaStat,
+  DashboardPaginationRow,
+  DashboardPanel,
   DashboardSectionHeader,
   DashboardSummaryCard,
 } from "@/components/dashboard/ui/dashboard-primitives";
@@ -161,6 +164,38 @@ export function JobsDomainSection({
   const inExecutionCount =
     clientJobFlowCounts.ACCEPTED + clientJobFlowCounts.IN_PROGRESS;
   const hasReviewBacklog = reviewableJobs.length > 0;
+  const creationSteps = [
+    {
+      label: "Profissional selecionado",
+      ready: jobWorkerProfileId.length > 0,
+    },
+    {
+      label: "Categoria definida",
+      ready: jobCategoryId.length > 0,
+    },
+    {
+      label: "Título e descrição completos",
+      ready: jobTitle.trim().length >= 3 && jobDescription.trim().length >= 10,
+    },
+    {
+      label:
+        jobPricingMode === "FIXED_PRICE"
+          ? "Orçamento obrigatório definido"
+          : "Modo de cotação confirmado",
+      ready:
+        jobPricingMode === "FIXED_PRICE"
+          ? Number(jobBudget) > 0
+          : true,
+    },
+  ];
+  const creationStepReadyCount = creationSteps.filter((item) => item.ready).length;
+  const creationProgressPercent = Math.round(
+    (creationStepReadyCount / creationSteps.length) * 100,
+  );
+  const createJobCtaLabel =
+    jobPricingMode === "QUOTE_REQUEST"
+      ? "Criar job e pedir cotação"
+      : "Criar job de preço fixo";
 
   return (
     <section id="jobs" className="dashboard-section">
@@ -196,8 +231,7 @@ export function JobsDomainSection({
         }
       />
 
-      <div className="result">
-        <p className="item-title">Fluxo do pedido (cliente {"->"} worker {"->"} review)</p>
+      <DashboardPanel title="Fluxo do pedido (cliente -> worker -> review)">
         <div className="flow-summary">
           <DashboardSummaryCard
             className="flow-summary-item"
@@ -234,13 +268,53 @@ export function JobsDomainSection({
             Quando um job chega a concluído, ele aparece automaticamente em Reviews.
           </p>
         )}
-      </div>
+      </DashboardPanel>
 
-      <div className="result">
-        <p className="item-title">Checklist antes de criar job</p>
+      <DashboardPanel title="Criação guiada de pedido">
+        <div className="flow-summary">
+          <DashboardSummaryCard
+            className="flow-summary-item"
+            label="Passos prontos"
+            value={`${creationStepReadyCount}/${creationSteps.length}`}
+          />
+          <DashboardSummaryCard
+            className="flow-summary-item"
+            label="Progresso"
+            value={`${creationProgressPercent}%`}
+          />
+          <DashboardSummaryCard
+            className="flow-summary-item"
+            label="Profissional selecionado"
+            value={
+              selectedJobWorkerProfile
+                ? shortenId(selectedJobWorkerProfile.userId)
+                : "Nenhum"
+            }
+          />
+          <DashboardSummaryCard
+            className="flow-summary-item"
+            label="Categorias compatíveis"
+            value={availableJobCategories.length}
+          />
+        </div>
+        <div className="dashboard-progress">
+          <div
+            className="dashboard-progress-fill"
+            style={{ width: `${creationProgressPercent}%` }}
+          />
+        </div>
         <ul className="checklist">
-          {jobCreationChecklist.map((item) => (
-            <li key={item.label} className={item.ready ? "is-ready" : "is-blocked"}>
+          {[
+            ...jobCreationChecklist,
+            ...creationSteps.map((item) => ({
+              ...item,
+              help: "Confirma este passo no formulário abaixo.",
+            })),
+          ].map((item, index) => (
+            <li
+              key={`${item.label}-${index}`}
+              className={item.ready ? "is-ready" : "is-blocked"}
+            >
               <strong>{item.ready ? "Pronto" : "Pendente"}:</strong> {item.label}. {item.help}
             </li>
           ))}
@@ -252,7 +326,7 @@ export function JobsDomainSection({
             : "Nenhum"}
         </p>
         <p className="muted">Categorias compatíveis com o worker: {availableJobCategories.length}</p>
-      </div>
+      </DashboardPanel>
 
       <div className="section-toolbar">
         <label>
@@ -306,121 +380,140 @@ export function JobsDomainSection({
         </button>
       </div>
 
-      <div className="meta-row">
-        <button type="button" onClick={onJobPreviousPage} disabled={jobsLoading || jobPage <= 1}>
-          Página anterior
-        </button>
-        <button
-          type="button"
-          onClick={onJobNextPage}
-          disabled={jobsLoading || !(clientJobsMeta?.hasNext || workerJobsMeta?.hasNext)}
-        >
-          Próxima página
-        </button>
-        <p className="status">
-          Página: {clientJobsMeta?.page ?? workerJobsMeta?.page ?? jobPage}
-        </p>
-        <p className="status">
-          Cliente {visibleClientJobs.length}/{clientJobsMeta?.total ?? 0} | Worker {visibleWorkerJobs.length}/{workerJobsMeta?.total ?? 0}
-        </p>
-      </div>
+      <DashboardPaginationRow
+        onPrevious={onJobPreviousPage}
+        onNext={onJobNextPage}
+        previousDisabled={jobsLoading || jobPage <= 1}
+        nextDisabled={jobsLoading || !(clientJobsMeta?.hasNext || workerJobsMeta?.hasNext)}
+      >
+        <DashboardMetaStat
+          label="Página"
+          value={clientJobsMeta?.page ?? workerJobsMeta?.page ?? jobPage}
+        />
+        <DashboardMetaStat
+          label="Cliente"
+          value={`${visibleClientJobs.length}/${clientJobsMeta?.total ?? 0}`}
+        />
+        <DashboardMetaStat
+          label="Worker"
+          value={`${visibleWorkerJobs.length}/${workerJobsMeta?.total ?? 0}`}
+        />
+      </DashboardPaginationRow>
 
-      <form onSubmit={onCreateJob} className="form" id="job-create">
-        <label>
-          Profissional
-          <select
-            value={jobWorkerProfileId}
-            onChange={(event) => onJobWorkerProfileIdChange(event.target.value)}
-            required
-          >
-            {jobWorkerOptions.length === 0 ? (
-              <option value="">Sem profissionais disponiveis</option>
-            ) : (
-              jobWorkerOptions.map((profile) => (
-                <option key={profile.id} value={profile.id}>
-                  {shortenId(profile.userId)} ({profile.location ?? "n/a"})
-                </option>
-              ))
-            )}
-          </select>
-        </label>
-        <label>
-          Categoria
-          <select
-            value={jobCategoryId}
-            onChange={(event) => onJobCategoryIdChange(event.target.value)}
-            required
-          >
-            {availableJobCategories.length === 0 ? (
-              <option value="">Sem categoria compativel</option>
-            ) : (
-              availableJobCategories.map((category) => (
-                <option key={category.id} value={category.id}>
-                  {category.name}
-                </option>
-              ))
-            )}
-          </select>
-        </label>
-        <label>
-          Modo de preco
-          <select
-            value={jobPricingMode}
-            onChange={(event) =>
-              onJobPricingModeChange(event.target.value as "FIXED_PRICE" | "QUOTE_REQUEST")
-            }
-          >
-            <option value="FIXED_PRICE">Preco fixo</option>
-            <option value="QUOTE_REQUEST">Sob cotacao</option>
-          </select>
-        </label>
-        <label>
-          Titulo
-          <input
-            type="text"
-            value={jobTitle}
-            onChange={(event) => onJobTitleChange(event.target.value)}
-            minLength={3}
-            maxLength={120}
-            required
-          />
-        </label>
-        <label>
-          Descricao
-          <textarea
-            value={jobDescription}
-            onChange={(event) => onJobDescriptionChange(event.target.value)}
-            maxLength={2000}
-            minLength={10}
-            required
-          />
-        </label>
-        <label>
-          {jobPricingMode === "FIXED_PRICE" ? "Orçamento (obrigatório)" : "Orçamento máximo (opcional)"}
-          <input
-            type="number"
-            value={jobBudget}
-            onChange={(event) => onJobBudgetChange(event.target.value)}
-            min={jobPricingMode === "FIXED_PRICE" ? 1 : 0}
-            max={100_000_000}
-            step={1}
-            required={jobPricingMode === "FIXED_PRICE"}
-          />
-        </label>
-        <label>
-          Data agendada (opcional)
-          <input
-            type="datetime-local"
-            value={jobScheduledFor}
-            onChange={(event) => onJobScheduledForChange(event.target.value)}
-          />
-        </label>
+      <form onSubmit={onCreateJob} className="form job-create-form" id="job-create">
+        <fieldset className="form-step">
+          <legend>Passo 1 · Selecionar profissional e categoria</legend>
+          <label>
+            Profissional
+            <select
+              value={jobWorkerProfileId}
+              onChange={(event) => onJobWorkerProfileIdChange(event.target.value)}
+              required
+            >
+              {jobWorkerOptions.length === 0 ? (
+                <option value="">Sem profissionais disponíveis</option>
+              ) : (
+                jobWorkerOptions.map((profile) => (
+                  <option key={profile.id} value={profile.id}>
+                    {shortenId(profile.userId)} ({profile.location ?? "n/a"})
+                  </option>
+                ))
+              )}
+            </select>
+          </label>
+          <label>
+            Categoria
+            <select
+              value={jobCategoryId}
+              onChange={(event) => onJobCategoryIdChange(event.target.value)}
+              required
+            >
+              {availableJobCategories.length === 0 ? (
+                <option value="">Sem categoria compatível</option>
+              ) : (
+                availableJobCategories.map((category) => (
+                  <option key={category.id} value={category.id}>
+                    {category.name}
+                  </option>
+                ))
+              )}
+            </select>
+          </label>
+        </fieldset>
+
+        <fieldset className="form-step">
+          <legend>Passo 2 · Definir tipo de preço e contexto</legend>
+          <label>
+            Modo de preço
+            <select
+              value={jobPricingMode}
+              onChange={(event) =>
+                onJobPricingModeChange(event.target.value as "FIXED_PRICE" | "QUOTE_REQUEST")
+              }
+            >
+              <option value="FIXED_PRICE">Preço fixo</option>
+              <option value="QUOTE_REQUEST">Sob cotação</option>
+            </select>
+          </label>
+          <label>
+            {jobPricingMode === "FIXED_PRICE"
+              ? "Orçamento (obrigatório)"
+              : "Orçamento máximo (opcional)"}
+            <input
+              type="number"
+              value={jobBudget}
+              onChange={(event) => onJobBudgetChange(event.target.value)}
+              min={jobPricingMode === "FIXED_PRICE" ? 1 : 0}
+              max={100_000_000}
+              step={1}
+              required={jobPricingMode === "FIXED_PRICE"}
+            />
+          </label>
+          <label>
+            Data agendada (opcional)
+            <input
+              type="datetime-local"
+              value={jobScheduledFor}
+              onChange={(event) => onJobScheduledForChange(event.target.value)}
+            />
+          </label>
+        </fieldset>
+
+        <fieldset className="form-step">
+          <legend>Passo 3 · Descrever o pedido</legend>
+          <label>
+            Título
+            <input
+              type="text"
+              value={jobTitle}
+              onChange={(event) => onJobTitleChange(event.target.value)}
+              minLength={3}
+              maxLength={120}
+              required
+            />
+          </label>
+          <label>
+            Descrição
+            <textarea
+              value={jobDescription}
+              onChange={(event) => onJobDescriptionChange(event.target.value)}
+              maxLength={2000}
+              minLength={10}
+              required
+            />
+          </label>
+        </fieldset>
+
         <button
           type="submit"
           className="primary"
-          disabled={jobsLoading || jobWorkerOptions.length === 0 || availableJobCategories.length === 0}
+          disabled={
+            jobsLoading ||
+            jobWorkerOptions.length === 0 ||
+            availableJobCategories.length === 0
+          }
         >
-          {jobsLoading ? "Aguarda..." : "Criar job"}
+          {jobsLoading ? "Aguarda..." : createJobCtaLabel}
         </button>
       </form>
 
@@ -452,15 +545,14 @@ export function JobsDomainSection({
         {jobJourneyView === "all"
           ? "Cliente e worker"
           : jobJourneyView === "client"
-            ? "So cliente"
-            : "So worker"}
+            ? "Só cliente"
+            : "Só worker"}
         .
       </p>
 
       <div className={`panel-grid ${jobJourneyView === "all" ? "" : "panel-grid--single"}`}>
         {showClientJourney ? (
-          <div className="result">
-            <p className="item-title">Meus jobs (cliente)</p>
+          <DashboardPanel title="Acompanhamento de pedidos (cliente)">
             {jobsLoading && visibleClientJobs.length === 0 ? (
               <p>A carregar jobs de cliente...</p>
             ) : visibleClientJobs.length === 0 ? (
@@ -495,8 +587,8 @@ export function JobsDomainSection({
                       <strong>Orçamento:</strong> {formatCurrencyMzn(job.budget)}
                     </p>
                     <p>
-                      <strong>Modo de preco:</strong>{" "}
-                      {job.pricingMode === "QUOTE_REQUEST" ? "Sob cotacao" : "Preco fixo"}
+                      <strong>Modo de preço:</strong>{" "}
+                      {job.pricingMode === "QUOTE_REQUEST" ? "Sob cotação" : "Preço fixo"}
                     </p>
                     {job.pricingMode === "QUOTE_REQUEST" && typeof job.quotedAmount === "number" ? (
                       <p>
@@ -591,12 +683,11 @@ export function JobsDomainSection({
                 );
               })
             )}
-          </div>
+          </DashboardPanel>
         ) : null}
 
         {showWorkerJourney ? (
-          <div className="result">
-            <p className="item-title">Jobs atribuidos a mim (worker)</p>
+          <DashboardPanel title="Acompanhamento de pedidos (worker)">
             {jobsLoading && visibleWorkerJobs.length === 0 ? (
               <p>A carregar jobs de worker...</p>
             ) : visibleWorkerJobs.length === 0 ? (
@@ -635,8 +726,8 @@ export function JobsDomainSection({
                       <strong>Orçamento:</strong> {formatCurrencyMzn(job.budget)}
                     </p>
                     <p>
-                      <strong>Modo de preco:</strong>{" "}
-                      {job.pricingMode === "QUOTE_REQUEST" ? "Sob cotacao" : "Preco fixo"}
+                      <strong>Modo de preço:</strong>{" "}
+                      {job.pricingMode === "QUOTE_REQUEST" ? "Sob cotação" : "Preço fixo"}
                     </p>
                     {job.pricingMode === "QUOTE_REQUEST" && typeof job.quotedAmount === "number" ? (
                       <p>
@@ -659,7 +750,7 @@ export function JobsDomainSection({
                     </p>
                     {job.completedAt ? (
                       <p>
-                        <strong>Concluido:</strong> {formatDate(job.completedAt)}
+                        <strong>Concluído:</strong> {formatDate(job.completedAt)}
                       </p>
                     ) : null}
                     <JobTimeline job={job} />
@@ -734,7 +825,7 @@ export function JobsDomainSection({
                 );
               })
             )}
-          </div>
+          </DashboardPanel>
         ) : null}
       </div>
     </section>

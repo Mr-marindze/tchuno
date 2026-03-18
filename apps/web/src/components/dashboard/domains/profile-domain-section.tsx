@@ -1,3 +1,4 @@
+import Link from "next/link";
 import { FormEvent } from "react";
 import { StatusTone } from "@/components/dashboard/dashboard-formatters";
 import {
@@ -130,6 +131,15 @@ export function ProfileDomainSection({
       : workerProfile
         ? "Manter disponibilidade e atualizar dados sempre que mudares de contexto."
         : "Criar e publicar o teu perfil profissional.";
+  const profileCategoriesCount =
+    workerProfile?.categories.length ?? profileCategoryIds.length;
+  const profileRateValue =
+    workerProfile && typeof workerProfile.hourlyRate === "number"
+      ? formatCurrencyMzn(workerProfile.hourlyRate)
+      : "Não definido";
+  const profileRatingValue = workerProfile
+    ? `${formatRatingValue(workerProfile.ratingAvg)}/5`
+    : "Sem rating";
 
   return (
     <>
@@ -296,6 +306,18 @@ export function ProfileDomainSection({
             </>
           }
         />
+        <div className="overview-grid">
+          <DashboardSummaryCard
+            label="Disponibilidade"
+            value={profileIsAvailable ? "Disponível" : "Indisponível"}
+          />
+          <DashboardSummaryCard label="Preço/hora" value={profileRateValue} />
+          <DashboardSummaryCard label="Rating" value={profileRatingValue} />
+          <DashboardSummaryCard
+            label="Categorias ativas"
+            value={profileCategoriesCount}
+          />
+        </div>
 
         <div className="section-toolbar">
           <button
@@ -477,6 +499,18 @@ export function ProfileDomainSection({
                   : "Sem categorias"}
               </p>
               {workerProfile.bio ? <p>{workerProfile.bio}</p> : null}
+              <div className="actions actions--inline marketplace-worker-actions">
+                <Link href="/dashboard/jobs" className="primary">
+                  Ver jobs e pedidos
+                </Link>
+                <button
+                  type="button"
+                  onClick={onReloadWorkerProfile}
+                  disabled={workerProfileLoading}
+                >
+                  Recarregar preview
+                </button>
+              </div>
             </article>
           ) : (
             <DashboardEmptyState
