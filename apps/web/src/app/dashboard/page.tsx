@@ -54,8 +54,10 @@ import {
   listWorkerReviews,
   Review,
 } from "@/lib/reviews";
+import { JobTimeline } from "@/components/job-timeline";
 import { ToastTone, useToast } from "@/components/toast-provider";
 import { humanizeUnknownError } from "@/lib/http-errors";
+import { buildJobActionPlan } from "@/lib/job-cta";
 import { PaginationMeta } from "@/lib/pagination";
 
 type DashboardState = {
@@ -72,22 +74,6 @@ const jobStatuses: JobStatus[] = [
 ];
 
 type StatusTone = "loading" | "success" | "error";
-
-function getWorkerAllowedTransitions(job: Job): JobStatus[] {
-  if (job.status === "REQUESTED" && job.pricingMode === "FIXED_PRICE") {
-    return ["ACCEPTED"];
-  }
-
-  if (job.status === "ACCEPTED") {
-    return ["IN_PROGRESS"];
-  }
-
-  if (job.status === "IN_PROGRESS") {
-    return ["COMPLETED"];
-  }
-
-  return [];
-}
 
 function getStatusTone(message: string): StatusTone {
   const text = message.trim().toLowerCase();
@@ -198,15 +184,6 @@ function shortenId(value: string): string {
   return `${value.slice(0, 6)}...${value.slice(-4)}`;
 }
 
-type JobFlowStepState = "is-done" | "is-current" | "is-todo";
-
-const jobFlowOrder: JobStatus[] = [
-  "REQUESTED",
-  "ACCEPTED",
-  "IN_PROGRESS",
-  "COMPLETED",
-];
-
 type JobFlowCounter = Record<JobStatus, number>;
 
 function createJobFlowCounter(): JobFlowCounter {
@@ -219,79 +196,7 @@ function createJobFlowCounter(): JobFlowCounter {
   };
 }
 
-function getJobFlowStepState(
-  currentStatus: JobStatus,
-  stepStatus: JobStatus,
-): JobFlowStepState {
-  const currentIndex = jobFlowOrder.indexOf(currentStatus);
-  const stepIndex = jobFlowOrder.indexOf(stepStatus);
-
-  if (stepIndex < currentIndex) {
-    return "is-done";
-  }
-
-  if (stepIndex === currentIndex) {
-    return "is-current";
-  }
-
-  return "is-todo";
-}
-
-function getClientFlowHint(job: Job): string {
-  if (job.status === "REQUESTED" && job.pricingMode === "QUOTE_REQUEST") {
-    return job.quotedAmount
-      ? "Proposta recebida. Revê o valor e aceita para avançar o serviço."
-      : "Aguardar proposta do worker antes da aceitação.";
-  }
-
-  if (job.status === "REQUESTED") {
-    return "Aguardar aceitação do worker ou cancelar se necessário.";
-  }
-
-  if (job.status === "ACCEPTED" && job.pricingMode === "QUOTE_REQUEST") {
-    return "Proposta aceita. Próximo passo é iniciar execução.";
-  }
-
-  if (job.status === "ACCEPTED") {
-    return "Worker aceitou. Próximo passo é iniciar execução.";
-  }
-
-  if (job.status === "IN_PROGRESS") {
-    return "Serviço em execução. Próximo passo é conclusão.";
-  }
-
-  if (job.status === "COMPLETED") {
-    return "Serviço concluído. Próximo passo é publicar review.";
-  }
-
-  return "Fluxo encerrado por cancelamento.";
-}
-
-function getWorkerFlowHint(job: Job): string {
-  if (job.status === "REQUESTED" && job.pricingMode === "QUOTE_REQUEST") {
-    return job.quotedAmount
-      ? "Proposta enviada. Aguarda aceitação do cliente."
-      : "Próximo passo: enviar proposta com valor para o cliente.";
-  }
-
-  if (job.status === "REQUESTED") {
-    return "Próximo passo: aceitar job para iniciar o fluxo.";
-  }
-
-  if (job.status === "ACCEPTED") {
-    return "Próximo passo: marcar como Em progresso quando começares.";
-  }
-
-  if (job.status === "IN_PROGRESS") {
-    return "Próximo passo: marcar como Concluído ao terminar.";
-  }
-
-  if (job.status === "COMPLETED") {
-    return "Fluxo concluído. Aguardar review do cliente.";
-  }
-
-  return "Fluxo encerrado por cancelamento do cliente.";
-}
+type JobJourneyView = "all" | "client" | "worker";
 
 type LocationParts = {
   city: string;
@@ -495,6 +400,7 @@ export default function DashboardPage() {
   const [jobStatusFilter, setJobStatusFilter] = useState<"ALL" | JobStatus>(
     "ALL",
   );
+  const [jobJourneyView, setJobJourneyView] = useState<JobJourneyView>("all");
   const [jobLimit, setJobLimit] = useState(10);
   const [jobPage, setJobPage] = useState(1);
   const [jobWorkerOptions, setJobWorkerOptions] = useState<WorkerProfile[]>([]);
@@ -733,6 +639,8 @@ export default function DashboardPage() {
 
     return summary;
   }, [clientJobs]);
+  const showClientJourney = jobJourneyView !== "worker";
+  const showWorkerJourney = jobJourneyView !== "client";
 
   const pushStatusToast = useCallback(
     (channel: string, message: string) => {
@@ -3176,307 +3084,375 @@ export default function DashboardPage() {
             </button>
           </form>
 
-          <div className="panel-grid">
-            <div className="result">
-              <p className="item-title">Meus jobs (cliente)</p>
-              {jobsLoading && clientJobs.length === 0 ? (
-                <p>A carregar jobs de cliente...</p>
-              ) : visibleClientJobs.length === 0 ? (
-                <p className="empty-state">
-                  {jobSearch.trim().length > 0
-                    ? "Nenhum job de cliente corresponde à pesquisa atual."
-                    : "Ainda não tens jobs publicados. Cria o teu primeiro pedido em 2 minutos."}
-                </p>
-              ) : (
-                visibleClientJobs.map((job) => {
-                  const canCancel =
-                    job.status !== "COMPLETED" && job.status !== "CANCELED";
-                  const canAcceptQuote =
-                    job.pricingMode === "QUOTE_REQUEST" &&
-                    job.status === "REQUESTED" &&
-                    typeof job.quotedAmount === "number" &&
-                    job.quotedAmount > 0;
-                  return (
-                    <article key={job.id} className="list-item job-card">
-                      <p className="item-title">
-                        {job.title}
-                        <span className="status-pill is-muted">
-                          {formatJobStatus(job.status)}
-                        </span>
-                      </p>
-                      <p>
-                        <strong>Orçamento:</strong>{" "}
-                        {formatCurrencyMzn(job.budget)}
-                      </p>
-                      <p>
-                        <strong>Modo de preço:</strong>{" "}
-                        {job.pricingMode === "QUOTE_REQUEST"
-                          ? "Sob cotação"
-                          : "Preço fixo"}
-                      </p>
-                      {job.pricingMode === "QUOTE_REQUEST" &&
-                      typeof job.quotedAmount === "number" ? (
-                        <p>
-                          <strong>Proposta:</strong>{" "}
-                          {formatCurrencyMzn(job.quotedAmount)}
-                        </p>
-                      ) : null}
-                      {job.pricingMode === "QUOTE_REQUEST" &&
-                      job.quoteMessage ? (
-                        <p>
-                          <strong>Mensagem da proposta:</strong>{" "}
-                          {job.quoteMessage}
-                        </p>
-                      ) : null}
-                      <p>
-                        <strong>Worker:</strong>{" "}
-                        {shortenId(job.workerProfileId)}
-                      </p>
-                      <p>
-                        <strong>Categoria:</strong> {shortenId(job.categoryId)}
-                      </p>
-                      <p>
-                        <strong>Criado:</strong> {formatDate(job.createdAt)}
-                      </p>
-                      {job.scheduledFor ? (
-                        <p>
-                          <strong>Agendado:</strong>{" "}
-                          {formatDate(job.scheduledFor)}
-                        </p>
-                      ) : null}
-                      {job.status === "CANCELED" ? (
-                        <p className="muted">
-                          Fluxo encerrado por cancelamento.
-                        </p>
-                      ) : (
-                        <ol className="flow-steps">
-                          {jobFlowOrder.map((stepStatus) => (
-                            <li
-                              key={`${job.id}-${stepStatus}`}
-                              className={getJobFlowStepState(
-                                job.status,
-                                stepStatus,
-                              )}
-                            >
-                              {formatJobStatus(stepStatus)}
-                            </li>
-                          ))}
-                        </ol>
-                      )}
-                      <p className="flow-hint">{getClientFlowHint(job)}</p>
-                      {job.status === "COMPLETED" &&
-                      reviewableJobIdSet.has(job.id) ? (
-                        <p className="status" style={{ marginTop: "0.35rem" }}>
-                          <a href="#reviews" className="nav-link">
-                            Job concluído: publicar review agora
-                          </a>
-                        </p>
-                      ) : null}
-                      <div className="actions" style={{ marginTop: "0.5rem" }}>
-                        {canAcceptQuote ? (
-                          <button
-                            type="button"
-                            onClick={() =>
-                              handleUpdateJobStatus(
-                                job.id,
-                                "ACCEPTED",
-                                "client",
-                                {
-                                  quotedAmount: job.quotedAmount ?? undefined,
-                                },
-                              )
-                            }
-                            disabled={jobsLoading}
-                          >
-                            Aceitar proposta
-                          </button>
-                        ) : null}
-                        <button
-                          type="button"
-                          onClick={() =>
-                            handleUpdateJobStatus(job.id, "CANCELED", "client")
-                          }
-                          disabled={!canCancel || jobsLoading}
-                        >
-                          {canCancel ? "Cancelar job" : "Finalizado"}
-                        </button>
-                      </div>
-                    </article>
-                  );
-                })
-              )}
-            </div>
+          <div className="journey-switch">
+            <button
+              type="button"
+              className={jobJourneyView === "all" ? "active" : ""}
+              onClick={() => setJobJourneyView("all")}
+            >
+              Ambos
+            </button>
+            <button
+              type="button"
+              className={jobJourneyView === "client" ? "active" : ""}
+              onClick={() => setJobJourneyView("client")}
+            >
+              Jornada cliente
+            </button>
+            <button
+              type="button"
+              className={jobJourneyView === "worker" ? "active" : ""}
+              onClick={() => setJobJourneyView("worker")}
+            >
+              Jornada worker
+            </button>
+          </div>
+          <p className="muted">
+            Foco ativo:{" "}
+            {jobJourneyView === "all"
+              ? "Cliente e worker"
+              : jobJourneyView === "client"
+                ? "Só cliente"
+                : "Só worker"}
+            .
+          </p>
 
-            <div className="result">
-              <p className="item-title">Jobs atribuídos a mim (worker)</p>
-              {jobsLoading && workerJobs.length === 0 ? (
-                <p>A carregar jobs de worker...</p>
-              ) : visibleWorkerJobs.length === 0 ? (
-                <p className="empty-state">
-                  {jobSearch.trim().length > 0
-                    ? "Nenhum job de worker corresponde à pesquisa atual."
-                    : "Ainda não recebeste jobs. Mantém o perfil disponível e com categorias corretas."}
-                </p>
-              ) : (
-                visibleWorkerJobs.map((job) => {
-                  const transitions = getWorkerAllowedTransitions(job);
-                  const quoteAmountInput =
-                    jobQuoteDraftAmount[job.id] ??
-                    (typeof job.quotedAmount === "number"
-                      ? String(job.quotedAmount)
-                      : "");
-                  const quoteMessageInput =
-                    jobQuoteDraftMessage[job.id] ?? job.quoteMessage ?? "";
-                  const shouldShowQuoteForm =
-                    job.pricingMode === "QUOTE_REQUEST" &&
-                    job.status === "REQUESTED";
-                  return (
-                    <article key={job.id} className="list-item job-card">
-                      <p className="item-title">
-                        {job.title}
-                        <span className="status-pill is-muted">
-                          {formatJobStatus(job.status)}
-                        </span>
-                      </p>
-                      <p>
-                        <strong>Orçamento:</strong>{" "}
-                        {formatCurrencyMzn(job.budget)}
-                      </p>
-                      <p>
-                        <strong>Modo de preço:</strong>{" "}
-                        {job.pricingMode === "QUOTE_REQUEST"
-                          ? "Sob cotação"
-                          : "Preço fixo"}
-                      </p>
-                      {job.pricingMode === "QUOTE_REQUEST" &&
-                      typeof job.quotedAmount === "number" ? (
+          <div
+            className={`panel-grid ${
+              jobJourneyView === "all" ? "" : "panel-grid--single"
+            }`}
+          >
+            {showClientJourney ? (
+              <div className="result">
+                <p className="item-title">Meus jobs (cliente)</p>
+                {jobsLoading && clientJobs.length === 0 ? (
+                  <p>A carregar jobs de cliente...</p>
+                ) : visibleClientJobs.length === 0 ? (
+                  <p className="empty-state">
+                    {jobSearch.trim().length > 0
+                      ? "Nenhum job de cliente corresponde à pesquisa atual."
+                      : "Ainda não tens jobs publicados. Cria o teu primeiro pedido em 2 minutos."}
+                  </p>
+                ) : (
+                  visibleClientJobs.map((job) => {
+                    const actionPlan = buildJobActionPlan({
+                      actor: "client",
+                      job,
+                      canReview: reviewableJobIdSet.has(job.id),
+                    });
+                    const primaryStatusAction =
+                      actionPlan.primary.kind === "status"
+                        ? actionPlan.primary
+                        : null;
+                    const secondaryStatusAction =
+                      actionPlan.secondary?.kind === "status"
+                        ? actionPlan.secondary
+                        : null;
+
+                    return (
+                      <article key={job.id} className="list-item job-card">
+                        <p className="item-title">
+                          {job.title}
+                          <span className="status-pill is-muted">
+                            {formatJobStatus(job.status)}
+                          </span>
+                        </p>
                         <p>
-                          <strong>Proposta enviada:</strong>{" "}
-                          {formatCurrencyMzn(job.quotedAmount)}
+                          <strong>Orçamento:</strong>{" "}
+                          {formatCurrencyMzn(job.budget)}
                         </p>
-                      ) : null}
-                      {job.pricingMode === "QUOTE_REQUEST" &&
-                      job.quoteMessage ? (
                         <p>
-                          <strong>Mensagem da proposta:</strong>{" "}
-                          {job.quoteMessage}
+                          <strong>Modo de preço:</strong>{" "}
+                          {job.pricingMode === "QUOTE_REQUEST"
+                            ? "Sob cotação"
+                            : "Preço fixo"}
                         </p>
-                      ) : null}
-                      <p>
-                        <strong>Cliente:</strong> {shortenId(job.clientId)}
-                      </p>
-                      <p>
-                        <strong>Categoria:</strong> {shortenId(job.categoryId)}
-                      </p>
-                      <p>
-                        <strong>Criado:</strong> {formatDate(job.createdAt)}
-                      </p>
-                      {job.completedAt ? (
+                        {job.pricingMode === "QUOTE_REQUEST" &&
+                        typeof job.quotedAmount === "number" ? (
+                          <p>
+                            <strong>Proposta:</strong>{" "}
+                            {formatCurrencyMzn(job.quotedAmount)}
+                          </p>
+                        ) : null}
+                        {job.pricingMode === "QUOTE_REQUEST" &&
+                        job.quoteMessage ? (
+                          <p>
+                            <strong>Mensagem da proposta:</strong>{" "}
+                            {job.quoteMessage}
+                          </p>
+                        ) : null}
                         <p>
-                          <strong>Concluído:</strong>{" "}
-                          {formatDate(job.completedAt)}
+                          <strong>Worker:</strong>{" "}
+                          {shortenId(job.workerProfileId)}
                         </p>
-                      ) : null}
-                      {job.status === "CANCELED" ? (
-                        <p className="muted">
-                          Fluxo encerrado por cancelamento.
+                        <p>
+                          <strong>Categoria:</strong> {shortenId(job.categoryId)}
                         </p>
-                      ) : (
-                        <ol className="flow-steps">
-                          {jobFlowOrder.map((stepStatus) => (
-                            <li
-                              key={`${job.id}-${stepStatus}`}
-                              className={getJobFlowStepState(
-                                job.status,
-                                stepStatus,
-                              )}
-                            >
-                              {formatJobStatus(stepStatus)}
-                            </li>
-                          ))}
-                        </ol>
-                      )}
-                      <p className="flow-hint">{getWorkerFlowHint(job)}</p>
-                      {shouldShowQuoteForm ? (
-                        <div className="form" style={{ marginTop: "0.5rem" }}>
-                          <label>
-                            Valor da proposta (MZN)
-                            <input
-                              type="number"
-                              value={quoteAmountInput}
-                              onChange={(event) =>
-                                setJobQuoteDraftAmount((current) => ({
-                                  ...current,
-                                  [job.id]: event.target.value,
-                                }))
-                              }
-                              min={1}
-                              max={100_000_000}
-                              step={1}
-                            />
-                          </label>
-                          <label>
-                            Mensagem (opcional)
-                            <textarea
-                              value={quoteMessageInput}
-                              onChange={(event) =>
-                                setJobQuoteDraftMessage((current) => ({
-                                  ...current,
-                                  [job.id]: event.target.value,
-                                }))
-                              }
-                              maxLength={280}
-                            />
-                          </label>
-                          <button
-                            type="button"
-                            onClick={() => handleProposeQuote(job.id)}
-                            disabled={jobsLoading}
+                        <p>
+                          <strong>Criado:</strong> {formatDate(job.createdAt)}
+                        </p>
+                        {job.scheduledFor ? (
+                          <p>
+                            <strong>Agendado:</strong>{" "}
+                            {formatDate(job.scheduledFor)}
+                          </p>
+                        ) : null}
+                        <JobTimeline job={job} />
+                        {actionPlan.primary.kind === "review" ? (
+                          <div
+                            className="actions"
+                            style={{
+                              marginTop: "0.5rem",
+                              gridTemplateColumns: "1fr",
+                            }}
                           >
-                            Enviar proposta
-                          </button>
-                        </div>
-                      ) : null}
-                      <div
-                        className="actions"
-                        style={{
-                          marginTop: "0.5rem",
-                          gridTemplateColumns:
-                            transitions.length > 1 ? "repeat(2, 1fr)" : "1fr",
-                        }}
-                      >
-                        {transitions.length === 0 ? (
-                          <button type="button" disabled>
-                            {shouldShowQuoteForm
-                              ? typeof job.quotedAmount === "number"
-                                ? "Aguardando cliente aceitar proposta"
-                                : "Envia proposta para avançar"
-                              : "Sem transições disponíveis"}
-                          </button>
-                        ) : (
-                          transitions.map((nextStatus) => (
                             <button
-                              key={nextStatus}
                               type="button"
-                              onClick={() =>
-                                handleUpdateJobStatus(
-                                  job.id,
-                                  nextStatus,
-                                  "worker",
-                                )
-                              }
+                              className="primary"
+                              onClick={() => {
+                                setReviewJobId(job.id);
+                                document
+                                  .getElementById("reviews")
+                                  ?.scrollIntoView({ behavior: "smooth" });
+                              }}
+                            >
+                              {actionPlan.primary.label}
+                            </button>
+                          </div>
+                        ) : (
+                          <div
+                            className="actions"
+                            style={{
+                              marginTop: "0.5rem",
+                              gridTemplateColumns: secondaryStatusAction
+                                ? "repeat(2, 1fr)"
+                                : "1fr",
+                            }}
+                          >
+                            {primaryStatusAction ? (
+                              <button
+                                type="button"
+                                className={
+                                  primaryStatusAction.emphasis === "danger"
+                                    ? "is-danger"
+                                    : "primary"
+                                }
+                                onClick={() =>
+                                  handleUpdateJobStatus(
+                                    job.id,
+                                    primaryStatusAction.nextStatus,
+                                    "client",
+                                    {
+                                      quotedAmount:
+                                        primaryStatusAction.options
+                                          ?.quotedAmount,
+                                    },
+                                  )
+                                }
+                                disabled={jobsLoading}
+                              >
+                                {primaryStatusAction.label}
+                              </button>
+                            ) : (
+                              <button type="button" disabled>
+                                {actionPlan.primary.label}
+                              </button>
+                            )}
+                            {secondaryStatusAction ? (
+                              <button
+                                type="button"
+                                className={
+                                  secondaryStatusAction.emphasis === "danger"
+                                    ? "is-danger"
+                                    : undefined
+                                }
+                                onClick={() =>
+                                  handleUpdateJobStatus(
+                                    job.id,
+                                    secondaryStatusAction.nextStatus,
+                                    "client",
+                                  )
+                                }
+                                disabled={jobsLoading}
+                              >
+                                {secondaryStatusAction.label}
+                              </button>
+                            ) : null}
+                          </div>
+                        )}
+                      </article>
+                    );
+                  })
+                )}
+              </div>
+            ) : null}
+
+            {showWorkerJourney ? (
+              <div className="result">
+                <p className="item-title">Jobs atribuídos a mim (worker)</p>
+                {jobsLoading && workerJobs.length === 0 ? (
+                  <p>A carregar jobs de worker...</p>
+                ) : visibleWorkerJobs.length === 0 ? (
+                  <p className="empty-state">
+                    {jobSearch.trim().length > 0
+                      ? "Nenhum job de worker corresponde à pesquisa atual."
+                      : "Ainda não recebeste jobs. Mantém o perfil disponível e com categorias corretas."}
+                  </p>
+                ) : (
+                  visibleWorkerJobs.map((job) => {
+                    const actionPlan = buildJobActionPlan({
+                      actor: "worker",
+                      job,
+                      canReview: false,
+                    });
+                    const quoteAmountInput =
+                      jobQuoteDraftAmount[job.id] ??
+                      (typeof job.quotedAmount === "number"
+                        ? String(job.quotedAmount)
+                        : "");
+                    const quoteMessageInput =
+                      jobQuoteDraftMessage[job.id] ?? job.quoteMessage ?? "";
+                    const shouldShowQuoteForm = actionPlan.primary.kind === "quote";
+                    const primaryStatusAction =
+                      actionPlan.primary.kind === "status"
+                        ? actionPlan.primary
+                        : null;
+
+                    return (
+                      <article key={job.id} className="list-item job-card">
+                        <p className="item-title">
+                          {job.title}
+                          <span className="status-pill is-muted">
+                            {formatJobStatus(job.status)}
+                          </span>
+                        </p>
+                        <p>
+                          <strong>Orçamento:</strong>{" "}
+                          {formatCurrencyMzn(job.budget)}
+                        </p>
+                        <p>
+                          <strong>Modo de preço:</strong>{" "}
+                          {job.pricingMode === "QUOTE_REQUEST"
+                            ? "Sob cotação"
+                            : "Preço fixo"}
+                        </p>
+                        {job.pricingMode === "QUOTE_REQUEST" &&
+                        typeof job.quotedAmount === "number" ? (
+                          <p>
+                            <strong>Proposta enviada:</strong>{" "}
+                            {formatCurrencyMzn(job.quotedAmount)}
+                          </p>
+                        ) : null}
+                        {job.pricingMode === "QUOTE_REQUEST" &&
+                        job.quoteMessage ? (
+                          <p>
+                            <strong>Mensagem da proposta:</strong>{" "}
+                            {job.quoteMessage}
+                          </p>
+                        ) : null}
+                        <p>
+                          <strong>Cliente:</strong> {shortenId(job.clientId)}
+                        </p>
+                        <p>
+                          <strong>Categoria:</strong> {shortenId(job.categoryId)}
+                        </p>
+                        <p>
+                          <strong>Criado:</strong> {formatDate(job.createdAt)}
+                        </p>
+                        {job.completedAt ? (
+                          <p>
+                            <strong>Concluído:</strong>{" "}
+                            {formatDate(job.completedAt)}
+                          </p>
+                        ) : null}
+                        <JobTimeline job={job} />
+                        {shouldShowQuoteForm ? (
+                          <div className="form" style={{ marginTop: "0.5rem" }}>
+                            <label>
+                              Valor da proposta (MZN)
+                              <input
+                                type="number"
+                                value={quoteAmountInput}
+                                onChange={(event) =>
+                                  setJobQuoteDraftAmount((current) => ({
+                                    ...current,
+                                    [job.id]: event.target.value,
+                                  }))
+                                }
+                                min={1}
+                                max={100_000_000}
+                                step={1}
+                              />
+                            </label>
+                            <label>
+                              Mensagem (opcional)
+                              <textarea
+                                value={quoteMessageInput}
+                                onChange={(event) =>
+                                  setJobQuoteDraftMessage((current) => ({
+                                    ...current,
+                                    [job.id]: event.target.value,
+                                  }))
+                                }
+                                maxLength={280}
+                              />
+                            </label>
+                            <button
+                              type="button"
+                              className="primary"
+                              onClick={() => handleProposeQuote(job.id)}
                               disabled={jobsLoading}
                             >
-                              Marcar {formatJobStatus(nextStatus)}
+                              {actionPlan.primary.label}
                             </button>
-                          ))
-                        )}
-                      </div>
-                    </article>
-                  );
-                })
-              )}
-            </div>
+                          </div>
+                        ) : null}
+                        {primaryStatusAction ||
+                        actionPlan.primary.kind === "none" ? (
+                          <div
+                            className="actions"
+                            style={{
+                              marginTop: "0.5rem",
+                              gridTemplateColumns: "1fr",
+                            }}
+                          >
+                            {primaryStatusAction ? (
+                              <button
+                                type="button"
+                                className={
+                                  primaryStatusAction.emphasis === "danger"
+                                    ? "is-danger"
+                                    : "primary"
+                                }
+                                onClick={() =>
+                                  handleUpdateJobStatus(
+                                    job.id,
+                                    primaryStatusAction.nextStatus,
+                                    "worker",
+                                    {
+                                      quotedAmount:
+                                        primaryStatusAction.options
+                                          ?.quotedAmount,
+                                    },
+                                  )
+                                }
+                                disabled={jobsLoading}
+                              >
+                                {primaryStatusAction.label}
+                              </button>
+                            ) : (
+                              <button type="button" disabled>
+                                {actionPlan.primary.label}
+                              </button>
+                            )}
+                          </div>
+                        ) : null}
+                      </article>
+                    );
+                  })
+                )}
+              </div>
+            ) : null}
           </div>
         </section>
 
