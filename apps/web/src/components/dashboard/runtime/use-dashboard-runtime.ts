@@ -77,6 +77,7 @@ import { ToastTone, useToast } from "@/components/toast-provider";
 import { humanizeUnknownError } from "@/lib/http-errors";
 import { buildJobActionPlan } from "@/lib/job-cta";
 import { PaginationMeta } from "@/lib/pagination";
+import { trackEvent } from "@/lib/tracking";
 
 type DashboardState = {
   me: unknown;
@@ -1739,6 +1740,15 @@ export function useDashboardRuntime({ view }: UseDashboardRuntimeArgs) {
     setJobsStatus("A criar job...");
 
     try {
+      trackEvent("job_create_submitted", {
+        scope: "dashboard_jobs",
+        pricingMode: jobPricingMode,
+        hasBudget: typeof parsedBudget === "number",
+        hasScheduledFor: Boolean(scheduledForIso),
+        titleLength: normalizedTitle.length,
+        descriptionLength: normalizedDescription.length,
+      });
+
       await createJob(accessToken, {
         workerProfileId: jobWorkerProfileId,
         categoryId: jobCategoryId,

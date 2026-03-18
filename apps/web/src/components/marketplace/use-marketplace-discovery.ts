@@ -1,9 +1,10 @@
 "use client";
 
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { shortenId } from "@/components/dashboard/dashboard-formatters";
 import { listCategories } from "@/lib/categories";
 import { humanizeUnknownError } from "@/lib/http-errors";
+import { trackEvent } from "@/lib/tracking";
 import { listWorkerProfiles, WorkerProfile } from "@/lib/worker-profile";
 
 type MarketplaceCategory = {
@@ -45,6 +46,9 @@ export function useMarketplaceDiscovery(): UseMarketplaceDiscoveryResult {
     [],
   );
   const [featuredWorkers, setFeaturedWorkers] = useState<WorkerProfile[]>([]);
+  const searchTrackTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(
+    null,
+  );
 
   useEffect(() => {
     let isActive = true;
@@ -113,6 +117,14 @@ export function useMarketplaceDiscovery(): UseMarketplaceDiscoveryResult {
     };
   }, []);
 
+  useEffect(() => {
+    return () => {
+      if (searchTrackTimeoutRef.current) {
+        clearTimeout(searchTrackTimeoutRef.current);
+      }
+    };
+  }, []);
+
   const normalizedSearch = discoverySearch.trim().toLowerCase();
 
   const visibleCategories = useMemo(() => {
@@ -177,9 +189,43 @@ export function useMarketplaceDiscovery(): UseMarketplaceDiscoveryResult {
     };
   }, [featuredWorkers]);
 
-  const handleToggleDiscoveryCategory = useCallback((categorySlug: string) => {
-    setDiscoveryCategory((current) => (current === categorySlug ? "" : categorySlug));
-  }, []);
+  const handleDiscoverySearchChange = useCallback(
+    (value: string) => {
+      setDiscoverySearch(value);
+
+      if (searchTrackTimeoutRef.current) {
+        clearTimeout(searchTrackTimeoutRef.current);
+      }
+
+      searchTrackTimeoutRef.current = setTimeout(() => {
+        const normalized = value.trim();
+        trackEvent("marketplace_search_used", {
+          queryLength: normalized.length,
+          hasCategoryFilter: discoveryCategory.length > 0,
+          resultCount: visibleWorkers.length,
+        });
+      }, 250);
+    },
+    [discoveryCategory, visibleWorkers.length],
+  );
+
+  const handleToggleDiscoveryCategory = useCallback(
+    (categorySlug: string) => {
+      setDiscoveryCategory((current) => {
+        const nextCategory = current === categorySlug ? "" : categorySlug;
+
+        trackEvent("marketplace_category_selected", {
+          selectedCategory: nextCategory || null,
+          previousCategory: current || null,
+          categoryCount: marketCategories.length,
+          resultCount: visibleWorkers.length,
+        });
+
+        return nextCategory;
+      });
+    },
+    [marketCategories.length, visibleWorkers.length],
+  );
 
   const handleResetDiscoveryFilters = useCallback(() => {
     setDiscoverySearch("");
@@ -196,7 +242,7 @@ export function useMarketplaceDiscovery(): UseMarketplaceDiscoveryResult {
     visibleCategories,
     visibleWorkers,
     trustSummary,
-    onDiscoverySearchChange: setDiscoverySearch,
+    onDiscoverySearchChange: handleDiscoverySearchChange,
     onToggleDiscoveryCategory: handleToggleDiscoveryCategory,
     onResetDiscoveryFilters: handleResetDiscoveryFilters,
   };

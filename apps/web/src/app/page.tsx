@@ -1,7 +1,7 @@
 "use client";
 
 import Link from "next/link";
-import { FormEvent, useEffect, useMemo, useState } from "react";
+import { FormEvent, useEffect, useMemo, useRef, useState } from "react";
 import {
   AuthResponse,
   API_URL,
@@ -31,6 +31,7 @@ import {
 } from "@/components/marketplace/marketplace-worker-presenter";
 import { ToastTone, useToast } from "@/components/toast-provider";
 import { humanizeUnknownError } from "@/lib/http-errors";
+import { trackEvent } from "@/lib/tracking";
 
 type Mode = "login" | "register";
 
@@ -68,12 +69,134 @@ export default function Home() {
     () => buildWorkerRankingContext(featuredWorkers),
     [featuredWorkers],
   );
+  const workerHeuristicSnapshot = useMemo(
+    () =>
+      visibleWorkers.map((worker) => {
+        const ratingValue = Number(worker.ratingAvg || 0);
+        const hasHourlyRate = typeof worker.hourlyRate === "number";
+        const ctaCopy = getWorkerCtaCopy({
+          isAvailable: worker.isAvailable,
+          hasHourlyRate,
+        });
+        const relevance = getWorkerRelevance({
+          isAvailable: worker.isAvailable,
+          ratingValue,
+          ratingCount: worker.ratingCount,
+        });
+
+        return {
+          workerId: worker.id,
+          ctaPrimaryLabel: ctaCopy.primaryLabel,
+          relevanceLabel: relevance.label ?? null,
+          highlighted: relevance.highlighted,
+          ratingRank: workerRanking.ratingRankById[worker.id] ?? null,
+          priceRank: workerRanking.priceRankById[worker.id] ?? null,
+        };
+      }),
+    [visibleWorkers, workerRanking],
+  );
+  const rankingSignature = useMemo(
+    () =>
+      workerHeuristicSnapshot
+        .map(
+          (item) =>
+            `${item.workerId}:${item.ratingRank ?? "-"}:${item.priceRank ?? "-"}`,
+        )
+        .join("|"),
+    [workerHeuristicSnapshot],
+  );
+  const highlightSignature = useMemo(
+    () =>
+      workerHeuristicSnapshot
+        .map(
+          (item) =>
+            `${item.workerId}:${item.highlighted ? "1" : "0"}:${item.relevanceLabel ?? "-"}`,
+        )
+        .join("|"),
+    [workerHeuristicSnapshot],
+  );
+  const ctaSignature = useMemo(
+    () =>
+      workerHeuristicSnapshot
+        .map((item) => `${item.workerId}:${item.ctaPrimaryLabel}`)
+        .join("|"),
+    [workerHeuristicSnapshot],
+  );
+  const lastRankingSignatureRef = useRef<string | null>(null);
+  const lastHighlightSignatureRef = useRef<string | null>(null);
+  const lastCtaSignatureRef = useRef<string | null>(null);
 
   useEffect(() => {
     const accessToken = localStorage.getItem("tchuno_access_token");
     const refreshToken = localStorage.getItem("tchuno_refresh_token");
     setHasSession(Boolean(accessToken || refreshToken));
   }, []);
+
+  useEffect(() => {
+    if (rankingSignature.length === 0) {
+      return;
+    }
+
+    if (lastRankingSignatureRef.current === rankingSignature) {
+      return;
+    }
+
+    trackEvent("worker_ranking_applied", {
+      scope: "landing_featured",
+      workerCount: workerHeuristicSnapshot.length,
+      workersWithRatingRank: workerHeuristicSnapshot.filter(
+        (item) => typeof item.ratingRank === "number",
+      ).length,
+      workersWithPriceRank: workerHeuristicSnapshot.filter(
+        (item) => typeof item.priceRank === "number",
+      ).length,
+    });
+    lastRankingSignatureRef.current = rankingSignature;
+  }, [rankingSignature, workerHeuristicSnapshot]);
+
+  useEffect(() => {
+    if (highlightSignature.length === 0) {
+      return;
+    }
+
+    if (lastHighlightSignatureRef.current === highlightSignature) {
+      return;
+    }
+
+    trackEvent("worker_highlight_labels_applied", {
+      scope: "landing_featured",
+      workerCount: workerHeuristicSnapshot.length,
+      highlightedCount: workerHeuristicSnapshot.filter((item) => item.highlighted)
+        .length,
+      labels: Array.from(
+        new Set(
+          workerHeuristicSnapshot
+            .map((item) => item.relevanceLabel)
+            .filter((value): value is string => Boolean(value)),
+        ),
+      ),
+    });
+    lastHighlightSignatureRef.current = highlightSignature;
+  }, [highlightSignature, workerHeuristicSnapshot]);
+
+  useEffect(() => {
+    if (ctaSignature.length === 0) {
+      return;
+    }
+
+    if (lastCtaSignatureRef.current === ctaSignature) {
+      return;
+    }
+
+    trackEvent("worker_contextual_cta_changed", {
+      scope: "landing_featured",
+      workerCount: workerHeuristicSnapshot.length,
+      labels: Array.from(
+        new Set(workerHeuristicSnapshot.map((item) => item.ctaPrimaryLabel)),
+      ),
+    });
+    lastCtaSignatureRef.current = ctaSignature;
+  }, [ctaSignature, workerHeuristicSnapshot]);
 
   function focusAuth(targetMode: Mode = "login"): void {
     setMode(targetMode);
@@ -240,14 +363,31 @@ export default function Home() {
           <div className="actions actions--inline marketplace-hero-actions">
             <div className="actions actions--inline marketplace-hero-actions-main">
               {hasSession ? (
-                <Link href="/dashboard/jobs" className="primary">
+                <Link
+                  href="/dashboard/jobs"
+                  className="primary"
+                  onClick={() =>
+                    trackEvent("marketplace_cta_clicked", {
+                      scope: "landing_hero",
+                      label: "Criar pedido agora",
+                      hasSession: true,
+                    })
+                  }
+                >
                   Criar pedido agora
                 </Link>
               ) : (
                 <button
                   type="button"
                   className="primary"
-                  onClick={() => focusAuth("login")}
+                  onClick={() => {
+                    trackEvent("marketplace_cta_clicked", {
+                      scope: "landing_hero",
+                      label: "Entrar para contratar",
+                      hasSession: false,
+                    });
+                    focusAuth("login");
+                  }}
                 >
                   Entrar para contratar
                 </button>
@@ -495,17 +635,50 @@ export default function Home() {
                           ? ctaCopy.helperText
                           : "Cria conta em segundos para comparar perfis e pedir serviço sem compromisso."
                       }
+                      onCardClick={() =>
+                        trackEvent("marketplace_worker_card_clicked", {
+                          scope: "landing_featured",
+                          workerId: worker.id,
+                          highlighted: index < 2 || relevance.highlighted,
+                          relevanceLabel: relevance.label ?? null,
+                        })
+                      }
                       actions={
                         <>
                           {hasSession ? (
-                            <Link href="/dashboard/jobs#job-create" className="primary">
+                            <Link
+                              href="/dashboard/jobs#job-create"
+                              className="primary"
+                              onClick={() =>
+                                trackEvent("marketplace_cta_clicked", {
+                                  scope: "landing_worker_card",
+                                  workerId: worker.id,
+                                  label: ctaCopy.primaryLabel,
+                                  pricingContext: hasHourlyRate
+                                    ? "fixed-price-or-quote"
+                                    : "quote-first",
+                                  hasSession: true,
+                                })
+                              }
+                            >
                               {ctaCopy.primaryLabel}
                             </Link>
                           ) : (
                             <button
                               type="button"
                               className="primary"
-                              onClick={() => focusAuth("login")}
+                              onClick={() => {
+                                trackEvent("marketplace_cta_clicked", {
+                                  scope: "landing_worker_card",
+                                  workerId: worker.id,
+                                  label: guestPrimaryLabel,
+                                  pricingContext: hasHourlyRate
+                                    ? "fixed-price-or-quote"
+                                    : "quote-first",
+                                  hasSession: false,
+                                });
+                                focusAuth("login");
+                              }}
                             >
                               {guestPrimaryLabel}
                             </button>

@@ -1,4 +1,4 @@
-import { FormEvent } from "react";
+import { FormEvent, useEffect, useMemo, useRef } from "react";
 import {
   getJobStatusBadgeTone,
   StatusTone,
@@ -18,6 +18,7 @@ import { buildJobActionPlan } from "@/lib/job-cta";
 import { JobTimeline } from "@/components/job-timeline";
 import { Job, JobStatus } from "@/lib/jobs";
 import { PaginationMeta } from "@/lib/pagination";
+import { trackEvent } from "@/lib/tracking";
 import { WorkerProfile } from "@/lib/worker-profile";
 
 type JobSortMode =
@@ -164,30 +165,40 @@ export function JobsDomainSection({
   const inExecutionCount =
     clientJobFlowCounts.ACCEPTED + clientJobFlowCounts.IN_PROGRESS;
   const hasReviewBacklog = reviewableJobs.length > 0;
-  const creationSteps = [
-    {
-      label: "Profissional selecionado",
-      ready: jobWorkerProfileId.length > 0,
-    },
-    {
-      label: "Categoria definida",
-      ready: jobCategoryId.length > 0,
-    },
-    {
-      label: "Título e descrição completos",
-      ready: jobTitle.trim().length >= 3 && jobDescription.trim().length >= 10,
-    },
-    {
-      label:
-        jobPricingMode === "FIXED_PRICE"
-          ? "Orçamento obrigatório definido"
-          : "Modo de cotação confirmado",
-      ready:
-        jobPricingMode === "FIXED_PRICE"
-          ? Number(jobBudget) > 0
-          : true,
-    },
-  ];
+  const creationSteps = useMemo(
+    () => [
+      {
+        label: "Profissional selecionado",
+        ready: jobWorkerProfileId.length > 0,
+      },
+      {
+        label: "Categoria definida",
+        ready: jobCategoryId.length > 0,
+      },
+      {
+        label: "Título e descrição completos",
+        ready: jobTitle.trim().length >= 3 && jobDescription.trim().length >= 10,
+      },
+      {
+        label:
+          jobPricingMode === "FIXED_PRICE"
+            ? "Orçamento obrigatório definido"
+            : "Modo de cotação confirmado",
+        ready:
+          jobPricingMode === "FIXED_PRICE"
+            ? Number(jobBudget) > 0
+            : true,
+      },
+    ],
+    [
+      jobWorkerProfileId,
+      jobCategoryId,
+      jobTitle,
+      jobDescription,
+      jobPricingMode,
+      jobBudget,
+    ],
+  );
   const creationStepReadyCount = creationSteps.filter((item) => item.ready).length;
   const creationProgressPercent = Math.round(
     (creationStepReadyCount / creationSteps.length) * 100,
@@ -196,6 +207,40 @@ export function JobsDomainSection({
     jobPricingMode === "QUOTE_REQUEST"
       ? "Criar job e pedir cotação"
       : "Criar job de preço fixo";
+  const creationStepState = useMemo(() => {
+    const pendingStepIndex = creationSteps.findIndex((item) => !item.ready);
+
+    if (pendingStepIndex === -1) {
+      return {
+        index: creationSteps.length + 1,
+        label: "Pronto para submissão",
+      };
+    }
+
+    return {
+      index: pendingStepIndex + 1,
+      label: creationSteps[pendingStepIndex].label,
+    };
+  }, [creationSteps]);
+  const previousCreationStepRef = useRef<string | null>(null);
+
+  useEffect(() => {
+    const currentStepKey = `${creationStepState.index}:${creationStepState.label}:${jobPricingMode}`;
+    if (previousCreationStepRef.current === currentStepKey) {
+      return;
+    }
+
+    trackEvent("job_create_step_changed", {
+      scope: "dashboard_jobs_create_flow",
+      stepIndex: creationStepState.index,
+      stepLabel: creationStepState.label,
+      readySteps: creationStepReadyCount,
+      totalSteps: creationSteps.length,
+      pricingMode: jobPricingMode,
+    });
+
+    previousCreationStepRef.current = currentStepKey;
+  }, [creationStepReadyCount, creationStepState, creationSteps.length, jobPricingMode]);
 
   return (
     <section id="jobs" className="dashboard-section">

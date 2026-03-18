@@ -1,4 +1,5 @@
 import Link from "next/link";
+import { useEffect, useMemo, useRef } from "react";
 import {
   getRatingBadgeTone,
   StatusTone,
@@ -28,6 +29,7 @@ import {
 } from "@/components/marketplace/marketplace-worker-presenter";
 import { Category } from "@/lib/categories";
 import { PaginationMeta } from "@/lib/pagination";
+import { trackEvent } from "@/lib/tracking";
 import { WorkerProfile } from "@/lib/worker-profile";
 
 type WorkerAvailabilityFilter = "all" | "true" | "false";
@@ -111,7 +113,134 @@ export function WorkersDomainSection({
   formatDate,
   shortenId,
 }: WorkersDomainSectionProps) {
-  const workerRanking = buildWorkerRankingContext(visibleWorkerProfiles);
+  const workerRanking = useMemo(
+    () => buildWorkerRankingContext(visibleWorkerProfiles),
+    [visibleWorkerProfiles],
+  );
+  const workerHeuristicSnapshot = useMemo(
+    () =>
+      visibleWorkerProfiles.map((profile) => {
+        const isMe = profile.userId === currentUserId;
+        const ratingValue = Number(profile.ratingAvg || 0);
+        const hasHourlyRate = typeof profile.hourlyRate === "number";
+        const ctaCopy = getWorkerCtaCopy({
+          isOwnProfile: isMe,
+          isAvailable: profile.isAvailable,
+          hasHourlyRate,
+        });
+        const relevance = getWorkerRelevance({
+          isAvailable: profile.isAvailable,
+          ratingValue,
+          ratingCount: profile.ratingCount,
+        });
+
+        return {
+          workerId: profile.id,
+          ctaPrimaryLabel: ctaCopy.primaryLabel,
+          relevanceLabel: relevance.label ?? null,
+          highlighted: relevance.highlighted,
+          ratingRank: workerRanking.ratingRankById[profile.id] ?? null,
+          priceRank: workerRanking.priceRankById[profile.id] ?? null,
+        };
+      }),
+    [visibleWorkerProfiles, currentUserId, workerRanking],
+  );
+  const rankingSignature = useMemo(
+    () =>
+      workerHeuristicSnapshot
+        .map(
+          (item) =>
+            `${item.workerId}:${item.ratingRank ?? "-"}:${item.priceRank ?? "-"}`,
+        )
+        .join("|"),
+    [workerHeuristicSnapshot],
+  );
+  const highlightSignature = useMemo(
+    () =>
+      workerHeuristicSnapshot
+        .map(
+          (item) =>
+            `${item.workerId}:${item.highlighted ? "1" : "0"}:${item.relevanceLabel ?? "-"}`,
+        )
+        .join("|"),
+    [workerHeuristicSnapshot],
+  );
+  const ctaSignature = useMemo(
+    () =>
+      workerHeuristicSnapshot
+        .map((item) => `${item.workerId}:${item.ctaPrimaryLabel}`)
+        .join("|"),
+    [workerHeuristicSnapshot],
+  );
+  const lastRankingSignatureRef = useRef<string | null>(null);
+  const lastHighlightSignatureRef = useRef<string | null>(null);
+  const lastCtaSignatureRef = useRef<string | null>(null);
+
+  useEffect(() => {
+    if (rankingSignature.length === 0) {
+      return;
+    }
+
+    if (lastRankingSignatureRef.current === rankingSignature) {
+      return;
+    }
+
+    trackEvent("worker_ranking_applied", {
+      scope: "dashboard_workers",
+      workerCount: workerHeuristicSnapshot.length,
+      workersWithRatingRank: workerHeuristicSnapshot.filter(
+        (item) => typeof item.ratingRank === "number",
+      ).length,
+      workersWithPriceRank: workerHeuristicSnapshot.filter(
+        (item) => typeof item.priceRank === "number",
+      ).length,
+    });
+    lastRankingSignatureRef.current = rankingSignature;
+  }, [rankingSignature, workerHeuristicSnapshot]);
+
+  useEffect(() => {
+    if (highlightSignature.length === 0) {
+      return;
+    }
+
+    if (lastHighlightSignatureRef.current === highlightSignature) {
+      return;
+    }
+
+    trackEvent("worker_highlight_labels_applied", {
+      scope: "dashboard_workers",
+      workerCount: workerHeuristicSnapshot.length,
+      highlightedCount: workerHeuristicSnapshot.filter((item) => item.highlighted)
+        .length,
+      labels: Array.from(
+        new Set(
+          workerHeuristicSnapshot
+            .map((item) => item.relevanceLabel)
+            .filter((value): value is string => Boolean(value)),
+        ),
+      ),
+    });
+    lastHighlightSignatureRef.current = highlightSignature;
+  }, [highlightSignature, workerHeuristicSnapshot]);
+
+  useEffect(() => {
+    if (ctaSignature.length === 0) {
+      return;
+    }
+
+    if (lastCtaSignatureRef.current === ctaSignature) {
+      return;
+    }
+
+    trackEvent("worker_contextual_cta_changed", {
+      scope: "dashboard_workers",
+      workerCount: workerHeuristicSnapshot.length,
+      labels: Array.from(
+        new Set(workerHeuristicSnapshot.map((item) => item.ctaPrimaryLabel)),
+      ),
+    });
+    lastCtaSignatureRef.current = ctaSignature;
+  }, [ctaSignature, workerHeuristicSnapshot]);
 
   function handleResetFilters() {
     onWorkerCategorySlugFilterChange("");
@@ -441,18 +570,44 @@ export function WorkersDomainSection({
                       <Link
                         href={isMe ? "/dashboard/profile" : "/dashboard/jobs#job-create"}
                         className="primary"
+                        onClick={() =>
+                          trackEvent("marketplace_cta_clicked", {
+                            scope: "dashboard_workers_card",
+                            workerId: profile.id,
+                            isOwnProfile: isMe,
+                            label: ctaCopy.primaryLabel,
+                          })
+                        }
                       >
                         {ctaCopy.primaryLabel}
                       </Link>
                       <Link
                         href="/dashboard/jobs#job-create"
                         className="primary primary--ghost"
+                        onClick={() =>
+                          trackEvent("marketplace_cta_clicked", {
+                            scope: "dashboard_workers_card",
+                            workerId: profile.id,
+                            isOwnProfile: isMe,
+                            isSecondary: true,
+                            label: ctaCopy.secondaryLabel,
+                          })
+                        }
                       >
                         {ctaCopy.secondaryLabel}
                       </Link>
                     </>
                   }
                   ctaHint={ctaCopy.helperText}
+                  onCardClick={() =>
+                    trackEvent("marketplace_worker_card_clicked", {
+                      scope: "dashboard_workers",
+                      workerId: profile.id,
+                      isOwnProfile: isMe,
+                      highlighted: relevance.highlighted,
+                      relevanceLabel: relevance.label ?? null,
+                    })
+                  }
                 />
               );
             })}

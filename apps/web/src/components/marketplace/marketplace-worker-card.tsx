@@ -1,4 +1,4 @@
-import { ReactNode } from "react";
+import { MouseEvent, ReactNode } from "react";
 import type { StatusBadgeTone } from "@/components/dashboard/dashboard-formatters";
 
 export type MarketplaceWorkerCardDetail = {
@@ -39,6 +39,7 @@ type MarketplaceWorkerCardProps = {
   footer?: ReactNode;
   actions?: ReactNode;
   ctaHint?: ReactNode;
+  onCardClick?: () => void;
   className?: string;
 };
 
@@ -58,8 +59,22 @@ export function MarketplaceWorkerCard({
   footer,
   actions,
   ctaHint,
+  onCardClick,
   className,
 }: MarketplaceWorkerCardProps) {
+  function handleCardClick(event: MouseEvent<HTMLElement>) {
+    if (!onCardClick) {
+      return;
+    }
+
+    const target = event.target as HTMLElement | null;
+    if (target?.closest("a, button, input, select, textarea, label")) {
+      return;
+    }
+
+    onCardClick();
+  }
+
   return (
     <article
       className={[
@@ -70,6 +85,7 @@ export function MarketplaceWorkerCard({
       ]
         .filter(Boolean)
         .join(" ")}
+      onClick={onCardClick ? handleCardClick : undefined}
     >
       <div className="marketplace-worker-card-head">
         <p className="item-title">{title}</p>
