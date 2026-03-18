@@ -2,6 +2,7 @@ import type { StatusBadgeTone } from "@/components/dashboard/dashboard-formatter
 import {
   getWorkerRelevanceScore,
   type WorkerRankingDebugItem,
+  type WorkerRelevanceScoreBreakdown,
 } from "@/lib/tracking";
 import type { WorkerProfile } from "@/lib/worker-profile";
 
@@ -31,6 +32,8 @@ type WorkerDecisionInput = {
   hourlyRate: number | null;
   ratingRank?: number | null;
   priceRank?: number | null;
+  rankingLabel?: string | null;
+  scoreBreakdown?: WorkerRelevanceScoreBreakdown | null;
 };
 
 export type WorkerRelevance = {
@@ -54,13 +57,55 @@ export type WorkerRankingContext = {
   priceRankById: Record<string, number>;
   relevanceRankById: Record<string, number>;
   relevanceScoreById: Record<string, number>;
-  rankingReasonById: Record<string, string>;
+  rankingLabelById: Record<string, string>;
+  strongHighlightById: Record<string, boolean>;
+  scoreBreakdownById: Record<string, WorkerRelevanceScoreBreakdown>;
   topWorkersDebug: WorkerRankingDebugItem[];
 };
 
 function normalizeRating(value: number | string): number {
   const parsed = typeof value === "number" ? value : Number(value);
   return Number.isFinite(parsed) ? parsed : 0;
+}
+
+function resolveRankingLabel(input: {
+  ratingRank: number | null;
+  relevanceRank: number | null;
+  scoreBreakdown: WorkerRelevanceScoreBreakdown;
+}): string {
+  const hasReliableEvidence = input.scoreBreakdown.confidenceLevel !== "low";
+
+  if (
+    (input.ratingRank ?? Number.MAX_SAFE_INTEGER) === 1 &&
+    input.scoreBreakdown.qualityComponent >= 7.8 &&
+    hasReliableEvidence
+  ) {
+    return "Melhor avaliação";
+  }
+
+  if (
+    input.scoreBreakdown.conversionComponent >= 5.6 &&
+    input.scoreBreakdown.conversions >= 2 &&
+    hasReliableEvidence
+  ) {
+    return "Boa conversão";
+  }
+
+  if (
+    input.scoreBreakdown.interestComponent +
+      input.scoreBreakdown.intentionComponent >=
+      2.6 &&
+    input.scoreBreakdown.interactions >= 4 &&
+    hasReliableEvidence
+  ) {
+    return "Mais procurado";
+  }
+
+  if ((input.relevanceRank ?? Number.MAX_SAFE_INTEGER) <= 3) {
+    return "Relevante nesta lista";
+  }
+
+  return "Relevante nesta lista";
 }
 
 export function buildWorkerRankingContext(
@@ -96,7 +141,7 @@ export function buildWorkerRankingContext(
 
   const relevanceRows = workers
     .map((worker) => {
-      const relevance = getWorkerRelevanceScore({
+      const scoreBreakdown = getWorkerRelevanceScore({
         workerId: worker.id,
         ratingAvg: worker.ratingAvg,
         ratingCount: worker.ratingCount,
@@ -104,8 +149,9 @@ export function buildWorkerRankingContext(
 
       return {
         workerId: worker.id,
-        score: relevance.score,
-        reasons: relevance.reasons,
+        score: scoreBreakdown.score,
+        reasons: scoreBreakdown.reasons,
+        scoreBreakdown,
         ratingValue: normalizeRating(worker.ratingAvg),
         ratingCount: worker.ratingCount,
       };
@@ -140,9 +186,45 @@ export function buildWorkerRankingContext(
     {},
   );
 
-  const rankingReasonById = relevanceRows.reduce<Record<string, string>>(
-    (acc, row) => {
-      acc[row.workerId] = row.reasons[0] ?? "Ranking por equilíbrio de confiança";
+  const scoreBreakdownById = relevanceRows.reduce<
+    Record<string, WorkerRelevanceScoreBreakdown>
+  >((acc, row) => {
+    acc[row.workerId] = row.scoreBreakdown;
+    return acc;
+  }, {});
+
+  const rankingLabelById = relevanceRows.reduce<Record<string, string>>(
+    (acc, row, index) => {
+      const relevanceRank = index + 1;
+      const ratingRank = ratingRankById[row.workerId] ?? null;
+      acc[row.workerId] = resolveRankingLabel({
+        ratingRank,
+        relevanceRank,
+        scoreBreakdown: row.scoreBreakdown,
+      });
+      return acc;
+    },
+    {},
+  );
+
+  const strongHighlightById = relevanceRows.reduce<Record<string, boolean>>(
+    (acc, row, index) => {
+      const relevanceRank = index + 1;
+      const confidenceLevel = row.scoreBreakdown.confidenceLevel;
+      const confidenceReliable =
+        confidenceLevel === "medium" || confidenceLevel === "high";
+      const conversionStrong =
+        row.scoreBreakdown.conversionComponent >= 5.6 &&
+        row.scoreBreakdown.conversions >= 2 &&
+        row.scoreBreakdown.qualityComponent >= 6 &&
+        confidenceReliable;
+      const strongByTopRank =
+        relevanceRank <= 2 &&
+        row.scoreBreakdown.score >= 8.4 &&
+        row.scoreBreakdown.qualityComponent >= 6.5 &&
+        confidenceReliable;
+
+      acc[row.workerId] = conversionStrong || strongByTopRank;
       return acc;
     },
     {},
@@ -153,6 +235,11 @@ export function buildWorkerRankingContext(
     .map((row) => ({
       workerId: row.workerId,
       score: row.score,
+      qualityComponent: row.scoreBreakdown.qualityComponent,
+      interestComponent: row.scoreBreakdown.interestComponent,
+      intentionComponent: row.scoreBreakdown.intentionComponent,
+      conversionComponent: row.scoreBreakdown.conversionComponent,
+      stabilityMultiplier: row.scoreBreakdown.stabilityMultiplier,
       reasons: row.reasons,
     }));
 
@@ -161,7 +248,9 @@ export function buildWorkerRankingContext(
     priceRankById,
     relevanceRankById,
     relevanceScoreById,
-    rankingReasonById,
+    rankingLabelById,
+    strongHighlightById,
+    scoreBreakdownById,
     topWorkersDebug,
   };
 }
@@ -256,16 +345,37 @@ export function getWorkerDecisionBadges(
   input: WorkerDecisionInput,
 ): WorkerDecisionBadge[] {
   const badges: WorkerDecisionBadge[] = [];
+  const rankingLabel = input.rankingLabel ?? null;
+  const scoreBreakdown = input.scoreBreakdown ?? null;
 
-  if ((input.ratingRank ?? 0) === 1 && input.ratingCount >= 4) {
+  if (
+    rankingLabel === "Melhor avaliação" ||
+    ((input.ratingRank ?? 0) === 1 && input.ratingCount >= 4)
+  ) {
     badges.push({ label: "Melhor avaliação", tone: "is-ok" });
+  }
+
+  if (
+    rankingLabel === "Boa conversão" ||
+    (scoreBreakdown &&
+      scoreBreakdown.conversions >= 2 &&
+      scoreBreakdown.conversionComponent >= 5.6 &&
+      scoreBreakdown.confidenceLevel !== "low")
+  ) {
+    badges.push({ label: "Boa conversão", tone: "is-ok" });
   }
 
   if ((input.priceRank ?? 0) === 1 && typeof input.hourlyRate === "number") {
     badges.push({ label: "Preço competitivo", tone: "is-ok" });
   }
 
-  if (input.ratingCount >= 12) {
+  if (
+    rankingLabel === "Mais procurado" ||
+    (scoreBreakdown &&
+      scoreBreakdown.interactions >= 4 &&
+      scoreBreakdown.interestComponent + scoreBreakdown.intentionComponent >= 2.6 &&
+      scoreBreakdown.confidenceLevel !== "low")
+  ) {
     badges.push({ label: "Mais procurado", tone: "is-ok" });
   }
 

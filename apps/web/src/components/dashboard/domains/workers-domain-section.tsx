@@ -24,7 +24,6 @@ import {
   getWorkerCtaCopy,
   getWorkerComparisonItems,
   getWorkerDecisionBadges,
-  getWorkerRelevance,
   getWorkerResponseEtaLabel,
 } from "@/components/marketplace/marketplace-worker-presenter";
 import { Category } from "@/lib/categories";
@@ -141,26 +140,25 @@ export function WorkersDomainSection({
     () =>
       visibleWorkerProfiles.map((profile) => {
         const isMe = profile.userId === currentUserId;
-        const ratingValue = Number(profile.ratingAvg || 0);
         const hasHourlyRate = typeof profile.hourlyRate === "number";
         const ctaCopy = getWorkerCtaCopy({
           isOwnProfile: isMe,
           isAvailable: profile.isAvailable,
           hasHourlyRate,
         });
-        const relevance = getWorkerRelevance({
-          isAvailable: profile.isAvailable,
-          ratingValue,
-          ratingCount: profile.ratingCount,
-        });
+        const rankingLabel =
+          workerRanking.rankingLabelById[profile.id] ?? "Relevante nesta lista";
+        const highlighted = workerRanking.strongHighlightById[profile.id] ?? false;
 
         return {
           workerId: profile.id,
           ctaPrimaryLabel: ctaCopy.primaryLabel,
-          relevanceLabel: relevance.label ?? null,
-          highlighted: relevance.highlighted,
+          relevanceLabel: rankingLabel,
+          highlighted,
           ratingRank: workerRanking.ratingRankById[profile.id] ?? null,
           priceRank: workerRanking.priceRankById[profile.id] ?? null,
+          relevanceRank: workerRanking.relevanceRankById[profile.id] ?? null,
+          relevanceScore: workerRanking.relevanceScoreById[profile.id] ?? 0,
         };
       }),
     [visibleWorkerProfiles, currentUserId, workerRanking],
@@ -170,7 +168,7 @@ export function WorkersDomainSection({
       workerHeuristicSnapshot
         .map(
           (item) =>
-            `${item.workerId}:${item.ratingRank ?? "-"}:${item.priceRank ?? "-"}`,
+            `${item.workerId}:${item.ratingRank ?? "-"}:${item.priceRank ?? "-"}:${item.relevanceRank ?? "-"}:${item.relevanceScore.toFixed(3)}`,
         )
         .join("|"),
     [workerHeuristicSnapshot],
@@ -474,11 +472,14 @@ export function WorkersDomainSection({
                 isAvailable: profile.isAvailable,
                 hasHourlyRate,
               });
-              const relevance = getWorkerRelevance({
-                isAvailable: profile.isAvailable,
-                ratingValue,
-                ratingCount: profile.ratingCount,
-              });
+              const rankingLabel = isMe
+                ? "Perfil próprio"
+                : (workerRanking.rankingLabelById[profile.id] ??
+                  "Relevante nesta lista");
+              const isStrongHighlight =
+                !isMe && (workerRanking.strongHighlightById[profile.id] ?? false);
+              const scoreBreakdown =
+                workerRanking.scoreBreakdownById[profile.id] ?? null;
               const responseEta = getWorkerResponseEtaLabel({
                 isAvailable: profile.isAvailable,
                 ratingValue,
@@ -496,6 +497,8 @@ export function WorkersDomainSection({
                 hourlyRate: profile.hourlyRate,
                 ratingRank: workerRanking.ratingRankById[profile.id] ?? null,
                 priceRank: workerRanking.priceRankById[profile.id] ?? null,
+                rankingLabel,
+                scoreBreakdown,
               });
               const comparisonItems = getWorkerComparisonItems({
                 isAvailable: profile.isAvailable,
@@ -511,12 +514,8 @@ export function WorkersDomainSection({
                 <MarketplaceWorkerCard
                   key={profile.id}
                   title={isMe ? "O teu perfil" : `Worker ${shortenId(profile.userId)}`}
-                  highlighted={
-                    !isMe &&
-                    ((workerRanking.relevanceRankById[profile.id] ??
-                      Number.MAX_SAFE_INTEGER) <= 3 || relevance.highlighted)
-                  }
-                  relevanceLabel={isMe ? "Perfil próprio" : relevance.label ?? undefined}
+                  highlighted={isStrongHighlight}
+                  relevanceLabel={rankingLabel}
                   availabilityTone={profile.isAvailable ? "is-ok" : "is-muted"}
                   availabilityLabel={
                     profile.isAvailable ? "Disponível hoje" : "Agenda limitada"
@@ -636,10 +635,8 @@ export function WorkersDomainSection({
                       view: "dashboard.workers",
                       workerId: profile.id,
                       isOwnProfile: isMe,
-                      highlighted:
-                        (workerRanking.relevanceRankById[profile.id] ??
-                          Number.MAX_SAFE_INTEGER) <= 3 || relevance.highlighted,
-                      relevanceLabel: relevance.label ?? null,
+                      highlighted: isStrongHighlight,
+                      relevanceLabel: rankingLabel,
                     })
                   }
                 />

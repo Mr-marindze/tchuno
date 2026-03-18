@@ -4,6 +4,11 @@ export type DropoffReason = "visibility_hidden" | "before_unload";
 export type WorkerRankingDebugItem = {
   workerId: string;
   score: number;
+  qualityComponent: number;
+  interestComponent: number;
+  intentionComponent: number;
+  conversionComponent: number;
+  stabilityMultiplier: number;
   reasons: string[];
 };
 
@@ -167,6 +172,7 @@ export type WorkerBehaviorAggregate = {
   clicks: number;
   ctaClicks: number;
   conversions: number;
+  lastInteractionEventIndex: number;
 };
 
 export type BehaviorAggregationSnapshot = {
@@ -177,13 +183,18 @@ export type BehaviorAggregationSnapshot = {
 
 export type WorkerRelevanceScoreBreakdown = {
   score: number;
-  ratingComponent: number;
-  clickComponent: number;
+  qualityComponent: number;
+  interestComponent: number;
+  intentionComponent: number;
   conversionComponent: number;
-  ctaComponent: number;
+  behaviorSignal: number;
+  stabilityMultiplier: number;
   clicks: number;
   conversions: number;
   ctaClicks: number;
+  interactions: number;
+  lastInteractionEventIndex: number;
+  confidenceLevel: "low" | "medium" | "high";
   reasons: string[];
 };
 
@@ -225,11 +236,13 @@ const categoryInteractionBySlug: Record<string, number> = {};
 const behaviorAggregationListeners = new Set<() => void>();
 let behaviorAggregationVersion = 0;
 
-const CLICK_WEIGHT = 0.6;
-const CTA_CLICK_WEIGHT = 0.8;
-const CONVERSION_WEIGHT = 4;
-const RATING_VALUE_WEIGHT = 1.8;
-const RATING_COUNT_WEIGHT = 0.06;
+const CLICK_WEIGHT = 0.42;
+const CTA_CLICK_WEIGHT = 0.58;
+const CONVERSION_WEIGHT = 2.9;
+const RATING_VALUE_WEIGHT = 1.65;
+const RATING_COUNT_WEIGHT = 0.22;
+const RECENCY_EVENT_WINDOW = 35;
+const MIN_CONFIDENCE_EVIDENCE = 12;
 
 function nowIso(): string {
   return new Date().toISOString();
@@ -281,6 +294,7 @@ function getOrCreateWorkerBehavior(workerId: string): WorkerBehaviorAggregate {
       clicks: 0,
       ctaClicks: 0,
       conversions: 0,
+      lastInteractionEventIndex: 0,
     };
   }
 
@@ -309,6 +323,7 @@ function updateBehaviorAggregation(event: AnyTrackingEvent) {
       const workerStats = getOrCreateWorkerBehavior(event.metadata.workerId);
       workerStats.interactions += 1;
       workerStats.clicks += 1;
+      workerStats.lastInteractionEventIndex = event.context.eventIndex;
       changed = true;
       break;
     }
@@ -320,6 +335,7 @@ function updateBehaviorAggregation(event: AnyTrackingEvent) {
       const workerStats = getOrCreateWorkerBehavior(event.metadata.workerId);
       workerStats.interactions += 1;
       workerStats.ctaClicks += 1;
+      workerStats.lastInteractionEventIndex = event.context.eventIndex;
       changed = true;
       break;
     }
@@ -327,6 +343,7 @@ function updateBehaviorAggregation(event: AnyTrackingEvent) {
       const workerStats = getOrCreateWorkerBehavior(event.metadata.workerId);
       workerStats.interactions += 1;
       workerStats.ctaClicks += 1;
+      workerStats.lastInteractionEventIndex = event.context.eventIndex;
       changed = true;
       break;
     }
@@ -347,6 +364,7 @@ function updateBehaviorAggregation(event: AnyTrackingEvent) {
       }
 
       workerStats.conversions += 1;
+      workerStats.lastInteractionEventIndex = event.context.eventIndex;
       changed = true;
       break;
     }
@@ -571,6 +589,14 @@ function parseRating(rating: number | string): number {
   return Math.max(0, Math.min(5, parsed));
 }
 
+function clamp01(value: number): number {
+  return Math.max(0, Math.min(1, value));
+}
+
+function roundScore(value: number): number {
+  return Number(value.toFixed(3));
+}
+
 export function getWorkerRelevanceScore(input: {
   workerId: string;
   ratingAvg: number | string;
@@ -581,41 +607,78 @@ export function getWorkerRelevanceScore(input: {
     clicks: 0,
     ctaClicks: 0,
     conversions: 0,
+    lastInteractionEventIndex: 0,
   };
 
   const ratingValue = parseRating(input.ratingAvg);
   const ratingCount = Math.max(0, input.ratingCount);
-  const ratingComponent =
+  const qualityComponent =
     ratingValue * RATING_VALUE_WEIGHT +
-    Math.min(20, ratingCount) * RATING_COUNT_WEIGHT;
-  const clickComponent = Math.min(20, behavior.clicks) * CLICK_WEIGHT;
-  const ctaComponent = Math.min(20, behavior.ctaClicks) * CTA_CLICK_WEIGHT;
+    Math.log1p(Math.min(60, ratingCount)) * RATING_COUNT_WEIGHT;
+
+  const eventsSinceInteraction = Math.max(
+    0,
+    sessionEventIndex - behavior.lastInteractionEventIndex,
+  );
+  const recencyMultiplier =
+    behavior.lastInteractionEventIndex > 0
+      ? 1 - clamp01(eventsSinceInteraction / RECENCY_EVENT_WINDOW) * 0.45
+      : 0.6;
+
+  const interestComponent =
+    Math.min(24, behavior.clicks) * CLICK_WEIGHT * recencyMultiplier;
+  const intentionComponent =
+    Math.min(18, behavior.ctaClicks) * CTA_CLICK_WEIGHT * recencyMultiplier;
   const conversionComponent =
     Math.min(10, behavior.conversions) * CONVERSION_WEIGHT;
-  const score =
-    ratingComponent + clickComponent + ctaComponent + conversionComponent;
+  const behaviorSignal =
+    interestComponent + intentionComponent + conversionComponent;
+
+  const evidenceScore =
+    Math.min(20, ratingCount) +
+    behavior.interactions * 1.1 +
+    behavior.conversions * 4;
+  const stabilityMultiplier = 0.45 + clamp01(evidenceScore / MIN_CONFIDENCE_EVIDENCE) * 0.55;
+  const score = qualityComponent + behaviorSignal * stabilityMultiplier;
+
+  let confidenceLevel: "low" | "medium" | "high" = "low";
+  if (stabilityMultiplier >= 0.85) {
+    confidenceLevel = "high";
+  } else if (stabilityMultiplier >= 0.65) {
+    confidenceLevel = "medium";
+  }
 
   const reasons: string[] = [];
-  if (behavior.conversions > 0) {
-    reasons.push(`${behavior.conversions} conversão(ões) na sessão`);
+  if (behavior.conversions >= 2) {
+    reasons.push("Boa conversão");
+  } else if (behavior.conversions > 0) {
+    reasons.push("Conversão inicial");
   }
-  if (behavior.ctaClicks > 0) {
-    reasons.push(`${behavior.ctaClicks} clique(s) em CTA`);
+  if (behavior.ctaClicks >= 3 || behavior.clicks >= 5) {
+    reasons.push("Mais procurado");
+  } else if (behavior.ctaClicks > 0 || behavior.clicks > 0) {
+    reasons.push("Relevante nesta lista");
   }
-  if (behavior.clicks > 0) {
-    reasons.push(`${behavior.clicks} clique(s) em card`);
+  if (ratingCount >= 8 && ratingValue >= 4.6) {
+    reasons.push("Melhor avaliação");
+  } else {
+    reasons.push(`Qualidade base: rating ${ratingValue.toFixed(1)} (${ratingCount})`);
   }
-  reasons.push(`rating ${ratingValue.toFixed(1)} (${ratingCount} avaliações)`);
 
   return {
-    score: Number(score.toFixed(3)),
-    ratingComponent: Number(ratingComponent.toFixed(3)),
-    clickComponent: Number(clickComponent.toFixed(3)),
-    conversionComponent: Number(conversionComponent.toFixed(3)),
-    ctaComponent: Number(ctaComponent.toFixed(3)),
+    score: roundScore(score),
+    qualityComponent: roundScore(qualityComponent),
+    interestComponent: roundScore(interestComponent),
+    intentionComponent: roundScore(intentionComponent),
+    conversionComponent: roundScore(conversionComponent),
+    behaviorSignal: roundScore(behaviorSignal),
+    stabilityMultiplier: roundScore(stabilityMultiplier),
     clicks: behavior.clicks,
     conversions: behavior.conversions,
     ctaClicks: behavior.ctaClicks,
+    interactions: behavior.interactions,
+    lastInteractionEventIndex: behavior.lastInteractionEventIndex,
+    confidenceLevel,
     reasons,
   };
 }

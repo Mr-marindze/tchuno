@@ -26,7 +26,6 @@ import {
   getWorkerCtaCopy,
   getWorkerComparisonItems,
   getWorkerDecisionBadges,
-  getWorkerRelevance,
   getWorkerResponseEtaLabel,
 } from "@/components/marketplace/marketplace-worker-presenter";
 import { ToastTone, useToast } from "@/components/toast-provider";
@@ -71,25 +70,24 @@ export default function Home() {
   const workerHeuristicSnapshot = useMemo(
     () =>
       visibleWorkers.map((worker) => {
-        const ratingValue = Number(worker.ratingAvg || 0);
         const hasHourlyRate = typeof worker.hourlyRate === "number";
         const ctaCopy = getWorkerCtaCopy({
           isAvailable: worker.isAvailable,
           hasHourlyRate,
         });
-        const relevance = getWorkerRelevance({
-          isAvailable: worker.isAvailable,
-          ratingValue,
-          ratingCount: worker.ratingCount,
-        });
+        const rankingLabel =
+          workerRanking.rankingLabelById[worker.id] ?? "Relevante nesta lista";
+        const highlighted = workerRanking.strongHighlightById[worker.id] ?? false;
 
         return {
           workerId: worker.id,
           ctaPrimaryLabel: ctaCopy.primaryLabel,
-          relevanceLabel: relevance.label ?? null,
-          highlighted: relevance.highlighted,
+          relevanceLabel: rankingLabel,
+          highlighted,
           ratingRank: workerRanking.ratingRankById[worker.id] ?? null,
           priceRank: workerRanking.priceRankById[worker.id] ?? null,
+          relevanceRank: workerRanking.relevanceRankById[worker.id] ?? null,
+          relevanceScore: workerRanking.relevanceScoreById[worker.id] ?? 0,
         };
       }),
     [visibleWorkers, workerRanking],
@@ -99,7 +97,7 @@ export default function Home() {
       workerHeuristicSnapshot
         .map(
           (item) =>
-            `${item.workerId}:${item.ratingRank ?? "-"}:${item.priceRank ?? "-"}`,
+            `${item.workerId}:${item.ratingRank ?? "-"}:${item.priceRank ?? "-"}:${item.relevanceRank ?? "-"}:${item.relevanceScore.toFixed(3)}`,
         )
         .join("|"),
     [workerHeuristicSnapshot],
@@ -545,11 +543,13 @@ export default function Home() {
                     isAvailable: worker.isAvailable,
                     hasHourlyRate,
                   });
-                  const relevance = getWorkerRelevance({
-                    isAvailable: worker.isAvailable,
-                    ratingValue,
-                    ratingCount: worker.ratingCount,
-                  });
+                  const rankingLabel =
+                    workerRanking.rankingLabelById[worker.id] ??
+                    "Relevante nesta lista";
+                  const isStrongHighlight =
+                    workerRanking.strongHighlightById[worker.id] ?? false;
+                  const scoreBreakdown =
+                    workerRanking.scoreBreakdownById[worker.id] ?? null;
                   const guestPrimaryLabel = `Entrar para ${ctaCopy.primaryLabel.toLowerCase()}`;
                   const responseEta = getWorkerResponseEtaLabel({
                     isAvailable: worker.isAvailable,
@@ -568,6 +568,8 @@ export default function Home() {
                     hourlyRate: worker.hourlyRate,
                     ratingRank: workerRanking.ratingRankById[worker.id] ?? null,
                     priceRank: workerRanking.priceRankById[worker.id] ?? null,
+                    rankingLabel,
+                    scoreBreakdown,
                   });
                   const comparisonItems = getWorkerComparisonItems({
                     isAvailable: worker.isAvailable,
@@ -583,11 +585,8 @@ export default function Home() {
                     <MarketplaceWorkerCard
                       key={worker.id}
                       title={`Profissional ${shortenId(worker.userId)}`}
-                      highlighted={
-                        (workerRanking.relevanceRankById[worker.id] ?? Number.MAX_SAFE_INTEGER) <=
-                          2 || relevance.highlighted
-                      }
-                      relevanceLabel={relevance.label ?? undefined}
+                      highlighted={isStrongHighlight}
+                      relevanceLabel={rankingLabel}
                       availabilityTone={worker.isAvailable ? "is-ok" : "is-muted"}
                       availabilityLabel={
                         worker.isAvailable ? "Disponível hoje" : "Agenda limitada"
@@ -650,10 +649,8 @@ export default function Home() {
                           source: "landing.worker_card",
                           view: "landing",
                           workerId: worker.id,
-                          highlighted:
-                            (workerRanking.relevanceRankById[worker.id] ??
-                              Number.MAX_SAFE_INTEGER) <= 2 || relevance.highlighted,
-                          relevanceLabel: relevance.label ?? null,
+                          highlighted: isStrongHighlight,
+                          relevanceLabel: rankingLabel,
                         })
                       }
                       actions={
