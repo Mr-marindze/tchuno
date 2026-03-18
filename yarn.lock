@@ -2505,6 +2505,7 @@ __metadata:
     eslint: "npm:^9"
     eslint-config-next: "npm:16.1.6"
     next: "npm:16.1.6"
+    playwright-core: "npm:^1.58.2"
     react: "npm:19.2.3"
     react-dom: "npm:19.2.3"
     tailwindcss: "npm:^4"
@@ -8639,6 +8640,15 @@ __metadata:
     exsolve: "npm:^1.0.7"
     pathe: "npm:^2.0.3"
   checksum: 10c0/d2bbddc5b81bd4741e1529c08ef4c5f1542bbdcf63498b73b8e1d84cff71806d1b8b1577800549bb569cb7aa20056257677b979bff48c97967cba7e64f72ae12
+  languageName: node
+  linkType: hard
+
+"playwright-core@npm:^1.58.2":
+  version: 1.58.2
+  resolution: "playwright-core@npm:1.58.2"
+  bin:
+    playwright-core: cli.js
+  checksum: 10c0/5aa15b2b764e6ffe738293a09081a6f7023847a0dbf4cd05fe10eed2e25450d321baf7482f938f2d2eb330291e197fa23e57b29a5b552b89927ceb791266225b
   languageName: node
   linkType: hard
 

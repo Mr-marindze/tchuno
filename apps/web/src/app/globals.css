@@ -32,6 +32,8 @@ body {
 }
 
 .card {
+  position: relative;
+  overflow: hidden;
   width: min(720px, 100%);
   background: var(--surface);
   backdrop-filter: blur(10px);
@@ -44,6 +46,55 @@ body {
 
 .card--wide {
   width: min(1100px, 100%);
+}
+
+.card::before {
+  content: "";
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  background:
+    linear-gradient(135deg, rgba(56, 189, 248, 0.08), transparent 45%),
+    linear-gradient(320deg, rgba(34, 197, 94, 0.08), transparent 40%);
+}
+
+.dashboard-shell {
+  display: grid;
+  gap: 0.95rem;
+}
+
+.dashboard-shell-nav {
+  display: grid;
+  gap: 0.45rem;
+  border-bottom: 1px solid rgba(186, 230, 253, 0.18);
+  padding-bottom: 0.8rem;
+}
+
+.dashboard-nav--admin a {
+  border-color: rgba(250, 204, 21, 0.35);
+  background: rgba(113, 63, 18, 0.24);
+  color: #fef3c7;
+}
+
+.dashboard-session-actions {
+  margin-top: 0;
+  padding: 0.6rem;
+  border-radius: 14px;
+  border: 1px solid rgba(186, 230, 253, 0.18);
+  background: rgba(15, 23, 42, 0.44);
+}
+
+.dashboard-shell-content {
+  display: grid;
+  gap: 0.9rem;
+}
+
+.state-card {
+  width: min(760px, 100%);
+}
+
+.state-card h1 {
+  margin: 0;
 }
 
 .header h1 {
@@ -188,6 +239,10 @@ body {
   gap: 0.6rem;
 }
 
+.actions--inline {
+  grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+}
+
 .actions button.is-danger {
   border-color: rgba(239, 68, 68, 0.45);
   background: rgba(185, 28, 28, 0.35);
@@ -218,6 +273,23 @@ body {
 
 .dashboard-nav a:hover {
   background: rgba(14, 116, 144, 0.5);
+}
+
+.dashboard-nav a.active {
+  background: rgba(8, 145, 178, 0.75);
+  border-color: rgba(186, 230, 253, 0.45);
+}
+
+a.primary {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  text-decoration: none;
+}
+
+a.primary.primary--ghost {
+  background: rgba(15, 23, 42, 0.52);
+  border-style: dashed;
 }
 
 .dashboard-section {
@@ -320,6 +392,17 @@ body {
   overflow-x: auto;
   overflow-wrap: anywhere;
   font-size: 0.84rem;
+}
+
+.dashboard-highlight-card {
+  border-color: rgba(56, 189, 248, 0.45);
+  background:
+    linear-gradient(140deg, rgba(8, 145, 178, 0.24), rgba(15, 23, 42, 0.7)),
+    rgba(15, 23, 42, 0.72);
+}
+
+.dashboard-highlight-card .item-title {
+  font-size: 0.95rem;
 }
 
 .item-title {
