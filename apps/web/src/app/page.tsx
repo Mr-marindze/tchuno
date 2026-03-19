@@ -26,11 +26,15 @@ import {
   getWorkerCtaCopy,
   getWorkerComparisonItems,
   getWorkerDecisionBadges,
+  getWorkerMainCategoryLabel,
+  getWorkerPriceLabel,
+  getWorkerReviewLabel,
   getWorkerResponseEtaLabel,
 } from "@/components/marketplace/marketplace-worker-presenter";
 import { ToastTone, useToast } from "@/components/toast-provider";
 import { humanizeUnknownError } from "@/lib/http-errors";
 import { trackEvent } from "@/lib/tracking";
+import styles from "./page.module.css";
 
 type Mode = "login" | "register";
 
@@ -60,7 +64,9 @@ export default function Home() {
 
   const title = useMemo(
     () =>
-      mode === "login" ? "Entrar no Tchuno" : "Criar conta e contratar serviços",
+      mode === "login"
+        ? "Entrar no Tchuno"
+        : "Criar conta e contratar serviços",
     [mode],
   );
   const workerRanking = useMemo(
@@ -77,7 +83,8 @@ export default function Home() {
         });
         const rankingLabel =
           workerRanking.rankingLabelById[worker.id] ?? "Relevante nesta lista";
-        const highlighted = workerRanking.strongHighlightById[worker.id] ?? false;
+        const highlighted =
+          workerRanking.strongHighlightById[worker.id] ?? false;
 
         return {
           workerId: worker.id,
@@ -151,7 +158,11 @@ export default function Home() {
       topWorkers: workerRanking.topWorkersDebug,
     });
     lastRankingSignatureRef.current = rankingSignature;
-  }, [rankingSignature, workerHeuristicSnapshot, workerRanking.topWorkersDebug]);
+  }, [
+    rankingSignature,
+    workerHeuristicSnapshot,
+    workerRanking.topWorkersDebug,
+  ]);
 
   useEffect(() => {
     if (highlightSignature.length === 0) {
@@ -166,8 +177,9 @@ export default function Home() {
       source: "landing.featured_workers",
       view: "landing",
       workerCount: workerHeuristicSnapshot.length,
-      highlightedCount: workerHeuristicSnapshot.filter((item) => item.highlighted)
-        .length,
+      highlightedCount: workerHeuristicSnapshot.filter(
+        (item) => item.highlighted,
+      ).length,
       labels: Array.from(
         new Set(
           workerHeuristicSnapshot
@@ -265,9 +277,15 @@ export default function Home() {
       setResult(auth);
       saveTokens(auth);
       setHasSession(true);
-      setFeedback(`${mode === "login" ? "Login" : "Registo"} com sucesso.`, "success");
+      setFeedback(
+        `${mode === "login" ? "Login" : "Registo"} com sucesso.`,
+        "success",
+      );
     } catch (error) {
-      setFeedback(humanizeUnknownError(error, "Erro inesperado no login."), "error");
+      setFeedback(
+        humanizeUnknownError(error, "Erro inesperado no login."),
+        "error",
+      );
     } finally {
       setIsSubmitting(false);
     }
@@ -292,7 +310,10 @@ export default function Home() {
       setHasSession(true);
       setFeedback("Sessão renovada.", "success");
     } catch (error) {
-      setFeedback(humanizeUnknownError(error, "Erro inesperado no refresh."), "error");
+      setFeedback(
+        humanizeUnknownError(error, "Erro inesperado no refresh."),
+        "error",
+      );
     } finally {
       setIsSubmitting(false);
     }
@@ -314,7 +335,10 @@ export default function Home() {
       setHasSession(false);
       setFeedback("Sessão terminada.", "success");
     } catch (error) {
-      setFeedback(humanizeUnknownError(error, "Erro inesperado no logout."), "error");
+      setFeedback(
+        humanizeUnknownError(error, "Erro inesperado no logout."),
+        "error",
+      );
     } finally {
       setIsSubmitting(false);
     }
@@ -348,397 +372,451 @@ export default function Home() {
     }
   }
 
-  return (
-    <main className="shell marketplace-shell">
-      <section className="card card--wide marketplace-layout">
-        <div className="marketplace-main">
-          <header className="header marketplace-hero">
-            <p className="kicker">Tchuno Marketplace</p>
-            <h1>Encontra profissionais locais e contrata com confiança</h1>
-            <p className="subtitle">
-              Descobre serviços por categoria, valida reputação e cria pedidos com
-              acompanhamento claro do início à conclusão.
-            </p>
-          </header>
+  const quickCategoryChips = useMemo(
+    () => [
+      { label: "Canalização", slug: "canalizacao", searchTerm: "canalizador" },
+      { label: "Eletricista", slug: "eletricista", searchTerm: "eletricista" },
+      { label: "Limpeza", slug: "limpeza", searchTerm: "limpeza" },
+      { label: "Pintura", slug: "pintura", searchTerm: "pintura" },
+    ],
+    [],
+  );
 
-          <div className="actions actions--inline marketplace-hero-actions">
-            <div className="actions actions--inline marketplace-hero-actions-main">
-              {hasSession ? (
-                <Link
-                  href="/dashboard/jobs"
-                  className="primary"
-                  onClick={() =>
-                    trackEvent("marketplace.cta.click", {
-                      source: "landing.hero",
-                      view: "landing",
-                      label: "Criar pedido agora",
-                      ctaType: "primary",
-                      sessionState: "authenticated",
-                    })
-                  }
-                >
-                  Criar pedido agora
-                </Link>
-              ) : (
-                <button
-                  type="button"
-                  className="primary"
-                  onClick={() => {
-                    trackEvent("marketplace.cta.click", {
-                      source: "landing.hero",
-                      view: "landing",
-                      label: "Entrar para contratar",
-                      ctaType: "primary",
-                      sessionState: "guest",
-                    });
-                    focusAuth("login");
-                  }}
-                >
-                  Entrar para contratar
-                </button>
-              )}
+  function scrollToDiscoverResults() {
+    if (typeof document === "undefined") {
+      return;
+    }
+
+    document
+      .getElementById("discover")
+      ?.scrollIntoView({ behavior: "smooth", block: "start" });
+  }
+
+  function onSubmitHeroSearch(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    scrollToDiscoverResults();
+    trackEvent("marketplace.cta.click", {
+      source: "landing.hero",
+      view: "landing",
+      label: "Pesquisar serviço",
+      ctaType: "primary",
+      sessionState: hasSession ? "authenticated" : "guest",
+    });
+  }
+
+  function onQuickCategoryClick(chip: { slug: string; searchTerm: string }) {
+    onDiscoverySearchChange(chip.searchTerm);
+
+    const categoryMatch = marketCategories.find((category) => {
+      const normalizedName = category.name.trim().toLowerCase();
+      const normalizedSlug = category.slug.trim().toLowerCase();
+      return normalizedSlug === chip.slug || normalizedName.includes(chip.slug);
+    });
+
+    if (categoryMatch && discoveryCategory !== categoryMatch.slug) {
+      onToggleDiscoveryCategory(categoryMatch.slug);
+    } else if (!categoryMatch && discoveryCategory) {
+      onToggleDiscoveryCategory(discoveryCategory);
+    }
+
+    scrollToDiscoverResults();
+  }
+
+  return (
+    <main className={`shell marketplace-shell ${styles.marketplaceHome}`}>
+      <section className={`card card--wide ${styles.landingSurface}`}>
+        <header className={styles.landingHero} aria-label="Hero da landing">
+          <p className={`kicker ${styles.heroKicker}`}>Marketplace Tchuno</p>
+          <h1 className={styles.heroTitle}>O que precisas hoje?</h1>
+          <p className={`subtitle ${styles.heroSubtitle}`}>
+            Encontra profissionais confiáveis perto de ti
+          </p>
+
+          <form className={styles.landingSearch} onSubmit={onSubmitHeroSearch}>
+            <label
+              htmlFor="landing-search-input"
+              className={styles.landingSearchLabel}
+            >
+              Pesquisa principal
+            </label>
+            <div className={styles.landingSearchRow}>
+              <input
+                id="landing-search-input"
+                type="search"
+                value={discoverySearch}
+                onChange={(event) =>
+                  onDiscoverySearchChange(event.target.value)
+                }
+                placeholder="Procurar canalizador, eletricista, limpeza..."
+                className={styles.landingSearchInput}
+              />
+              <button
+                type="submit"
+                className={`primary ${styles.searchSubmit}`}
+              >
+                Pesquisar
+              </button>
             </div>
-            <p className="marketplace-hero-secondary">
-              {hasSession ? (
-                <>
-                  Preferes explorar primeiro?{" "}
-                  <Link href="/dashboard/workers" className="nav-link">
-                    Ver catálogo de profissionais
-                  </Link>
-                </>
-              ) : (
-                <>
-                  Ainda sem conta?{" "}
-                  <button
-                    type="button"
-                    className="marketplace-inline-link"
-                    onClick={() => focusAuth("register")}
-                  >
-                    Criar conta gratuita
-                  </button>
-                </>
-              )}
+          </form>
+
+          <div
+            className={styles.landingChipRow}
+            aria-label="Categorias rápidas"
+          >
+            {quickCategoryChips.map((chip) => (
+              <button
+                key={chip.slug}
+                type="button"
+                className={`marketplace-chip${
+                  discoveryCategory === chip.slug ? " is-active" : ""
+                }`}
+                onClick={() => onQuickCategoryClick(chip)}
+              >
+                {chip.label}
+              </button>
+            ))}
+          </div>
+
+          <p
+            className={`status status--${getStatusTone(
+              discoveryMessage,
+            )} ${styles.heroStatus}`}
+          >
+            {discoveryMessage}
+          </p>
+        </header>
+
+        <section
+          className={styles.landingBenefits}
+          aria-label="Benefícios principais"
+        >
+          <article className={styles.landingBenefitCard}>
+            <h2>Encontra profissionais confiáveis</h2>
+            <p>
+              Perfis com reputação, localização e categoria para decidires
+              rápido.
+            </p>
+          </article>
+          <article className={styles.landingBenefitCard}>
+            <h2>Recebe propostas rapidamente</h2>
+            <p>
+              Pede serviço em poucos passos e acompanha o estado no dashboard.
+            </p>
+          </article>
+          <article className={styles.landingBenefitCard}>
+            <h2>Conclui com segurança</h2>
+            <p>
+              Vê progresso, confirma entregas e avalia o profissional no fim.
+            </p>
+          </article>
+        </section>
+
+        <section className="marketplace-section" id="discover">
+          <div className={styles.marketplaceSectionHeader}>
+            <h2 className="section-title">Profissionais em destaque</h2>
+            <p className="section-lead">
+              Lista rápida para começar. Se precisares de mais opções, abre o
+              catálogo completo.
             </p>
           </div>
 
-          <p className={`status status--${getStatusTone(discoveryMessage)}`}>
-            {discoveryMessage}
-          </p>
+          <div
+            className={`actions actions--inline ${styles.landingResultActions}`}
+          >
+            <button type="button" onClick={onResetDiscoveryFilters}>
+              Limpar filtros
+            </button>
+            <Link href="/dashboard/workers" className="primary primary--ghost">
+              Ver todos os profissionais
+            </Link>
+          </div>
 
-          <section className="marketplace-section" id="discover">
-            <h2 className="section-title">Descoberta de serviços</h2>
-            <p className="section-lead">
-              Pesquisa por serviço, localização ou categoria. Depois abre o dashboard
-              para avançar com pedido e contratação.
-            </p>
+          <div className={`overview-grid ${styles.landingTrustGrid}`}>
+            <article className="metric-card">
+              <p className="metric-label">Disponíveis</p>
+              <p className="metric-value">{trustSummary.availableCount}</p>
+            </article>
+            <article className="metric-card">
+              <p className="metric-label">Com avaliações</p>
+              <p className="metric-value">{trustSummary.ratedCount}</p>
+            </article>
+            <article className="metric-card">
+              <p className="metric-label">Rating médio</p>
+              <p className="metric-value">{trustSummary.avgRating}/5</p>
+            </article>
+            <article className="metric-card">
+              <p className="metric-label">Categorias ativas</p>
+              <p className="metric-value">{marketCategories.length}</p>
+            </article>
+          </div>
 
-            <div className="section-toolbar marketplace-search-toolbar">
-              <label>
-                Pesquisa principal
-                <input
-                  type="search"
-                  value={discoverySearch}
-                  onChange={(event) => onDiscoverySearchChange(event.target.value)}
-                  placeholder="Ex.: eletricista, canalização, Matola"
-                />
-              </label>
-              <button type="button" onClick={onResetDiscoveryFilters}>
-                Limpar pesquisa
-              </button>
-            </div>
+          <div
+            className="dashboard-nav marketplace-chip-grid"
+            aria-label="Categorias"
+          >
+            {visibleCategories.length === 0 ? (
+              <div className="marketplace-empty-state">
+                <p className="empty-state">
+                  Sem categorias para este termo. Tenta um serviço mais amplo.
+                </p>
+              </div>
+            ) : (
+              visibleCategories.map((category) => (
+                <button
+                  key={category.id}
+                  type="button"
+                  className={`marketplace-chip${
+                    discoveryCategory === category.slug ? " is-active" : ""
+                  }`}
+                  onClick={() => onToggleDiscoveryCategory(category.slug)}
+                >
+                  {category.name}
+                </button>
+              ))
+            )}
+          </div>
 
-            <div className="dashboard-nav marketplace-chip-grid" aria-label="Categorias">
-              {visibleCategories.length === 0 ? (
-                <div className="marketplace-empty-state">
-                  <p className="empty-state">
-                    Sem categorias para este termo. Tenta um serviço mais amplo ou
-                    limpa a pesquisa.
-                  </p>
-                  <div className="actions actions--inline">
-                    <button type="button" onClick={onResetDiscoveryFilters}>
-                      Limpar filtros
-                    </button>
-                  </div>
-                </div>
-              ) : (
-                visibleCategories.map((category) => (
-                  <button
-                    key={category.id}
-                    type="button"
-                    className={`marketplace-chip${
-                      discoveryCategory === category.slug ? " is-active" : ""
-                    }`}
-                    onClick={() => onToggleDiscoveryCategory(category.slug)}
-                  >
-                    {category.name}
+          <div className="panel-grid marketplace-worker-grid">
+            {discoveryLoading ? (
+              <p className="status">A carregar profissionais...</p>
+            ) : visibleWorkers.length === 0 ? (
+              <div className="marketplace-empty-state">
+                <p className="empty-state">
+                  Não encontrámos profissionais para este filtro. Ajusta a
+                  pesquisa ou remove a categoria selecionada.
+                </p>
+                <div className="actions actions--inline">
+                  <button type="button" onClick={onResetDiscoveryFilters}>
+                    Ver todos os profissionais
                   </button>
-                ))
-              )}
-            </div>
-          </section>
-
-          <section className="marketplace-section">
-            <h2 className="section-title">Profissionais em destaque</h2>
-            <p className="section-lead">
-              Catálogo rápido com sinais de confiança para acelerar a decisão de
-              contratação.
-            </p>
-            <p className="muted marketplace-signal-note">
-              Sinais de destaque e comparação são relativos aos profissionais em
-              destaque desta página.
-            </p>
-
-            <div className="overview-grid">
-              <article className="metric-card">
-                <p className="metric-label">Disponíveis</p>
-                <p className="metric-value">{trustSummary.availableCount}</p>
-              </article>
-              <article className="metric-card">
-                <p className="metric-label">Com avaliações</p>
-                <p className="metric-value">{trustSummary.ratedCount}</p>
-              </article>
-              <article className="metric-card">
-                <p className="metric-label">Rating médio</p>
-                <p className="metric-value">{trustSummary.avgRating}/5</p>
-              </article>
-              <article className="metric-card">
-                <p className="metric-label">Categorias ativas</p>
-                <p className="metric-value">{marketCategories.length}</p>
-              </article>
-            </div>
-
-            <div className="panel-grid marketplace-worker-grid">
-              {discoveryLoading ? (
-                <p className="status">A carregar profissionais...</p>
-              ) : visibleWorkers.length === 0 ? (
-                <div className="marketplace-empty-state">
-                  <p className="empty-state">
-                    Não encontrámos profissionais para este filtro. Ajusta a pesquisa
-                    ou remove a categoria selecionada.
-                  </p>
-                  <div className="actions actions--inline">
-                    <button type="button" onClick={onResetDiscoveryFilters}>
-                      Ver todos os profissionais
+                  {hasSession ? (
+                    <Link
+                      href="/dashboard/workers"
+                      className="primary primary--ghost"
+                    >
+                      Abrir catálogo completo
+                    </Link>
+                  ) : (
+                    <button
+                      type="button"
+                      className="primary primary--ghost"
+                      onClick={() => focusAuth("login")}
+                    >
+                      Entrar para continuar
                     </button>
-                    {hasSession ? (
-                      <Link href="/dashboard/workers" className="primary primary--ghost">
-                        Abrir catálogo completo
-                      </Link>
-                    ) : (
-                      <button
-                        type="button"
-                        className="primary primary--ghost"
-                        onClick={() => focusAuth("login")}
-                      >
-                        Entrar para continuar
-                      </button>
-                    )}
-                  </div>
+                  )}
                 </div>
-              ) : (
-                visibleWorkers.map((worker) => {
-                  const hasHourlyRate = typeof worker.hourlyRate === "number";
-                  const ratingValue = Number(worker.ratingAvg || 0);
-                  const ctaCopy = getWorkerCtaCopy({
-                    isAvailable: worker.isAvailable,
-                    hasHourlyRate,
-                  });
-                  const rankingLabel =
-                    workerRanking.rankingLabelById[worker.id] ??
-                    "Relevante nesta lista";
-                  const isStrongHighlight =
-                    workerRanking.strongHighlightById[worker.id] ?? false;
-                  const scoreBreakdown =
-                    workerRanking.scoreBreakdownById[worker.id] ?? null;
-                  const guestPrimaryLabel = `Entrar para ${ctaCopy.primaryLabel.toLowerCase()}`;
-                  const responseEta = getWorkerResponseEtaLabel({
-                    isAvailable: worker.isAvailable,
-                    ratingValue,
-                    ratingCount: worker.ratingCount,
-                    experienceYears: worker.experienceYears,
-                    hourlyRate: worker.hourlyRate,
-                    ratingRank: workerRanking.ratingRankById[worker.id] ?? null,
-                    priceRank: workerRanking.priceRankById[worker.id] ?? null,
-                  });
-                  const decisionBadges = getWorkerDecisionBadges({
-                    isAvailable: worker.isAvailable,
-                    ratingValue,
-                    ratingCount: worker.ratingCount,
-                    experienceYears: worker.experienceYears,
-                    hourlyRate: worker.hourlyRate,
-                    ratingRank: workerRanking.ratingRankById[worker.id] ?? null,
-                    priceRank: workerRanking.priceRankById[worker.id] ?? null,
-                    rankingLabel,
-                    scoreBreakdown,
-                  });
-                  const comparisonItems = getWorkerComparisonItems({
-                    isAvailable: worker.isAvailable,
-                    ratingValue,
-                    ratingCount: worker.ratingCount,
-                    experienceYears: worker.experienceYears,
-                    hourlyRate: worker.hourlyRate,
-                    ratingRank: workerRanking.ratingRankById[worker.id] ?? null,
-                    priceRank: workerRanking.priceRankById[worker.id] ?? null,
-                  });
+              </div>
+            ) : (
+              visibleWorkers.map((worker) => {
+                const hasHourlyRate = typeof worker.hourlyRate === "number";
+                const ratingValue = Number(worker.ratingAvg || 0);
+                const ctaCopy = getWorkerCtaCopy({
+                  isAvailable: worker.isAvailable,
+                  hasHourlyRate,
+                });
+                const rankingLabel =
+                  workerRanking.rankingLabelById[worker.id] ??
+                  "Relevante nesta lista";
+                const isStrongHighlight =
+                  workerRanking.strongHighlightById[worker.id] ?? false;
+                const scoreBreakdown =
+                  workerRanking.scoreBreakdownById[worker.id] ?? null;
+                const guestPrimaryLabel = `Entrar para ${ctaCopy.primaryLabel.toLowerCase()}`;
+                const responseEta = getWorkerResponseEtaLabel({
+                  isAvailable: worker.isAvailable,
+                  ratingValue,
+                  ratingCount: worker.ratingCount,
+                  experienceYears: worker.experienceYears,
+                  hourlyRate: worker.hourlyRate,
+                  ratingRank: workerRanking.ratingRankById[worker.id] ?? null,
+                  priceRank: workerRanking.priceRankById[worker.id] ?? null,
+                });
+                const decisionBadges = getWorkerDecisionBadges({
+                  isAvailable: worker.isAvailable,
+                  ratingValue,
+                  ratingCount: worker.ratingCount,
+                  experienceYears: worker.experienceYears,
+                  hourlyRate: worker.hourlyRate,
+                  ratingRank: workerRanking.ratingRankById[worker.id] ?? null,
+                  priceRank: workerRanking.priceRankById[worker.id] ?? null,
+                  rankingLabel,
+                  scoreBreakdown,
+                });
+                const comparisonItems = getWorkerComparisonItems({
+                  isAvailable: worker.isAvailable,
+                  ratingValue,
+                  ratingCount: worker.ratingCount,
+                  experienceYears: worker.experienceYears,
+                  hourlyRate: worker.hourlyRate,
+                  ratingRank: workerRanking.ratingRankById[worker.id] ?? null,
+                  priceRank: workerRanking.priceRankById[worker.id] ?? null,
+                });
+                const priceLabel = getWorkerPriceLabel(worker.hourlyRate);
+                const mainCategoryLabel = getWorkerMainCategoryLabel(worker);
+                const reviewLabel = getWorkerReviewLabel(worker.ratingCount);
 
-                  return (
-                    <MarketplaceWorkerCard
-                      key={worker.id}
-                      title={`Profissional ${shortenId(worker.userId)}`}
-                      highlighted={isStrongHighlight}
-                      relevanceLabel={rankingLabel}
-                      availabilityTone={worker.isAvailable ? "is-ok" : "is-muted"}
-                      availabilityLabel={
-                        worker.isAvailable ? "Disponível hoje" : "Agenda limitada"
-                      }
-                      responseTimeLabel={responseEta}
-                      rating={{
-                        stars: formatStars(worker.ratingAvg),
-                        value: formatRatingValue(worker.ratingAvg),
-                        reviewCount: worker.ratingCount,
-                      }}
-                      comparisonItems={comparisonItems}
-                      trustSignals={[
-                        {
-                          label: "Avaliações",
-                          value:
-                            worker.ratingCount > 0
-                              ? `${worker.ratingCount} clientes`
-                              : "Sem histórico ainda",
-                        },
-                        {
-                          label: "Disponibilidade",
-                          value: worker.isAvailable
-                            ? "Aceita novos pedidos"
-                            : "Confirma agenda por mensagem",
-                        },
-                      ]}
-                      badges={
-                        <>
-                          {decisionBadges.map((badge) => (
-                            <span
-                              key={badge.label}
-                              className={`status-pill ${badge.tone}`}
-                            >
-                              {badge.label}
-                            </span>
-                          ))}
-                        </>
-                      }
-                      details={[
-                        {
-                          label: "Localização",
-                          value: worker.location ?? "Não indicada",
-                        },
-                        {
-                          label: "Categorias",
-                          value:
-                            worker.categories.length > 0
-                              ? worker.categories.map((item) => item.name).join(", ")
-                              : "Sem categorias",
-                        },
-                      ]}
-                      note={worker.bio ?? undefined}
-                      ctaHint={
-                        hasSession
-                          ? ctaCopy.helperText
-                          : "Cria conta em segundos para comparar perfis e pedir serviço sem compromisso."
-                      }
-                      onCardClick={() =>
-                        trackEvent("marketplace.worker.card.click", {
-                          source: "landing.worker_card",
-                          view: "landing",
-                          workerId: worker.id,
-                          highlighted: isStrongHighlight,
-                          relevanceLabel: rankingLabel,
-                        })
-                      }
-                      actions={
-                        <>
-                          {hasSession ? (
-                            <Link
-                              href="/dashboard/jobs#job-create"
-                              className="primary"
-                              onClick={() =>
-                                trackEvent("marketplace.cta.click", {
-                                  source: "landing.worker_card",
-                                  view: "landing",
-                                  workerId: worker.id,
-                                  label: ctaCopy.primaryLabel,
-                                  ctaType: "primary",
-                                  sessionState: "authenticated",
-                                  pricingContext: hasHourlyRate
-                                    ? "fixed-price-or-quote"
-                                    : "quote-first",
-                                })
-                              }
-                            >
-                              {ctaCopy.primaryLabel}
-                            </Link>
-                          ) : (
-                            <button
-                              type="button"
-                              className="primary"
-                              onClick={() => {
-                                trackEvent("marketplace.cta.click", {
-                                  source: "landing.worker_card",
-                                  view: "landing",
-                                  workerId: worker.id,
-                                  label: guestPrimaryLabel,
-                                  ctaType: "primary",
-                                  sessionState: "guest",
-                                  pricingContext: hasHourlyRate
-                                    ? "fixed-price-or-quote"
-                                    : "quote-first",
-                                });
-                                focusAuth("login");
-                              }}
-                            >
-                              {guestPrimaryLabel}
-                            </button>
-                          )}
-                          <Link href="/dashboard/workers" className="primary primary--ghost">
-                            Ver catálogo completo
+                return (
+                  <MarketplaceWorkerCard
+                    key={worker.id}
+                    title={`Profissional ${shortenId(worker.userId)}`}
+                    highlighted={isStrongHighlight}
+                    relevanceLabel={rankingLabel}
+                    availabilityTone={worker.isAvailable ? "is-ok" : "is-muted"}
+                    availabilityLabel={
+                      worker.isAvailable ? "Disponível hoje" : "Agenda limitada"
+                    }
+                    responseTimeLabel={responseEta}
+                    rating={{
+                      stars: formatStars(worker.ratingAvg),
+                      value: formatRatingValue(worker.ratingAvg),
+                      reviewCount: worker.ratingCount,
+                    }}
+                    comparisonItems={comparisonItems}
+                    trustSignals={[
+                      {
+                        label: "Reputação",
+                        value:
+                          worker.ratingCount > 0
+                            ? reviewLabel
+                            : "Sem avaliações ainda",
+                      },
+                      {
+                        label: "Categoria principal",
+                        value: mainCategoryLabel,
+                      },
+                    ]}
+                    badges={
+                      <>
+                        {decisionBadges.map((badge) => (
+                          <span
+                            key={badge.label}
+                            className={`status-pill ${badge.tone}`}
+                          >
+                            {badge.label}
+                          </span>
+                        ))}
+                      </>
+                    }
+                    details={[
+                      {
+                        label: "Preço",
+                        value: priceLabel,
+                      },
+                      {
+                        label: "Localização",
+                        value: worker.location ?? "Não indicada",
+                      },
+                      {
+                        label: "Categoria",
+                        value: mainCategoryLabel,
+                      },
+                    ]}
+                    note={worker.bio ?? undefined}
+                    ctaHint={
+                      hasSession
+                        ? ctaCopy.helperText
+                        : "Cria conta em segundos para comparar perfis e pedir serviço sem compromisso."
+                    }
+                    onCardClick={() =>
+                      trackEvent("marketplace.worker.card.click", {
+                        source: "landing.worker_card",
+                        view: "landing",
+                        workerId: worker.id,
+                        highlighted: isStrongHighlight,
+                        relevanceLabel: rankingLabel,
+                      })
+                    }
+                    actions={
+                      <>
+                        {hasSession ? (
+                          <Link
+                            href="/dashboard/jobs#job-create"
+                            className="primary"
+                            onClick={() =>
+                              trackEvent("marketplace.cta.click", {
+                                source: "landing.worker_card",
+                                view: "landing",
+                                workerId: worker.id,
+                                label: ctaCopy.primaryLabel,
+                                ctaType: "primary",
+                                sessionState: "authenticated",
+                                pricingContext: hasHourlyRate
+                                  ? "fixed-price-or-quote"
+                                  : "quote-first",
+                              })
+                            }
+                          >
+                            {ctaCopy.primaryLabel}
                           </Link>
-                        </>
-                      }
-                    />
-                  );
+                        ) : (
+                          <button
+                            type="button"
+                            className="primary"
+                            onClick={() => {
+                              trackEvent("marketplace.cta.click", {
+                                source: "landing.worker_card",
+                                view: "landing",
+                                workerId: worker.id,
+                                label: guestPrimaryLabel,
+                                ctaType: "primary",
+                                sessionState: "guest",
+                                pricingContext: hasHourlyRate
+                                  ? "fixed-price-or-quote"
+                                  : "quote-first",
+                              });
+                              focusAuth("login");
+                            }}
+                          >
+                            {guestPrimaryLabel}
+                          </button>
+                        )}
+                        <Link
+                          href="/dashboard/workers"
+                          className="primary primary--ghost"
+                        >
+                          Ver perfil
+                        </Link>
+                      </>
+                    }
+                  />
+                );
+              })
+            )}
+          </div>
+        </section>
+
+        <section className={styles.landingFinalCta}>
+          <h2>Pronto para contratar com confiança?</h2>
+          <p>
+            Entra no Tchuno e acompanha cada pedido com clareza do início ao
+            fim.
+          </p>
+          <div className="actions actions--inline">
+            <Link
+              href="/dashboard"
+              className="primary"
+              onClick={() =>
+                trackEvent("marketplace.cta.click", {
+                  source: "landing.hero",
+                  view: "landing",
+                  label: "Entrar no Tchuno",
+                  ctaType: "primary",
+                  sessionState: hasSession ? "authenticated" : "guest",
                 })
-              )}
-            </div>
-          </section>
+              }
+            >
+              Entrar no Tchuno
+            </Link>
+            <Link href="/dashboard/workers" className="primary primary--ghost">
+              Ver profissionais
+            </Link>
+          </div>
+        </section>
 
-          <section className="marketplace-section marketplace-journey">
-            <h2 className="section-title">Como funciona no Tchuno</h2>
-            <div className="flow-summary">
-              <article className="flow-summary-item">
-                <p className="metric-label">1. Descobrir</p>
-                <p className="metric-note">
-                  Escolhe categoria e profissional com base em reputação,
-                  disponibilidade e localização.
-                </p>
-              </article>
-              <article className="flow-summary-item">
-                <p className="metric-label">2. Pedir</p>
-                <p className="metric-note">
-                  Cria o pedido com descrição clara e orçamento em preço fixo ou
-                  cotação.
-                </p>
-              </article>
-              <article className="flow-summary-item">
-                <p className="metric-label">3. Acompanhar</p>
-                <p className="metric-note">
-                  Segue estado, timeline e próxima ação até concluir e avaliar.
-                </p>
-              </article>
-            </div>
-          </section>
-        </div>
-
-        <aside id="auth-panel" className="marketplace-auth">
+        <section id="auth-panel" className="marketplace-auth">
           <header className="header">
-            <p className="kicker">Acesso</p>
+            <p className="kicker">Acesso rápido</p>
             <h2>{title}</h2>
             <p className="subtitle">API alvo: {API_URL}</p>
           </header>
@@ -797,11 +875,15 @@ export default function Home() {
             ) : null}
 
             <button type="submit" disabled={isSubmitting} className="primary">
-              {isSubmitting ? "Aguarda..." : mode === "login" ? "Entrar" : "Criar conta"}
+              {isSubmitting
+                ? "Aguarda..."
+                : mode === "login"
+                  ? "Entrar"
+                  : "Criar conta"}
             </button>
           </form>
 
-          <div className="actions">
+          <div className="actions actions--inline">
             <button type="button" onClick={onRefresh} disabled={isSubmitting}>
               Renovar sessão
             </button>
@@ -836,9 +918,11 @@ export default function Home() {
               </Link>
             </p>
           ) : (
-            <p className="status">Faz login para aceder ao dashboard protegido.</p>
+            <p className="status">
+              Faz login para aceder ao dashboard protegido.
+            </p>
           )}
-        </aside>
+        </section>
       </section>
     </main>
   );

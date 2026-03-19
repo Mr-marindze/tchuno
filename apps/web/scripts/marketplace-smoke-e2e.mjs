@@ -411,9 +411,12 @@ async function assertRouteSpecificContent(page, check, viewportName) {
 
   for (const requirement of check.mustHave) {
     if (requirement.type === "text") {
-      await page.getByText(requirement.value, { exact: false }).first().waitFor({
-        timeout: 20_000,
-      });
+      await page
+        .getByText(requirement.value, { exact: false })
+        .first()
+        .waitFor({
+          timeout: 20_000,
+        });
       continue;
     }
 
@@ -456,13 +459,14 @@ async function run() {
       const checks = [
         {
           path: "/",
-          heading: "Encontra profissionais locais e contrata com confiança",
-          block: "Descoberta de serviços",
-          cta: /Entrar para contratar|Criar pedido agora/,
+          heading: "O que precisas hoje?",
+          block: "Profissionais em destaque",
+          cta: /Pesquisar|Entrar no Tchuno/,
           mustHave: [
             { type: "label", value: "Pesquisa principal" },
             { type: "aria", value: "Categorias" },
             { type: "text", value: "Profissionais em destaque" },
+            { type: "text", value: "Encontra profissionais confiáveis" },
           ],
         },
         {
@@ -525,35 +529,42 @@ async function run() {
           localStorage.setItem("tchuno_device_id", "smoke-device");
         });
 
-        await context.route(/http:\/\/(localhost|127\.0\.0\.1):3001\/.*/, async (route) => {
-          const request = route.request();
-          const url = new URL(request.url());
+        await context.route(
+          /http:\/\/(localhost|127\.0\.0\.1):3001\/.*/,
+          async (route) => {
+            const request = route.request();
+            const url = new URL(request.url());
 
-          if (request.method() === "OPTIONS") {
+            if (request.method() === "OPTIONS") {
+              await route.fulfill({
+                status: 204,
+                headers: corsHeaders,
+                body: "",
+              });
+              return;
+            }
+
+            const body = resolveMockBody(url);
             await route.fulfill({
-              status: 204,
+              status: 200,
               headers: corsHeaders,
-              body: "",
+              body: JSON.stringify(body),
             });
-            return;
-          }
-
-          const body = resolveMockBody(url);
-          await route.fulfill({
-            status: 200,
-            headers: corsHeaders,
-            body: JSON.stringify(body),
-          });
-        });
+          },
+        );
 
         for (const check of checks) {
           console.log(`Smoke ${viewportConfig.name}: ${check.path}`);
           const page = await context.newPage();
-          await page.goto(`${WEB_URL}${check.path}`, { waitUntil: "networkidle" });
-
-          await page.getByRole("heading", { level: 1, name: check.heading }).waitFor({
-            timeout: 20_000,
+          await page.goto(`${WEB_URL}${check.path}`, {
+            waitUntil: "networkidle",
           });
+
+          await page
+            .getByRole("heading", { level: 1, name: check.heading })
+            .waitFor({
+              timeout: 20_000,
+            });
           await page.getByText(check.block, { exact: false }).first().waitFor({
             timeout: 20_000,
           });

@@ -52,6 +52,26 @@ export type WorkerComparisonItem = {
   tone: StatusBadgeTone;
 };
 
+export function getWorkerPriceLabel(hourlyRate: number | null): string {
+  if (typeof hourlyRate !== "number") {
+    return "Sob cotação";
+  }
+
+  return `${hourlyRate.toLocaleString("pt-MZ")} MZN/h`;
+}
+
+export function getWorkerMainCategoryLabel(worker: WorkerProfile): string {
+  return worker.categories[0]?.name ?? "Sem categoria definida";
+}
+
+export function getWorkerReviewLabel(count: number): string {
+  if (count === 1) {
+    return "1 avaliação";
+  }
+
+  return `${count} avaliações`;
+}
+
 export type WorkerRankingContext = {
   ratingRankById: Record<string, number>;
   priceRankById: Record<string, number>;
@@ -129,15 +149,21 @@ export function buildWorkerRankingContext(
     .filter((worker) => typeof worker.hourlyRate === "number")
     .sort((a, b) => (a.hourlyRate ?? 0) - (b.hourlyRate ?? 0));
 
-  const ratingRankById = rated.reduce<Record<string, number>>((acc, worker, index) => {
-    acc[worker.id] = index + 1;
-    return acc;
-  }, {});
+  const ratingRankById = rated.reduce<Record<string, number>>(
+    (acc, worker, index) => {
+      acc[worker.id] = index + 1;
+      return acc;
+    },
+    {},
+  );
 
-  const priceRankById = priced.reduce<Record<string, number>>((acc, worker, index) => {
-    acc[worker.id] = index + 1;
-    return acc;
-  }, {});
+  const priceRankById = priced.reduce<Record<string, number>>(
+    (acc, worker, index) => {
+      acc[worker.id] = index + 1;
+      return acc;
+    },
+    {},
+  );
 
   const relevanceRows = workers
     .map((worker) => {
@@ -292,11 +318,14 @@ export function getWorkerCtaCopy(input: WorkerCtaInput): WorkerCtaCopy {
   return {
     primaryLabel: "Pedir serviço",
     secondaryLabel: "Pedir orçamento",
-    helperText: "Confirma em poucos passos e acompanha o progresso no dashboard.",
+    helperText:
+      "Confirma em poucos passos e acompanha o progresso no dashboard.",
   };
 }
 
-export function getWorkerRelevance(input: WorkerRelevanceInput): WorkerRelevance {
+export function getWorkerRelevance(
+  input: WorkerRelevanceInput,
+): WorkerRelevance {
   if (!input.isAvailable) {
     return {
       highlighted: false,
@@ -379,7 +408,8 @@ export function getWorkerDecisionBadges(
     rankingLabel === "Mais procurado" ||
     (scoreBreakdown &&
       scoreBreakdown.interactions >= 4 &&
-      scoreBreakdown.interestComponent + scoreBreakdown.intentionComponent >= 2.6 &&
+      scoreBreakdown.interestComponent + scoreBreakdown.intentionComponent >=
+        2.6 &&
       scoreBreakdown.confidenceLevel !== "low")
   ) {
     badges.push({ label: "Mais procurado", tone: "is-ok" });
@@ -421,15 +451,14 @@ export function getWorkerComparisonItems(
         : "is-muted";
 
   const ratingValue =
-    input.ratingCount > 0 ? `${input.ratingValue.toFixed(1)}/5` : "Sem avaliações";
-  const priceValue =
-    typeof input.hourlyRate === "number"
-      ? `${input.hourlyRate.toLocaleString("pt-MZ")} MZN/h`
-      : "Sob cotação";
+    input.ratingCount > 0
+      ? `${input.ratingValue.toFixed(1)}/5`
+      : "Sem avaliações";
+  const priceValue = getWorkerPriceLabel(input.hourlyRate);
 
   return [
     {
-      label: "Rating",
+      label: "Avaliação",
       value: ratingValue,
       tone: ratingTone,
     },

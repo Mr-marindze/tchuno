@@ -1,9 +1,6 @@
 import Link from "next/link";
 import { useEffect, useMemo, useRef } from "react";
-import {
-  getRatingBadgeTone,
-  StatusTone,
-} from "@/components/dashboard/dashboard-formatters";
+import { StatusTone } from "@/components/dashboard/dashboard-formatters";
 import {
   ProfileCompleteness,
   ProfileReputation,
@@ -24,6 +21,9 @@ import {
   getWorkerCtaCopy,
   getWorkerComparisonItems,
   getWorkerDecisionBadges,
+  getWorkerMainCategoryLabel,
+  getWorkerPriceLabel,
+  getWorkerReviewLabel,
   getWorkerResponseEtaLabel,
 } from "@/components/marketplace/marketplace-worker-presenter";
 import { Category } from "@/lib/categories";
@@ -76,7 +76,6 @@ type WorkersDomainSectionProps = {
   ) => ProfileReputation;
   formatStars: (rating: number | string) => string;
   formatRatingValue: (rating: number | string) => string;
-  formatCurrencyMzn: (value: number | null) => string;
   formatDate: (value: string) => string;
   shortenId: (value: string) => string;
 };
@@ -108,7 +107,6 @@ export function WorkersDomainSection({
   getProfileReputation,
   formatStars,
   formatRatingValue,
-  formatCurrencyMzn,
   formatDate,
   shortenId,
 }: WorkersDomainSectionProps) {
@@ -117,13 +115,12 @@ export function WorkersDomainSection({
     [visibleWorkerProfiles],
   );
   const orderedWorkerProfiles = useMemo(() => {
-    const originalIndexById = visibleWorkerProfiles.reduce<Record<string, number>>(
-      (acc, profile, index) => {
-        acc[profile.id] = index;
-        return acc;
-      },
-      {},
-    );
+    const originalIndexById = visibleWorkerProfiles.reduce<
+      Record<string, number>
+    >((acc, profile, index) => {
+      acc[profile.id] = index;
+      return acc;
+    }, {});
 
     return [...visibleWorkerProfiles].sort((a, b) => {
       const scoreDiff =
@@ -148,7 +145,8 @@ export function WorkersDomainSection({
         });
         const rankingLabel =
           workerRanking.rankingLabelById[profile.id] ?? "Relevante nesta lista";
-        const highlighted = workerRanking.strongHighlightById[profile.id] ?? false;
+        const highlighted =
+          workerRanking.strongHighlightById[profile.id] ?? false;
 
         return {
           workerId: profile.id,
@@ -216,7 +214,11 @@ export function WorkersDomainSection({
       topWorkers: workerRanking.topWorkersDebug,
     });
     lastRankingSignatureRef.current = rankingSignature;
-  }, [rankingSignature, workerHeuristicSnapshot, workerRanking.topWorkersDebug]);
+  }, [
+    rankingSignature,
+    workerHeuristicSnapshot,
+    workerRanking.topWorkersDebug,
+  ]);
 
   useEffect(() => {
     if (highlightSignature.length === 0) {
@@ -231,8 +233,9 @@ export function WorkersDomainSection({
       source: "dashboard.workers",
       view: "dashboard.workers",
       workerCount: workerHeuristicSnapshot.length,
-      highlightedCount: workerHeuristicSnapshot.filter((item) => item.highlighted)
-        .length,
+      highlightedCount: workerHeuristicSnapshot.filter(
+        (item) => item.highlighted,
+      ).length,
       labels: Array.from(
         new Set(
           workerHeuristicSnapshot
@@ -276,7 +279,7 @@ export function WorkersDomainSection({
     <section id="workers" className="dashboard-section">
       <DashboardSectionHeader
         title="Descoberta de Profissionais"
-        subtitle="Esta vista simula o perfil público que um cliente usa para decidir em quem confiar."
+        subtitle="Compara reputação, disponibilidade e preço para escolher o profissional certo."
         status={workerProfilesStatus}
         statusTone={getStatusTone(workerProfilesStatus)}
       />
@@ -330,7 +333,9 @@ export function WorkersDomainSection({
           Categoria
           <select
             value={workerCategorySlugFilter}
-            onChange={(event) => onWorkerCategorySlugFilterChange(event.target.value)}
+            onChange={(event) =>
+              onWorkerCategorySlugFilterChange(event.target.value)
+            }
           >
             <option value="">Todas as categorias</option>
             {activeCategories.map((category) => (
@@ -359,7 +364,9 @@ export function WorkersDomainSection({
           Limite API
           <select
             value={String(workerLimit)}
-            onChange={(event) => onWorkerLimitChange(Number(event.target.value))}
+            onChange={(event) =>
+              onWorkerLimitChange(Number(event.target.value))
+            }
           >
             <option value="5">5</option>
             <option value="10">10</option>
@@ -414,9 +421,18 @@ export function WorkersDomainSection({
         previousDisabled={workerProfilesLoading || workerPage <= 1}
         nextDisabled={workerProfilesLoading || !workerProfilesMeta?.hasNext}
       >
-        <DashboardMetaStat label="Página" value={workerProfilesMeta?.page ?? workerPage} />
-        <DashboardMetaStat label="Total API" value={workerProfilesMeta?.total ?? 0} />
-        <DashboardMetaStat label="Visíveis" value={visibleWorkerProfiles.length} />
+        <DashboardMetaStat
+          label="Página"
+          value={workerProfilesMeta?.page ?? workerPage}
+        />
+        <DashboardMetaStat
+          label="Total API"
+          value={workerProfilesMeta?.total ?? 0}
+        />
+        <DashboardMetaStat
+          label="Visíveis"
+          value={visibleWorkerProfiles.length}
+        />
         <DashboardMetaStat
           label="Disponíveis"
           value={workerDiscoveryStats.availableCount}
@@ -450,7 +466,10 @@ export function WorkersDomainSection({
                 <button type="button" onClick={handleResetFilters}>
                   Limpar filtros
                 </button>
-                <Link href="/dashboard/jobs#job-create" className="primary primary--ghost">
+                <Link
+                  href="/dashboard/jobs#job-create"
+                  className="primary primary--ghost"
+                >
                   Criar pedido mesmo assim
                 </Link>
               </>
@@ -477,7 +496,8 @@ export function WorkersDomainSection({
                 : (workerRanking.rankingLabelById[profile.id] ??
                   "Relevante nesta lista");
               const isStrongHighlight =
-                !isMe && (workerRanking.strongHighlightById[profile.id] ?? false);
+                !isMe &&
+                (workerRanking.strongHighlightById[profile.id] ?? false);
               const scoreBreakdown =
                 workerRanking.scoreBreakdownById[profile.id] ?? null;
               const responseEta = getWorkerResponseEtaLabel({
@@ -489,6 +509,9 @@ export function WorkersDomainSection({
                 ratingRank: workerRanking.ratingRankById[profile.id] ?? null,
                 priceRank: workerRanking.priceRankById[profile.id] ?? null,
               });
+              const priceLabel = getWorkerPriceLabel(profile.hourlyRate);
+              const mainCategoryLabel = getWorkerMainCategoryLabel(profile);
+              const reviewLabel = getWorkerReviewLabel(profile.ratingCount);
               const decisionBadges = getWorkerDecisionBadges({
                 isAvailable: profile.isAvailable,
                 ratingValue,
@@ -513,7 +536,11 @@ export function WorkersDomainSection({
               return (
                 <MarketplaceWorkerCard
                   key={profile.id}
-                  title={isMe ? "O teu perfil" : `Worker ${shortenId(profile.userId)}`}
+                  title={
+                    isMe
+                      ? "O teu perfil profissional"
+                      : `Profissional ${shortenId(profile.userId)}`
+                  }
                   highlighted={isStrongHighlight}
                   relevanceLabel={rankingLabel}
                   availabilityTone={profile.isAvailable ? "is-ok" : "is-muted"}
@@ -529,17 +556,15 @@ export function WorkersDomainSection({
                   comparisonItems={comparisonItems}
                   trustSignals={[
                     {
-                      label: "Avaliações",
+                      label: "Reputação",
                       value:
                         profile.ratingCount > 0
-                          ? `${profile.ratingCount} clientes`
-                          : "Sem histórico ainda",
+                          ? reviewLabel
+                          : "Sem avaliações ainda",
                     },
                     {
-                      label: "Disponibilidade",
-                      value: profile.isAvailable
-                        ? "Aceita novos pedidos"
-                        : "Confirma agenda por mensagem",
+                      label: "Categoria principal",
+                      value: mainCategoryLabel,
                     },
                   ]}
                   badges={
@@ -549,14 +574,6 @@ export function WorkersDomainSection({
                           {badge.label}
                         </DashboardBadge>
                       ))}
-                      <DashboardBadge
-                        tone={profileCompleteness.score >= 5 ? "is-ok" : "is-muted"}
-                      >
-                        Completude {profileCompleteness.percent}%
-                      </DashboardBadge>
-                      <DashboardBadge tone={getRatingBadgeTone(profile.ratingAvg)}>
-                        Rating {formatRatingValue(profile.ratingAvg)}/5
-                      </DashboardBadge>
                       <DashboardBadge tone={reputation.tone}>
                         {reputation.label}
                       </DashboardBadge>
@@ -564,25 +581,24 @@ export function WorkersDomainSection({
                   }
                   details={[
                     {
-                      label: "Tarifa",
-                      value:
-                        typeof profile.hourlyRate === "number"
-                          ? formatCurrencyMzn(profile.hourlyRate)
-                          : "Não definida",
-                    },
-                    {
-                      label: "Experiência",
-                      value: `${profile.experienceYears} anos`,
+                      label: "Preço",
+                      value: priceLabel,
                     },
                     {
                       label: "Localização",
                       value: `${profileCompleteness.location.city}, ${profileCompleteness.location.neighborhood}`,
                     },
                     {
+                      label: "Experiência",
+                      value: `${profile.experienceYears} anos`,
+                    },
+                    {
                       label: "Categorias",
                       value:
                         profile.categories.length > 0
-                          ? profile.categories.map((item) => item.name).join(", ")
+                          ? profile.categories
+                              .map((item) => item.name)
+                              .join(", ")
                           : "Sem categorias",
                     },
                   ]}
@@ -595,7 +611,11 @@ export function WorkersDomainSection({
                   actions={
                     <>
                       <Link
-                        href={isMe ? "/dashboard/profile" : "/dashboard/jobs#job-create"}
+                        href={
+                          isMe
+                            ? "/dashboard/profile"
+                            : "/dashboard/jobs#job-create"
+                        }
                         className="primary"
                         onClick={() =>
                           trackEvent("dashboard.cta.click", {

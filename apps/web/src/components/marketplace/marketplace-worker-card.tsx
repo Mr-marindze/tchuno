@@ -88,9 +88,11 @@ export function MarketplaceWorkerCard({
       onClick={onCardClick ? handleCardClick : undefined}
     >
       <div className="marketplace-worker-card-head">
-        <p className="item-title">{title}</p>
+        <h3 className="item-title marketplace-worker-name">{title}</h3>
         <p className="pill-row marketplace-worker-topline">
-          <span className={`status-pill ${availabilityTone}`}>{availabilityLabel}</span>
+          <span className={`status-pill ${availabilityTone}`}>
+            {availabilityLabel}
+          </span>
           {responseTimeLabel ? (
             <span className="status-pill is-muted">{responseTimeLabel}</span>
           ) : null}
@@ -101,7 +103,10 @@ export function MarketplaceWorkerCard({
       </div>
 
       {rating ? (
-        <div className="marketplace-worker-rating" aria-label="Resumo de reputação">
+        <div
+          className="marketplace-worker-rating"
+          aria-label="Resumo de reputação"
+        >
           <p className="marketplace-worker-rating-stars">{rating.stars}</p>
           <p className="marketplace-worker-rating-value">
             {rating.value}/5
@@ -113,9 +118,15 @@ export function MarketplaceWorkerCard({
       ) : null}
 
       {comparisonItems.length > 0 ? (
-        <div className="marketplace-worker-compare-grid" aria-label="Comparação rápida">
+        <div
+          className="marketplace-worker-compare-grid"
+          aria-label="Comparação rápida"
+        >
           {comparisonItems.map((item) => (
-            <article key={item.label} className="marketplace-worker-compare-item">
+            <article
+              key={item.label}
+              className="marketplace-worker-compare-item"
+            >
               <p className="metric-label">{item.label}</p>
               <p
                 className={[
@@ -135,7 +146,10 @@ export function MarketplaceWorkerCard({
       {trustSignals.length > 0 ? (
         <div className="marketplace-worker-trust-grid">
           {trustSignals.map((signal) => (
-            <article key={signal.label} className="marketplace-worker-trust-item">
+            <article
+              key={signal.label}
+              className="marketplace-worker-trust-item"
+            >
               <p className="metric-label">{signal.label}</p>
               <p className="marketplace-worker-trust-value">{signal.value}</p>
             </article>
@@ -145,11 +159,16 @@ export function MarketplaceWorkerCard({
 
       {badges ? <div className="pill-row">{badges}</div> : null}
 
-      {details.map((detail) => (
-        <p key={detail.label}>
-          <strong>{detail.label}:</strong> {detail.value}
-        </p>
-      ))}
+      {details.length > 0 ? (
+        <dl className="marketplace-worker-details">
+          {details.map((detail) => (
+            <div key={detail.label} className="marketplace-worker-detail-row">
+              <dt>{detail.label}</dt>
+              <dd>{detail.value}</dd>
+            </div>
+          ))}
+        </dl>
+      ) : null}
 
       {note ? <p className="muted">{note}</p> : null}
       {footer ? <p className="muted">{footer}</p> : null}
@@ -158,7 +177,9 @@ export function MarketplaceWorkerCard({
           {actions}
         </div>
       ) : null}
-      {ctaHint ? <p className="muted marketplace-worker-cta-hint">{ctaHint}</p> : null}
+      {ctaHint ? (
+        <p className="muted marketplace-worker-cta-hint">{ctaHint}</p>
+      ) : null}
     </article>
   );
 }

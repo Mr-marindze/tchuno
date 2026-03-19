@@ -1,0 +1,165 @@
+.marketplaceHome {
+  align-items: start;
+}
+
+.landingSurface {
+  display: grid;
+  gap: 1rem;
+  background: #ffffff;
+}
+
+.landingHero {
+  border: 1px solid rgba(147, 197, 253, 0.25);
+  border-radius: 20px;
+  padding: clamp(1.2rem, 3vw, 2rem);
+  background:
+    radial-gradient(
+      circle at 20% 10%,
+      rgba(59, 130, 246, 0.25),
+      transparent 38%
+    ),
+    linear-gradient(145deg, var(--bg-0), var(--bg-1) 55%, var(--bg-2));
+  color: #ffffff;
+}
+
+.heroKicker {
+  color: rgba(219, 234, 254, 0.92);
+}
+
+.heroTitle {
+  margin: 0.2rem 0 0;
+  font-size: clamp(1.9rem, 4.2vw, 3rem);
+  line-height: 1.08;
+  letter-spacing: -0.02em;
+}
+
+.heroSubtitle {
+  margin-top: 0.55rem;
+  color: #dbeafe;
+  font-size: clamp(1rem, 2vw, 1.2rem);
+}
+
+.landingSearch {
+  margin-top: 1rem;
+  display: grid;
+  gap: 0.45rem;
+}
+
+.landingSearchLabel {
+  font-size: 0.85rem;
+  color: #dbeafe;
+}
+
+.landingSearchRow {
+  display: flex;
+  gap: 0.55rem;
+  align-items: stretch;
+}
+
+.landingSearchInput {
+  flex: 1;
+  min-height: 54px;
+  border-radius: 14px;
+  border: 1px solid #dbeafe;
+  background: #ffffff;
+  padding: 0.9rem 1rem;
+  color: #0f172a;
+  font-size: 1rem;
+  box-shadow: 0 8px 24px rgba(15, 23, 42, 0.15);
+}
+
+.searchSubmit {
+  min-width: 140px;
+  border-radius: 14px;
+  font-size: 0.95rem;
+}
+
+.landingChipRow {
+  margin-top: 0.85rem;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.45rem;
+}
+
+.heroStatus {
+  margin-top: 0.85rem;
+  color: #bfdbfe;
+}
+
+.landingBenefits {
+  display: grid;
+  gap: 0.75rem;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+}
+
+.landingBenefitCard {
+  border: 1px solid var(--border);
+  border-radius: 16px;
+  background: var(--surface-soft);
+  padding: 0.9rem;
+}
+
+.landingBenefitCard h2 {
+  margin: 0;
+  font-size: 1rem;
+  color: #0f172a;
+}
+
+.landingBenefitCard p {
+  margin: 0.4rem 0 0;
+  color: var(--text-muted);
+  font-size: 0.9rem;
+}
+
+.marketplaceSectionHeader {
+  display: grid;
+  gap: 0.15rem;
+}
+
+.landingResultActions {
+  margin-top: 0.5rem;
+}
+
+.landingTrustGrid :global(.metric-card) {
+  background: #f8fbff;
+}
+
+.landingFinalCta {
+  border: 1px solid var(--border);
+  border-radius: 18px;
+  background: linear-gradient(145deg, #dbeafe, #f8fbff 65%);
+  padding: 1rem;
+}
+
+.landingFinalCta h2 {
+  margin: 0;
+  color: #0f172a;
+  font-size: clamp(1.2rem, 2.5vw, 1.45rem);
+}
+
+.landingFinalCta p {
+  margin: 0.42rem 0 0;
+  color: #334155;
+}
+
+@media (max-width: 760px) {
+  .landingHero {
+    padding: 1rem;
+  }
+
+  .landingSearchRow {
+    flex-direction: column;
+  }
+
+  .searchSubmit {
+    width: 100%;
+  }
+
+  .landingBenefits {
+    grid-template-columns: 1fr;
+  }
+
+  .landingFinalCta {
+    padding: 0.9rem;
+  }
+}
