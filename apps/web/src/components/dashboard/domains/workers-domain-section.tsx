@@ -27,9 +27,13 @@ import {
   getWorkerResponseEtaLabel,
 } from "@/components/marketplace/marketplace-worker-presenter";
 import { Category } from "@/lib/categories";
+import { DashboardRouteMap } from "@/lib/dashboard-routes";
 import { PaginationMeta } from "@/lib/pagination";
 import { trackEvent } from "@/lib/tracking";
-import { WorkerProfile } from "@/lib/worker-profile";
+import {
+  resolveWorkerDisplayName,
+  WorkerProfile,
+} from "@/lib/worker-profile";
 
 type WorkerAvailabilityFilter = "all" | "true" | "false";
 type WorkerSortMode =
@@ -68,6 +72,7 @@ type WorkersDomainSectionProps = {
   workerProfilesMeta: PaginationMeta | null;
   visibleWorkerProfiles: WorkerProfile[];
   workerDiscoveryStats: WorkerDiscoveryStats;
+  dashboardRoutes: DashboardRouteMap;
   currentUserId: string;
   getProfileCompleteness: (profile: WorkerProfile) => ProfileCompleteness;
   getProfileReputation: (
@@ -77,7 +82,6 @@ type WorkersDomainSectionProps = {
   formatStars: (rating: number | string) => string;
   formatRatingValue: (rating: number | string) => string;
   formatDate: (value: string) => string;
-  shortenId: (value: string) => string;
 };
 
 export function WorkersDomainSection({
@@ -102,13 +106,13 @@ export function WorkersDomainSection({
   workerProfilesMeta,
   visibleWorkerProfiles,
   workerDiscoveryStats,
+  dashboardRoutes,
   currentUserId,
   getProfileCompleteness,
   getProfileReputation,
   formatStars,
   formatRatingValue,
   formatDate,
-  shortenId,
 }: WorkersDomainSectionProps) {
   const workerRanking = useMemo(
     () => buildWorkerRankingContext(visibleWorkerProfiles),
@@ -298,7 +302,7 @@ export function WorkersDomainSection({
             <button type="button" onClick={handleResetFilters}>
               Limpar filtros
             </button>
-            <Link href="/dashboard/jobs" className="primary primary--ghost">
+            <Link href={dashboardRoutes.jobs} className="primary primary--ghost">
               Ir para jobs
             </Link>
           </>
@@ -467,7 +471,7 @@ export function WorkersDomainSection({
                   Limpar filtros
                 </button>
                 <Link
-                  href="/dashboard/jobs#job-create"
+                  href={`${dashboardRoutes.jobs}#job-create`}
                   className="primary primary--ghost"
                 >
                   Criar pedido mesmo assim
@@ -539,7 +543,7 @@ export function WorkersDomainSection({
                   title={
                     isMe
                       ? "O teu perfil profissional"
-                      : `Profissional ${shortenId(profile.userId)}`
+                      : resolveWorkerDisplayName(profile)
                   }
                   highlighted={isStrongHighlight}
                   relevanceLabel={rankingLabel}
@@ -613,8 +617,8 @@ export function WorkersDomainSection({
                       <Link
                         href={
                           isMe
-                            ? "/dashboard/profile"
-                            : "/dashboard/jobs#job-create"
+                            ? dashboardRoutes.profile
+                            : `${dashboardRoutes.jobs}#job-create`
                         }
                         className="primary"
                         onClick={() =>
@@ -631,7 +635,7 @@ export function WorkersDomainSection({
                         {ctaCopy.primaryLabel}
                       </Link>
                       <Link
-                        href="/dashboard/jobs#job-create"
+                        href={`${dashboardRoutes.jobs}#job-create`}
                         className="primary primary--ghost"
                         onClick={() =>
                           trackEvent("dashboard.cta.click", {

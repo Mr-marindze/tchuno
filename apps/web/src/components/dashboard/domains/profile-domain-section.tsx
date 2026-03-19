@@ -23,6 +23,7 @@ import {
   SessionListQuery,
 } from "@/lib/auth";
 import { Category } from "@/lib/categories";
+import { DashboardRouteMap } from "@/lib/dashboard-routes";
 import { WorkerProfile } from "@/lib/worker-profile";
 
 type ProfileDebugData = {
@@ -76,6 +77,7 @@ type ProfileDomainSectionProps = {
   formatRatingValue: (rating: number | string) => string;
   formatDate: (value: string) => string;
   shortenId: (value: string) => string;
+  dashboardRoutes: DashboardRouteMap;
 };
 
 export function ProfileDomainSection({
@@ -122,6 +124,7 @@ export function ProfileDomainSection({
   formatRatingValue,
   formatDate,
   shortenId,
+  dashboardRoutes,
 }: ProfileDomainSectionProps) {
   const totalSessions = sessionsMeta?.total ?? sessions.length;
   const activeSessions = sessions.filter((session) => !session.revokedAt).length;
@@ -500,7 +503,7 @@ export function ProfileDomainSection({
               </p>
               {workerProfile.bio ? <p>{workerProfile.bio}</p> : null}
               <div className="actions actions--inline marketplace-worker-actions">
-                <Link href="/dashboard/jobs" className="primary">
+                <Link href={dashboardRoutes.jobs} className="primary">
                   Ver jobs e pedidos
                 </Link>
                 <button

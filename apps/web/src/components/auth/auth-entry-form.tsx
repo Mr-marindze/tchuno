@@ -33,7 +33,17 @@ function getSafeQueryNext(searchParams: URLSearchParams | null): string | null {
 }
 
 function getDefaultPath(auth: AuthResponse, me: unknown): string {
-  const role = resolveAppRoleFromMe(me) ?? (auth.user.role === "ADMIN" ? "admin" : "customer");
+  const fallbackRole =
+    auth.user.role === "ADMIN"
+      ? auth.user.adminSubrole === "SUPPORT_ADMIN"
+        ? "support_admin"
+        : auth.user.adminSubrole === "OPS_ADMIN"
+          ? "ops_admin"
+          : auth.user.adminSubrole === "SUPER_ADMIN"
+            ? "super_admin"
+            : "admin"
+      : "customer";
+  const role = resolveAppRoleFromMe(me) ?? fallbackRole;
   return getRoleHomePath(role);
 }
 

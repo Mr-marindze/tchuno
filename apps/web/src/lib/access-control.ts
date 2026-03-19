@@ -38,6 +38,18 @@ export function resolveAppRole(input: {
   }
 
   if (input.auth.user.role === "ADMIN") {
+    if (input.auth.user.adminSubrole === "SUPPORT_ADMIN") {
+      return "support_admin";
+    }
+
+    if (input.auth.user.adminSubrole === "OPS_ADMIN") {
+      return "ops_admin";
+    }
+
+    if (input.auth.user.adminSubrole === "SUPER_ADMIN") {
+      return "super_admin";
+    }
+
     return "admin";
   }
 

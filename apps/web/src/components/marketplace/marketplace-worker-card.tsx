@@ -33,7 +33,7 @@ type MarketplaceWorkerCardProps = {
   rating?: MarketplaceWorkerCardRating;
   comparisonItems?: MarketplaceWorkerCardComparisonItem[];
   trustSignals?: MarketplaceWorkerCardTrustSignal[];
-  details: MarketplaceWorkerCardDetail[];
+  details?: MarketplaceWorkerCardDetail[];
   badges?: ReactNode;
   note?: ReactNode;
   footer?: ReactNode;
@@ -53,7 +53,7 @@ export function MarketplaceWorkerCard({
   rating,
   comparisonItems = [],
   trustSignals = [],
-  details,
+  details = [],
   badges,
   note,
   footer,
@@ -62,6 +62,11 @@ export function MarketplaceWorkerCard({
   onCardClick,
   className,
 }: MarketplaceWorkerCardProps) {
+  const ratingCountLabel =
+    rating?.reviewCount === 1
+      ? "1 avaliação"
+      : `${rating?.reviewCount ?? 0} avaliações`;
+
   function handleCardClick(event: MouseEvent<HTMLElement>) {
     if (!onCardClick) {
       return;
@@ -111,7 +116,7 @@ export function MarketplaceWorkerCard({
           <p className="marketplace-worker-rating-value">
             {rating.value}/5
             <span className="marketplace-worker-rating-count">
-              {rating.reviewCount} avaliação(ões)
+              {ratingCountLabel}
             </span>
           </p>
         </div>

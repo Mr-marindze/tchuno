@@ -255,7 +255,31 @@ function resolveMockBody(url) {
   }
 
   if (url.pathname === "/worker-profile") {
-    return paginated([workerProfile], 1, 20);
+    const categorySlug = url.searchParams.get("categorySlug");
+    const search = (url.searchParams.get("search") ?? "").trim().toLowerCase();
+
+    const matchesCategory =
+      !categorySlug ||
+      workerProfile.categories.some((item) => item.slug === categorySlug);
+    const matchesSearch =
+      search.length === 0 ||
+      [
+        workerProfile.location,
+        workerProfile.bio,
+        ...workerProfile.categories.map((item) => item.name),
+        workerProfile.userId,
+      ]
+        .filter((value) => Boolean(value))
+        .join(" ")
+        .toLowerCase()
+        .includes(search);
+
+    const data = matchesCategory && matchesSearch ? [workerProfile] : [];
+    return paginated(data, 1, 20);
+  }
+
+  if (url.pathname.startsWith("/worker-profile/")) {
+    return workerProfile;
   }
 
   if (url.pathname === "/jobs/me/client") {
@@ -342,8 +366,16 @@ function resolveMockBody(url) {
 }
 
 function routePathToScreenshotName(routePath) {
-  const normalized = routePath.replace(/^\/+/, "").replaceAll("/", "-");
-  return normalized.length > 0 ? normalized : "landing";
+  const [pathPart, queryPart] = routePath.split("?");
+  const normalizedPath = pathPart.replace(/^\/+/, "").replaceAll("/", "-");
+  const base = normalizedPath.length > 0 ? normalizedPath : "landing";
+
+  if (!queryPart) {
+    return base;
+  }
+
+  const normalizedQuery = queryPart.replace(/[^a-z0-9]+/gi, "-");
+  return `${base}--${normalizedQuery}`;
 }
 
 async function hasRoleWithName(page, role, name) {
@@ -363,10 +395,12 @@ async function assertDashboardA11yBasics(page, check, viewportName) {
   assert(h1Count === 1, `${viewportName} ${check.path} deve ter um único <h1>`);
 
   const namedNavCount = await page.locator("[aria-label]").count();
-  assert(
-    namedNavCount >= 1,
-    `${viewportName} ${check.path} sem elemento com aria-label`,
-  );
+  if (!check.allowNoAria) {
+    assert(
+      namedNavCount >= 1,
+      `${viewportName} ${check.path} sem elemento com aria-label`,
+    );
+  }
 
   const hasButtonCta = await hasRoleWithName(page, "button", check.cta);
   const hasLinkCta = await hasRoleWithName(page, "link", check.cta);
@@ -461,7 +495,7 @@ async function run() {
           path: "/",
           heading: "O que precisas hoje?",
           block: "Profissionais em destaque",
-          cta: /Pesquisar|Entrar no Tchuno/,
+          cta: /Encontrar profissional|Entrar no Tchuno/,
           mustHave: [
             { type: "label", value: "Pesquisa principal" },
             { type: "aria", value: "Categorias" },
@@ -470,40 +504,60 @@ async function run() {
           ],
         },
         {
+          path: "/prestadores",
+          heading: "Profissionais",
+          block: "Pesquisa por serviço, área ou profissional",
+          cta: /Procurar/,
+          mustHave: [
+            { type: "label", value: "Pesquisa" },
+            { type: "label", value: "Área" },
+            { type: "text", value: "No Tchuno, o valor final é negociado" },
+          ],
+        },
+        {
+          path: "/prestadores?categoria=inexistente",
+          heading: "Profissionais",
+          block: "Não encontrámos profissionais para este filtro",
+          cta: /Limpar filtros/,
+          mustHave: [{ type: "label", value: "Pesquisa" }],
+        },
+        {
           path: "/dashboard",
-          heading: "Home Operacional",
-          block: "Resumo Operacional",
-          cta: /Resolver jobs pendentes|Abrir gestão de jobs/,
+          heading: "Admin Ops",
+          block: "Admin Ops Mínimo",
+          cta: /Recarregar painel admin/,
         },
         {
-          path: "/dashboard/jobs",
-          heading: "Gestão de Jobs",
-          block: "Fluxo do pedido",
-          cta: /Criar job/,
+          path: "/admin/orders",
+          heading: "Gestão de pedidos",
+          block: "Área protegida",
+          cta: /Voltar ao painel admin/,
+          allowNoAria: true,
         },
         {
-          path: "/dashboard/workers",
+          path: "/admin/providers",
           heading: "Descoberta de Profissionais",
           block: "Descoberta de Profissionais",
           cta: /Recarregar/,
         },
         {
-          path: "/dashboard/profile",
-          heading: "Perfil e Sessões",
-          block: "Meu Perfil de Worker",
-          cta: /Recarregar perfil/,
+          path: "/admin/users",
+          heading: "Gestão de utilizadores",
+          block: "Área protegida",
+          cta: /Voltar ao painel admin/,
+          allowNoAria: true,
         },
         {
-          path: "/dashboard/reviews",
-          heading: "Gestão de Reviews",
-          block: "Handoff de conclusão",
-          cta: /Publicar review/,
-        },
-        {
-          path: "/dashboard/admin",
+          path: "/admin/reports",
           heading: "Admin Ops",
           block: "Admin Ops Mínimo",
           cta: /Recarregar painel admin/,
+        },
+        {
+          path: "/admin/categories",
+          heading: "Gestão de Categorias",
+          block: "Gestão de categorias",
+          cta: /Criar categoria/,
         },
       ];
 

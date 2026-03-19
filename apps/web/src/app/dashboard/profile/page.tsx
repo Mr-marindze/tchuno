@@ -1,10 +1,5 @@
-import { RouteGuard } from "@/components/access/route-guard";
-import { ProfileDashboardView } from "@/components/dashboard/views/profile-dashboard-view";
+import { LegacyDashboardRedirect } from "@/components/access/legacy-dashboard-redirect";
 
 export default function DashboardProfilePage() {
-  return (
-    <RouteGuard requiredAccess="authenticated">
-      <ProfileDashboardView />
-    </RouteGuard>
-  );
+  return <LegacyDashboardRedirect target="profile" />;
 }

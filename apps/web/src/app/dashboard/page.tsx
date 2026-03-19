@@ -1,10 +1,5 @@
-import { RouteGuard } from "@/components/access/route-guard";
-import { HomeDashboardView } from "@/components/dashboard/views/home-dashboard-view";
+import { LegacyDashboardRedirect } from "@/components/access/legacy-dashboard-redirect";
 
 export default function DashboardPage() {
-  return (
-    <RouteGuard requiredAccess="authenticated">
-      <HomeDashboardView />
-    </RouteGuard>
-  );
+  return <LegacyDashboardRedirect target="home" />;
 }

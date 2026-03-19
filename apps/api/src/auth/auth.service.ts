@@ -119,11 +119,13 @@ export class AuthService {
     });
 
     if (user.role === 'ADMIN') {
-      this.securityAuditService.logAdminLogin({
+      void this.securityAuditService.logAdminLogin({
         userId: user.id,
+        role: this.resolveAdminRoleLabel(user.adminSubrole),
         email: user.email,
         ip: clientInfo?.ip ?? null,
         deviceId: clientInfo?.deviceId ?? null,
+        userAgent: clientInfo?.userAgent ?? null,
       });
     }
 
@@ -364,6 +366,7 @@ export class AuthService {
         email: user.email,
         name: user.name,
         role: user.role,
+        adminSubrole: user.adminSubrole,
       },
       accessToken,
       refreshToken,
@@ -457,5 +460,23 @@ export class AuthService {
         ...context,
       }),
     );
+  }
+
+  private resolveAdminRoleLabel(
+    adminSubrole: User['adminSubrole'] | null,
+  ): 'admin' | 'support_admin' | 'ops_admin' | 'super_admin' {
+    if (adminSubrole === 'SUPPORT_ADMIN') {
+      return 'support_admin';
+    }
+
+    if (adminSubrole === 'OPS_ADMIN') {
+      return 'ops_admin';
+    }
+
+    if (adminSubrole === 'SUPER_ADMIN') {
+      return 'super_admin';
+    }
+
+    return 'admin';
   }
 }

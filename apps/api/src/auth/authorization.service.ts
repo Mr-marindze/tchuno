@@ -1,4 +1,5 @@
 import { Injectable } from '@nestjs/common';
+import { AdminSubrole } from '@prisma/client';
 import { PrismaService } from '../prisma/prisma.service';
 import { AccessContext, AppRole, Permission } from './authorization.types';
 
@@ -39,6 +40,7 @@ const rolePermissions: Record<AppRole, Permission[]> = {
     'provider.reviews.read.received',
     'admin.ops.read',
     'admin.categories.manage',
+    'admin.roles.manage',
     'admin.users.manage',
     'admin.providers.manage',
     'admin.orders.manage',
@@ -69,6 +71,7 @@ const rolePermissions: Record<AppRole, Permission[]> = {
     'public.read',
     'admin.ops.read',
     'admin.categories.manage',
+    'admin.roles.manage',
     'admin.users.manage',
     'admin.providers.manage',
     'admin.orders.manage',
@@ -86,6 +89,7 @@ export class AuthorizationService {
   async resolveAccessContext(input: {
     userId?: string | null;
     platformRole?: 'USER' | 'ADMIN' | null;
+    adminSubrole?: AdminSubrole | null;
   }): Promise<AccessContext> {
     if (!input.userId) {
       return {
@@ -97,26 +101,50 @@ export class AuthorizationService {
     }
 
     if (input.platformRole === 'ADMIN') {
+      const adminRole = this.resolveAdminRole(input.adminSubrole);
       return {
         userId: input.userId,
-        role: 'admin',
-        permissions: rolePermissions.admin,
+        role: adminRole,
+        permissions: rolePermissions[adminRole],
         isAuthenticated: true,
       };
     }
 
-    const workerProfile = await this.prisma.workerProfile.findUnique({
-      where: { userId: input.userId },
-      select: { id: true },
-    });
-
-    const role: AppRole = workerProfile ? 'provider' : 'customer';
+    const isProvider = await this.isProviderUser(input.userId);
+    const role: AppRole = isProvider ? 'provider' : 'customer';
     return {
       userId: input.userId,
       role,
       permissions: rolePermissions[role],
       isAuthenticated: true,
     };
+  }
+
+  private resolveAdminRole(adminSubrole?: AdminSubrole | null): AppRole {
+    if (adminSubrole === 'SUPPORT_ADMIN') {
+      return 'support_admin';
+    }
+
+    if (adminSubrole === 'OPS_ADMIN') {
+      return 'ops_admin';
+    }
+
+    if (adminSubrole === 'SUPER_ADMIN') {
+      return 'super_admin';
+    }
+
+    return 'admin';
+  }
+
+  private async isProviderUser(userId: string): Promise<boolean> {
+    // MVP compatibility: provider is currently inferred from worker profile existence.
+    // This keeps legacy behavior stable while centralizing the decision in one place.
+    const workerProfile = await this.prisma.workerProfile.findUnique({
+      where: { userId },
+      select: { id: true },
+    });
+
+    return Boolean(workerProfile);
   }
 
   hasAnyRole(contextRole: AppRole, requiredRoles: AppRole[]): boolean {

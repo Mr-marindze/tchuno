@@ -1,6 +1,6 @@
 "use client";
 
-import { useRouter } from "next/navigation";
+import { usePathname, useRouter } from "next/navigation";
 import {
   FormEvent,
   useCallback,
@@ -12,6 +12,7 @@ import {
 import {
   AuthResponse,
   clearTokens,
+  confirmReauth,
   DeviceSession,
   ensureSession,
   getOrCreateDeviceId,
@@ -74,9 +75,10 @@ import {
 } from "@/components/dashboard/dashboard-profile";
 import { DashboardView } from "@/components/dashboard/dashboard-view";
 import { ToastTone, useToast } from "@/components/toast-provider";
-import { humanizeUnknownError } from "@/lib/http-errors";
+import { humanizeUnknownError, ReauthRequiredError } from "@/lib/http-errors";
 import { buildJobActionPlan } from "@/lib/job-cta";
 import { PaginationMeta } from "@/lib/pagination";
+import { buildDashboardRouteMap, resolveDashboardScope } from "@/lib/dashboard-routes";
 import { listSharedWorkerRanking } from "@/lib/shared-worker-ranking";
 import { setSharedWorkerBehaviorSignals, trackEvent } from "@/lib/tracking";
 
@@ -164,6 +166,7 @@ type UseDashboardRuntimeArgs = {
 
 export function useDashboardRuntime({ view }: UseDashboardRuntimeArgs) {
   const router = useRouter();
+  const pathname = usePathname();
   const { pushToast } = useToast();
   const lastToastByChannelRef = useRef<Record<string, string>>({});
   const currentDeviceId = useMemo(() => getOrCreateDeviceId(), []);
@@ -299,6 +302,10 @@ export function useDashboardRuntime({ view }: UseDashboardRuntimeArgs) {
   const [reviewPage, setReviewPage] = useState(1);
   const [reviewLimit, setReviewLimit] = useState(10);
   const [loading, setLoading] = useState(true);
+  const dashboardRoutes = useMemo(
+    () => buildDashboardRouteMap(resolveDashboardScope(pathname)),
+    [pathname],
+  );
   const isAuthenticated = Boolean(state?.auth.accessToken);
   const isAdmin = state?.auth.user.role === "ADMIN";
   const isHomeView = view === "home";
@@ -598,23 +605,28 @@ export function useDashboardRuntime({ view }: UseDashboardRuntimeArgs) {
   const homePrimaryCta = useMemo(() => {
     if (homeAttentionItems.length > 0) {
       return {
-        href: "/dashboard/jobs",
+        href: dashboardRoutes.jobs,
         label: "Resolver jobs pendentes",
       };
     }
 
     if (reviewableJobs.length > 0) {
       return {
-        href: "/dashboard/reviews",
+        href: dashboardRoutes.reviews,
         label: "Publicar reviews pendentes",
       };
     }
 
     return {
-      href: "/dashboard/jobs",
+      href: dashboardRoutes.jobs,
       label: "Abrir gestão de jobs",
     };
-  }, [homeAttentionItems.length, reviewableJobs.length]);
+  }, [
+    dashboardRoutes.jobs,
+    dashboardRoutes.reviews,
+    homeAttentionItems.length,
+    reviewableJobs.length,
+  ]);
   const showClientJourney = jobJourneyView !== "worker";
   const showWorkerJourney = jobJourneyView !== "client";
 
@@ -1396,6 +1408,44 @@ export function useDashboardRuntime({ view }: UseDashboardRuntimeArgs) {
     }
   }
 
+  async function runCriticalAdminAction<T>(input: {
+    accessToken: string;
+    purpose: string;
+    execute: (reauthToken?: string) => Promise<T>;
+  }): Promise<T> {
+    try {
+      return await input.execute();
+    } catch (error) {
+      if (!(error instanceof ReauthRequiredError)) {
+        throw error;
+      }
+
+      if (typeof window === "undefined") {
+        throw new Error("Reautenticação necessária para concluir esta ação.");
+      }
+
+      setCategoryStatus(
+        "Confirma a tua password para concluir a ação administrativa crítica.",
+      );
+
+      const password = window.prompt(
+        "Confirma a tua password para concluir esta ação crítica:",
+      );
+
+      if (!password || password.trim().length === 0) {
+        throw new Error("Reautenticação cancelada pelo utilizador.");
+      }
+
+      const confirmation = await confirmReauth({
+        accessToken: input.accessToken,
+        password: password.trim(),
+        purpose: input.purpose,
+      });
+
+      return input.execute(confirmation.reauthToken);
+    }
+  }
+
   async function handleCreateCategory(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
 
@@ -1453,11 +1503,22 @@ export function useDashboardRuntime({ view }: UseDashboardRuntimeArgs) {
     setCategoryStatus("A criar categoria...");
 
     try {
-      await createCategory(accessToken, {
-        name: normalizedName,
-        slug: normalizedSlug || undefined,
-        description: normalizedDescription || undefined,
-        sortOrder: parsedSortOrder,
+      await runCriticalAdminAction({
+        accessToken,
+        purpose: "admin.categories.create",
+        execute: (reauthToken) =>
+          createCategory(
+            accessToken,
+            {
+              name: normalizedName,
+              slug: normalizedSlug || undefined,
+              description: normalizedDescription || undefined,
+              sortOrder: parsedSortOrder,
+            },
+            {
+              reauthToken,
+            },
+          ),
       });
 
       setCategoryName("");
@@ -1492,7 +1553,14 @@ export function useDashboardRuntime({ view }: UseDashboardRuntimeArgs) {
     setCategoryStatus("A desativar categoria...");
 
     try {
-      await deactivateCategory(accessToken, categoryId);
+      await runCriticalAdminAction({
+        accessToken,
+        purpose: "admin.categories.remove",
+        execute: (reauthToken) =>
+          deactivateCategory(accessToken, categoryId, {
+            reauthToken,
+          }),
+      });
       await loadCategories();
       setCategoryStatus("Categoria desativada.");
     } catch (error) {
@@ -2012,6 +2080,7 @@ export function useDashboardRuntime({ view }: UseDashboardRuntimeArgs) {
     homeAttentionItems,
     homeJobCounts,
     homePrimaryCta,
+    dashboardRoutes,
     formatJobStatus,
     formatDate,
   } as const;
@@ -2100,6 +2169,7 @@ export function useDashboardRuntime({ view }: UseDashboardRuntimeArgs) {
     formatRatingValue,
     formatDate,
     shortenId,
+    dashboardRoutes,
   } as const;
 
   const categoriesProps = {
@@ -2195,7 +2265,7 @@ export function useDashboardRuntime({ view }: UseDashboardRuntimeArgs) {
     formatRatingValue,
     formatCurrencyMzn,
     formatDate,
-    shortenId,
+    dashboardRoutes,
   } as const;
 
   const jobsProps = {

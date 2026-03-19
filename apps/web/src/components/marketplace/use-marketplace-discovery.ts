@@ -1,7 +1,6 @@
 "use client";
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { shortenId } from "@/components/dashboard/dashboard-formatters";
 import { buildWorkerRankingContext } from "@/components/marketplace/marketplace-worker-presenter";
 import { listCategories } from "@/lib/categories";
 import { humanizeUnknownError } from "@/lib/http-errors";
@@ -12,7 +11,11 @@ import {
   subscribeBehaviorAggregation,
   trackEvent,
 } from "@/lib/tracking";
-import { listWorkerProfiles, WorkerProfile } from "@/lib/worker-profile";
+import {
+  listWorkerProfiles,
+  resolveWorkerPublicName,
+  WorkerProfile,
+} from "@/lib/worker-profile";
 
 type MarketplaceCategory = {
   id: string;
@@ -22,8 +25,7 @@ type MarketplaceCategory = {
 };
 
 type DiscoveryTrustSummary = {
-  availableCount: number;
-  ratedCount: number;
+  totalCount: number;
   avgRating: string;
 };
 
@@ -45,7 +47,7 @@ type UseMarketplaceDiscoveryResult = {
 export function useMarketplaceDiscovery(): UseMarketplaceDiscoveryResult {
   const [discoveryLoading, setDiscoveryLoading] = useState(true);
   const [discoveryMessage, setDiscoveryMessage] = useState(
-    "A carregar descoberta de serviços...",
+    "A carregar descoberta de profissionais...",
   );
   const [discoverySearch, setDiscoverySearch] = useState("");
   const [discoveryCategory, setDiscoveryCategory] = useState("");
@@ -63,7 +65,7 @@ export function useMarketplaceDiscovery(): UseMarketplaceDiscoveryResult {
 
     async function loadDiscovery() {
       setDiscoveryLoading(true);
-      setDiscoveryMessage("A carregar descoberta de serviços...");
+      setDiscoveryMessage("A carregar descoberta de profissionais...");
 
       try {
         const [categories, workersResponse] = await Promise.all([
@@ -98,7 +100,7 @@ export function useMarketplaceDiscovery(): UseMarketplaceDiscoveryResult {
         setMarketCategories(activeCategories);
         setFeaturedWorkers(topWorkers);
         setDiscoveryMessage(
-          "Explora por categoria, reputação e disponibilidade para contratar com confiança.",
+          "Pesquisa por serviço, área ou profissional para encontrar o melhor perfil.",
         );
       } catch (error) {
         if (!isActive) {
@@ -108,7 +110,7 @@ export function useMarketplaceDiscovery(): UseMarketplaceDiscoveryResult {
         setDiscoveryMessage(
           humanizeUnknownError(
             error,
-            "Descoberta indisponível agora. Usa o dashboard para continuar.",
+            "Descoberta indisponível agora. Tenta novamente em instantes.",
           ),
         );
       } finally {
@@ -209,12 +211,13 @@ export function useMarketplaceDiscovery(): UseMarketplaceDiscoveryResult {
       const categoriesLabel = worker.categories
         .map((item) => item.name.toLowerCase())
         .join(" ");
+      const publicName = resolveWorkerPublicName(worker)?.toLowerCase() ?? "";
 
       return (
         worker.location?.toLowerCase().includes(normalizedSearch) ||
         categoriesLabel.includes(normalizedSearch) ||
         worker.bio?.toLowerCase().includes(normalizedSearch) ||
-        shortenId(worker.userId).toLowerCase().includes(normalizedSearch)
+        publicName.includes(normalizedSearch)
       );
     });
 
@@ -240,10 +243,7 @@ export function useMarketplaceDiscovery(): UseMarketplaceDiscoveryResult {
   ]);
 
   const trustSummary = useMemo(() => {
-    const availableCount = featuredWorkers.filter((worker) => worker.isAvailable)
-      .length;
-    const ratedCount = featuredWorkers.filter((worker) => worker.ratingCount > 0)
-      .length;
+    const totalCount = featuredWorkers.length;
     const avgRating =
       featuredWorkers.length > 0
         ? (
@@ -255,8 +255,7 @@ export function useMarketplaceDiscovery(): UseMarketplaceDiscoveryResult {
         : "0.0";
 
     return {
-      availableCount,
-      ratedCount,
+      totalCount,
       avgRating,
     };
   }, [featuredWorkers]);

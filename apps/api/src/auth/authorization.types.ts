@@ -20,6 +20,7 @@ export type Permission =
   | 'provider.reviews.read.received'
   | 'admin.ops.read'
   | 'admin.categories.manage'
+  | 'admin.roles.manage'
   | 'admin.users.manage'
   | 'admin.providers.manage'
   | 'admin.orders.manage'

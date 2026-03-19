@@ -1,10 +1,5 @@
-import { RouteGuard } from "@/components/access/route-guard";
-import { WorkersDashboardView } from "@/components/dashboard/views/workers-dashboard-view";
+import { LegacyDashboardRedirect } from "@/components/access/legacy-dashboard-redirect";
 
 export default function DashboardWorkersPage() {
-  return (
-    <RouteGuard requiredAccess="authenticated">
-      <WorkersDashboardView />
-    </RouteGuard>
-  );
+  return <LegacyDashboardRedirect target="workers" />;
 }

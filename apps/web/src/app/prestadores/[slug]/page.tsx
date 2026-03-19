@@ -1,12 +1,11 @@
 import Link from "next/link";
-import {
-  formatRatingValue,
-  formatStars,
-  shortenId,
-} from "@/components/dashboard/dashboard-formatters";
+import { formatRatingValue, formatStars } from "@/components/dashboard/dashboard-formatters";
 import { PublicPageShell } from "@/components/public/public-page-shell";
 import { listWorkerReviews } from "@/lib/reviews";
-import { getWorkerProfileByUserId } from "@/lib/worker-profile";
+import {
+  getWorkerProfileByUserId,
+  resolveWorkerDisplayName,
+} from "@/lib/worker-profile";
 
 type ProviderDetailsPageProps = {
   params: Promise<{
@@ -21,6 +20,7 @@ export default async function ProviderDetailsPage({
 
   try {
     const profile = await getWorkerProfileByUserId(slug);
+    const publicName = resolveWorkerDisplayName(profile);
     const reviews = await listWorkerReviews(profile.id, {
       page: 1,
       limit: 5,
@@ -29,8 +29,8 @@ export default async function ProviderDetailsPage({
 
     return (
       <PublicPageShell
-        title={`Prestador ${shortenId(profile.userId)}`}
-        description="Perfil público com sinais de confiança para decisão rápida."
+        title={publicName}
+        description="Perfil público com reputação, disponibilidade e contexto para decisão rápida."
       >
         <div className="panel-grid">
           <article className="panel-card">
@@ -49,10 +49,16 @@ export default async function ProviderDetailsPage({
             </p>
             <p className="subtitle">Avaliações: {profile.ratingCount}</p>
             <p className="subtitle">
-              Preço: {typeof profile.hourlyRate === "number" ? `${profile.hourlyRate} MZN/h` : "Sob cotação"}
+              Preço de referência:{" "}
+              {typeof profile.hourlyRate === "number"
+                ? `${profile.hourlyRate} MZN/h`
+                : "Valor negociado com o profissional"}
             </p>
             <p className="subtitle">
               Disponibilidade: {profile.isAvailable ? "Disponível" : "Agenda limitada"}
+            </p>
+            <p className="subtitle">
+              O valor final é negociado diretamente entre cliente e profissional no Tchuno.
             </p>
           </article>
         </div>
@@ -89,12 +95,12 @@ export default async function ProviderDetailsPage({
   } catch {
     return (
       <PublicPageShell
-        title="Prestador não encontrado"
+        title="Profissional não encontrado"
         description="Não foi possível carregar este perfil público."
       >
         <div className="actions actions--inline">
           <Link href="/prestadores" className="primary">
-            Ver prestadores
+            Ver profissionais
           </Link>
           <Link href="/" className="primary primary--ghost">
             Voltar ao início

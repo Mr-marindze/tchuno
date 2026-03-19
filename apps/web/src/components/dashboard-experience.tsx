@@ -8,6 +8,10 @@ import {
   getDashboardSubtitle,
   getDashboardTitle,
 } from "@/components/dashboard/dashboard-view";
+import {
+  buildDashboardRouteMap,
+  resolveDashboardScope,
+} from "@/lib/dashboard-routes";
 
 type StatusTone = "loading" | "success" | "error";
 
@@ -41,62 +45,7 @@ export function DashboardExperience({
 }: DashboardExperienceProps) {
   const pathname = usePathname();
 
-  const navScope = (() => {
-    if (pathname.startsWith("/app")) {
-      return "customer";
-    }
-
-    if (pathname.startsWith("/pro")) {
-      return "provider";
-    }
-
-    if (pathname.startsWith("/admin")) {
-      return "admin";
-    }
-
-    return "legacy";
-  })();
-
-  const navPaths =
-    navScope === "customer"
-      ? {
-          home: "/app",
-          jobs: "/app/pedidos",
-          workers: "/prestadores",
-          reviews: "/app/pedidos",
-          profile: "/app/perfil",
-          categories: "/categorias",
-          admin: "/admin",
-        }
-      : navScope === "provider"
-        ? {
-            home: "/pro/dashboard",
-            jobs: "/pro/pedidos",
-            workers: "/prestadores",
-            reviews: "/pro/avaliacoes",
-            profile: "/pro/perfil",
-            categories: "/categorias",
-            admin: "/admin",
-          }
-        : navScope === "admin"
-          ? {
-              home: "/admin",
-              jobs: "/admin/orders",
-              workers: "/admin/providers",
-              reviews: "/admin/reports",
-              profile: "/admin/users",
-              categories: "/admin/categories",
-              admin: "/admin",
-            }
-          : {
-              home: "/dashboard",
-              jobs: "/dashboard/jobs",
-              workers: "/dashboard/workers",
-              reviews: "/dashboard/reviews",
-              profile: "/dashboard/profile",
-              categories: "/dashboard/categories",
-              admin: "/dashboard/admin",
-            };
+  const navPaths = buildDashboardRouteMap(resolveDashboardScope(pathname));
 
   const isHomeView = view === "home";
   const isJobsView = view === "jobs";

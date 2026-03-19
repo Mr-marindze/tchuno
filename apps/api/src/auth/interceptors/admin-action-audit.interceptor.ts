@@ -11,6 +11,9 @@ type RequestWithUser = {
   method: string;
   path: string;
   originalUrl?: string;
+  params?: Record<string, string | undefined>;
+  headers?: Record<string, string | string[] | undefined>;
+  ip?: string;
   user?: {
     sub?: string;
   };
@@ -30,6 +33,11 @@ export class AdminActionAuditInterceptor implements NestInterceptor {
     const role = request.authz?.role ?? 'admin';
     const reauthRequired = request.authz?.reauthRequired ?? false;
     const userId = request.user?.sub;
+    const targetId = request.params?.id ?? null;
+    const userAgentHeader = request.headers?.['user-agent'];
+    const userAgent = Array.isArray(userAgentHeader)
+      ? (userAgentHeader[0] ?? null)
+      : (userAgentHeader ?? null);
 
     return next.handle().pipe(
       tap(() => {
@@ -37,25 +45,34 @@ export class AdminActionAuditInterceptor implements NestInterceptor {
           return;
         }
 
-        this.securityAuditService.logAdminAction({
+        void this.securityAuditService.logAdminAction({
           userId,
           role,
           action,
           method: request.method,
           path: request.originalUrl ?? request.path,
           status: 'success',
+          targetType: targetId ? 'entity' : 'route',
+          targetId,
+          ipAddress: request.ip ?? null,
+          userAgent,
           reauthRequired,
         });
       }),
       catchError((error: unknown) => {
         if (userId) {
-          this.securityAuditService.logAdminAction({
+          void this.securityAuditService.logAdminAction({
             userId,
             role,
             action,
             method: request.method,
             path: request.originalUrl ?? request.path,
             status: 'failed',
+            targetType: targetId ? 'entity' : 'route',
+            targetId,
+            reason: error instanceof Error ? error.message : 'unknown_error',
+            ipAddress: request.ip ?? null,
+            userAgent,
             reauthRequired,
           });
         }

@@ -11,6 +11,12 @@ export type WorkerProfileCategoryItem = {
 export type WorkerProfile = {
   id: string;
   userId: string;
+  publicName?: string | null;
+  displayName?: string | null;
+  name?: string | null;
+  user?: {
+    name?: string | null;
+  } | null;
   bio: string | null;
   location: string | null;
   hourlyRate: number | null;
@@ -46,6 +52,33 @@ export type UpsertWorkerProfileInput = {
   isAvailable?: boolean;
   categoryIds?: string[];
 };
+
+function normalizePublicName(value: string | null | undefined): string | null {
+  if (typeof value !== "string") {
+    return null;
+  }
+
+  const normalized = value.trim();
+  return normalized.length > 0 ? normalized : null;
+}
+
+export function resolveWorkerPublicName(profile: WorkerProfile): string | null {
+  const candidates = [
+    normalizePublicName(profile.publicName),
+    normalizePublicName(profile.displayName),
+    normalizePublicName(profile.name),
+    normalizePublicName(profile.user?.name),
+  ];
+
+  return candidates.find((candidate): candidate is string => Boolean(candidate)) ?? null;
+}
+
+export function resolveWorkerDisplayName(
+  profile: WorkerProfile,
+  fallback = "Profissional verificado",
+): string {
+  return resolveWorkerPublicName(profile) ?? fallback;
+}
 
 export async function listWorkerProfiles(
   query?: ListWorkerProfilesQuery,

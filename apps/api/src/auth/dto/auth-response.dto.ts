@@ -12,6 +12,12 @@ class AuthUserDto {
 
   @ApiProperty({ enum: ['USER', 'ADMIN'] })
   role!: 'USER' | 'ADMIN';
+
+  @ApiProperty({
+    enum: ['SUPPORT_ADMIN', 'OPS_ADMIN', 'SUPER_ADMIN'],
+    nullable: true,
+  })
+  adminSubrole!: 'SUPPORT_ADMIN' | 'OPS_ADMIN' | 'SUPER_ADMIN' | null;
 }
 
 export class AuthResponseDto {

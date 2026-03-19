@@ -2,6 +2,7 @@ import { INestApplication, ValidationPipe } from '@nestjs/common';
 import { JwtService } from '@nestjs/jwt';
 import { Test, TestingModule } from '@nestjs/testing';
 import { PrismaClient } from '@prisma/client';
+import * as bcrypt from 'bcryptjs';
 import { execSync } from 'node:child_process';
 import { randomUUID } from 'node:crypto';
 import { resolve } from 'node:path';
@@ -80,6 +81,29 @@ type TrackingWorkerRankingResponse = {
     ctaClicks: number;
     conversions: number;
     isAvailable: boolean;
+  }>;
+  meta: {
+    total: number;
+    page: number;
+    limit: number;
+    hasNext: boolean;
+  };
+};
+
+type ReauthResponsePayload = {
+  reauthToken: string;
+  expiresAt: string;
+};
+
+type AuditLogListResponse = {
+  data: Array<{
+    id: string;
+    action: string;
+    status: 'SUCCESS' | 'DENIED' | 'FAILED';
+    route: string;
+    method: string;
+    actorUserId: string | null;
+    reason: string | null;
   }>;
   meta: {
     total: number;
@@ -377,6 +401,164 @@ describe('Auth and Sessions (e2e)', () => {
     expect(Array.isArray(overview.recentJobs)).toBe(true);
     expect(Array.isArray(overview.recentlyCanceledJobs)).toBe(true);
     expect(Array.isArray(overview.completedWithoutReviewJobs)).toBe(true);
+  });
+
+  it('persists audit logs and enforces reauth for critical admin actions', async () => {
+    const adminEmail = `audit_admin_${Date.now()}@tchuno.local`;
+    const regularEmail = `audit_user_${Date.now()}@tchuno.local`;
+    const password = 'abc12345';
+
+    const adminRegisterResponse = await request(app.getHttpServer())
+      .post('/auth/register')
+      .send({ email: adminEmail, password, name: 'Audit Admin' })
+      .expect(201);
+    const adminAuth = adminRegisterResponse.body as AuthPayload;
+
+    await prisma.user.update({
+      where: { id: adminAuth.user.id },
+      data: {
+        role: 'ADMIN',
+        adminSubrole: 'SUPER_ADMIN',
+      },
+    });
+
+    const regularRegisterResponse = await request(app.getHttpServer())
+      .post('/auth/register')
+      .send({ email: regularEmail, password, name: 'Audit User' })
+      .expect(201);
+    const regularAuth = regularRegisterResponse.body as AuthPayload;
+
+    await request(app.getHttpServer())
+      .get('/admin/ops/overview')
+      .set('Authorization', `Bearer ${regularAuth.accessToken}`)
+      .expect(403);
+
+    const criticalWithoutReauth = await request(app.getHttpServer())
+      .patch(`/admin/ops/users/${regularAuth.user.id}/status`)
+      .set('Authorization', `Bearer ${adminAuth.accessToken}`)
+      .send({ isActive: false })
+      .expect(403);
+    const criticalWithoutReauthBody = criticalWithoutReauth.body as {
+      code?: string;
+      reauthRequired?: boolean;
+    };
+
+    expect(criticalWithoutReauthBody.code).toBe('REAUTH_REQUIRED');
+    expect(criticalWithoutReauthBody.reauthRequired).toBe(true);
+
+    await request(app.getHttpServer())
+      .post('/auth/reauth/confirm')
+      .set('Authorization', `Bearer ${adminAuth.accessToken}`)
+      .send({
+        password: 'wrong-password',
+        purpose: 'admin.user.status.change',
+      })
+      .expect(401);
+
+    const reauthResponse = await request(app.getHttpServer())
+      .post('/auth/reauth/confirm')
+      .set('Authorization', `Bearer ${adminAuth.accessToken}`)
+      .send({
+        password,
+        purpose: 'admin.user.status.change',
+      })
+      .expect(200);
+    const reauthBody = reauthResponse.body as ReauthResponsePayload;
+
+    const suspendResponse = await request(app.getHttpServer())
+      .patch(`/admin/ops/users/${regularAuth.user.id}/status`)
+      .set('Authorization', `Bearer ${adminAuth.accessToken}`)
+      .set('x-reauth-token', reauthBody.reauthToken)
+      .send({ isActive: false })
+      .expect(200);
+    const suspendBody = suspendResponse.body as {
+      isActive: boolean;
+    };
+
+    expect(suspendBody.isActive).toBe(false);
+
+    await request(app.getHttpServer())
+      .patch(`/admin/ops/users/${regularAuth.user.id}/status`)
+      .set('Authorization', `Bearer ${adminAuth.accessToken}`)
+      .set('x-reauth-token', reauthBody.reauthToken)
+      .send({ isActive: true })
+      .expect(403);
+
+    await request(app.getHttpServer())
+      .get('/auth/me')
+      .set('Authorization', `Bearer ${regularAuth.accessToken}`)
+      .expect(401);
+
+    let deniedAdminRouteAudit: AuditLogListResponse | null = null;
+    let reauthFailureAudit: AuditLogListResponse | null = null;
+    let suspendAudit: AuditLogListResponse | null = null;
+
+    for (let attempt = 0; attempt < 20; attempt += 1) {
+      const [deniedResponse, reauthFailedResponse, suspendResponseAudit] =
+        await Promise.all([
+          request(app.getHttpServer())
+            .get(
+              '/admin/ops/audit-logs?page=1&limit=10&action=auth.access.denied',
+            )
+            .set('Authorization', `Bearer ${adminAuth.accessToken}`)
+            .expect(200),
+          request(app.getHttpServer())
+            .get(
+              '/admin/ops/audit-logs?page=1&limit=10&action=auth.reauth&status=FAILED',
+            )
+            .set('Authorization', `Bearer ${adminAuth.accessToken}`)
+            .expect(200),
+          request(app.getHttpServer())
+            .get(
+              '/admin/ops/audit-logs?page=1&limit=10&action=admin.user.suspend',
+            )
+            .set('Authorization', `Bearer ${adminAuth.accessToken}`)
+            .expect(200),
+        ]);
+
+      deniedAdminRouteAudit = deniedResponse.body as AuditLogListResponse;
+      reauthFailureAudit = reauthFailedResponse.body as AuditLogListResponse;
+      suspendAudit = suspendResponseAudit.body as AuditLogListResponse;
+
+      const hasDeniedEntry = deniedAdminRouteAudit.data.some(
+        (item) =>
+          item.route.includes('/admin/ops/overview') &&
+          item.status === 'DENIED',
+      );
+      const hasReauthFailure = reauthFailureAudit.data.some(
+        (item) => item.action === 'auth.reauth' && item.status === 'FAILED',
+      );
+      const hasSuspend = suspendAudit.data.some(
+        (item) =>
+          item.action === 'admin.user.suspend' && item.status === 'SUCCESS',
+      );
+
+      if (hasDeniedEntry && hasReauthFailure && hasSuspend) {
+        break;
+      }
+
+      await new Promise((resolve) => setTimeout(resolve, 25));
+    }
+
+    expect(deniedAdminRouteAudit).not.toBeNull();
+    expect(reauthFailureAudit).not.toBeNull();
+    expect(suspendAudit).not.toBeNull();
+
+    const deniedHasEntry = deniedAdminRouteAudit!.data.some(
+      (item) =>
+        item.route.includes('/admin/ops/overview') && item.status === 'DENIED',
+    );
+    const reauthHasFailure = reauthFailureAudit!.data.some(
+      (item) => item.action === 'auth.reauth' && item.status === 'FAILED',
+    );
+    const suspendHasEntry = suspendAudit!.data.some(
+      (item) =>
+        item.action === 'admin.user.suspend' && item.status === 'SUCCESS',
+    );
+
+    expect(deniedHasEntry).toBe(true);
+    expect(reauthHasFailure).toBe(true);
+    expect(suspendHasEntry).toBe(true);
   });
 
   it('ingests tracking events and exposes shared worker ranking', async () => {
@@ -825,24 +1007,45 @@ describe('Auth and Sessions (e2e)', () => {
     const workerEmail = `chaos_worker_${Date.now()}@tchuno.local`;
     const clientEmail = `chaos_client_${Date.now()}@tchuno.local`;
     const password = 'abc12345';
+    const passwordHash = await bcrypt.hash(password, 12);
 
-    const workerRegister = await request(app.getHttpServer())
-      .post('/auth/register')
+    await prisma.user.create({
+      data: {
+        email: workerEmail,
+        name: 'Chaos Worker',
+        passwordHash,
+        role: 'USER',
+        isActive: true,
+      },
+    });
+
+    const workerLogin = await request(app.getHttpServer())
+      .post('/auth/login')
       .set('x-device-id', 'chaos-worker-device')
-      .send({ email: workerEmail, password, name: 'Chaos Worker' })
-      .expect(201);
-    const workerAuth = workerRegister.body as AuthPayload;
+      .send({ email: workerEmail, password })
+      .expect(200);
+    const workerAuth = workerLogin.body as AuthPayload;
 
     await request(app.getHttpServer())
       .get('/jobs/me/worker')
       .set('Authorization', `Bearer ${workerAuth.accessToken}`)
       .expect(404);
 
+    await prisma.user.create({
+      data: {
+        email: clientEmail,
+        name: 'Chaos Client',
+        passwordHash,
+        role: 'USER',
+        isActive: true,
+      },
+    });
+
     const clientRegister = await request(app.getHttpServer())
-      .post('/auth/register')
+      .post('/auth/login')
       .set('x-device-id', 'chaos-client-tab-a')
-      .send({ email: clientEmail, password, name: 'Chaos Client' })
-      .expect(201);
+      .send({ email: clientEmail, password })
+      .expect(200);
     const clientTabA = clientRegister.body as AuthPayload;
 
     const clientLogin = await request(app.getHttpServer())
@@ -1074,11 +1277,17 @@ describe('Auth and Sessions (e2e)', () => {
   it('rate-limits repeated login attempts', async () => {
     const email = `limit_${Date.now()}@tchuno.local`;
     const password = 'abc12345';
+    const passwordHash = await bcrypt.hash(password, 12);
 
-    await request(app.getHttpServer())
-      .post('/auth/register')
-      .send({ email, password, name: 'Rate Limit User' })
-      .expect(201);
+    await prisma.user.create({
+      data: {
+        email,
+        name: 'Rate Limit User',
+        passwordHash,
+        role: 'USER',
+        isActive: true,
+      },
+    });
 
     let received429 = false;
 

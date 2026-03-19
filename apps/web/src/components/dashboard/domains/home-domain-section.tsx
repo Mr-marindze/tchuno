@@ -7,6 +7,7 @@ import {
   DashboardSectionHeader,
   DashboardSummaryCard,
 } from "@/components/dashboard/ui/dashboard-primitives";
+import { DashboardRouteMap } from "@/lib/dashboard-routes";
 import { Job, JobStatus } from "@/lib/jobs";
 
 type HomeAttentionItem = {
@@ -31,6 +32,7 @@ type HomeDomainSectionProps = {
   homeAttentionItems: HomeAttentionItem[];
   homeJobCounts: HomeJobCounts;
   homePrimaryCta: HomePrimaryCta;
+  dashboardRoutes: DashboardRouteMap;
   formatJobStatus: (status: JobStatus) => string;
   formatDate: (value: string) => string;
 };
@@ -39,6 +41,7 @@ export function HomeDomainSection({
   homeAttentionItems,
   homeJobCounts,
   homePrimaryCta,
+  dashboardRoutes,
   formatJobStatus,
   formatDate,
 }: HomeDomainSectionProps) {
@@ -57,7 +60,7 @@ export function HomeDomainSection({
             <Link href={homePrimaryCta.href} className="primary">
               {homePrimaryCta.label}
             </Link>
-            <Link href="/dashboard/jobs" className="primary primary--ghost">
+            <Link href={dashboardRoutes.jobs} className="primary primary--ghost">
               Ver todos os jobs
             </Link>
           </>
@@ -120,10 +123,10 @@ export function HomeDomainSection({
       <div className="result">
         <p className="item-title">Atalhos rápidos</p>
         <nav className="dashboard-nav" aria-label="Atalhos operacionais">
-          <Link href="/dashboard/jobs">Jobs</Link>
-          <Link href="/dashboard/reviews">Reviews</Link>
-          <Link href="/dashboard/workers">Profissionais</Link>
-          <Link href="/dashboard/profile">Perfil</Link>
+          <Link href={dashboardRoutes.jobs}>Jobs</Link>
+          <Link href={dashboardRoutes.reviews}>Reviews</Link>
+          <Link href={dashboardRoutes.workers}>Profissionais</Link>
+          <Link href={dashboardRoutes.profile}>Perfil</Link>
         </nav>
       </div>
     </section>

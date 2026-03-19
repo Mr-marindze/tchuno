@@ -13,7 +13,10 @@ import {
 } from '../authorization.constants';
 import { AuthorizationService } from '../authorization.service';
 import { AppRole, Permission } from '../authorization.types';
+import { ReauthRequirement } from '../decorators/require-reauth.decorator';
+import { ReauthService } from '../reauth.service';
 import { SecurityAuditService } from '../security-audit.service';
+import { AdminSubrole } from '@prisma/client';
 
 type RequestWithUser = {
   method: string;
@@ -23,8 +26,11 @@ type RequestWithUser = {
     sub?: string;
     user?: {
       role?: 'USER' | 'ADMIN';
+      adminSubrole?: AdminSubrole | null;
     };
   };
+  headers?: Record<string, string | string[] | undefined>;
+  ip?: string;
   authz?: {
     role: AppRole;
     permissions: Permission[];
@@ -37,6 +43,7 @@ export class AccessPolicyGuard implements CanActivate {
   constructor(
     private readonly reflector: Reflector,
     private readonly authorizationService: AuthorizationService,
+    private readonly reauthService: ReauthService,
     private readonly securityAuditService: SecurityAuditService,
   ) {}
 
@@ -51,11 +58,16 @@ export class AccessPolicyGuard implements CanActivate {
         context.getHandler(),
         context.getClass(),
       ]) ?? [];
-    const reauthRequired =
-      this.reflector.getAllAndOverride<boolean>(REQUIRE_REAUTH_KEY, [
+    const reauthRequirement =
+      this.reflector.getAllAndOverride<ReauthRequirement>(REQUIRE_REAUTH_KEY, [
         context.getHandler(),
         context.getClass(),
       ]) ?? false;
+    const reauthRequired = Boolean(reauthRequirement);
+    const reauthPurpose =
+      typeof reauthRequirement === 'object' && reauthRequirement !== null
+        ? (reauthRequirement.purpose ?? null)
+        : null;
 
     if (requiredRoles.length === 0 && requiredPermissions.length === 0) {
       return true;
@@ -65,13 +77,16 @@ export class AccessPolicyGuard implements CanActivate {
     const userId = request.user?.sub ?? null;
 
     if (!userId) {
-      this.securityAuditService.logForbiddenAccess({
+      void this.securityAuditService.logForbiddenAccess({
         userId: null,
         role: 'guest',
         method: request.method,
         path: request.originalUrl ?? request.path,
         requiredRoles,
         requiredPermissions,
+        ipAddress: request.ip ?? null,
+        userAgent: this.extractUserAgent(request),
+        reason: 'unauthenticated',
       });
       throw new UnauthorizedException('Autenticação necessária');
     }
@@ -79,6 +94,7 @@ export class AccessPolicyGuard implements CanActivate {
     const contextAccess = await this.authorizationService.resolveAccessContext({
       userId,
       platformRole: request.user?.user?.role ?? null,
+      adminSubrole: request.user?.user?.adminSubrole ?? null,
     });
 
     request.authz = {
@@ -97,18 +113,72 @@ export class AccessPolicyGuard implements CanActivate {
     );
 
     if (hasRole && hasPermissions) {
+      if (!reauthRequired) {
+        return true;
+      }
+
+      const reauthToken = this.extractReauthToken(request);
+      const challengeResult = await this.reauthService.consumeChallenge({
+        userId,
+        token: reauthToken ?? '',
+        method: request.method,
+        path: request.originalUrl ?? request.path,
+        role: contextAccess.role,
+        purpose: reauthPurpose,
+        ipAddress: request.ip ?? null,
+        userAgent: this.extractUserAgent(request),
+      });
+
+      if (!challengeResult.ok) {
+        throw new ForbiddenException({
+          message: 'Reautenticação necessária para concluir esta ação.',
+          code: 'REAUTH_REQUIRED',
+          reauthRequired: true,
+          reason: challengeResult.reason ?? 'invalid_or_expired',
+        });
+      }
+
       return true;
     }
 
-    this.securityAuditService.logForbiddenAccess({
+    void this.securityAuditService.logForbiddenAccess({
       userId,
       role: contextAccess.role,
       method: request.method,
       path: request.originalUrl ?? request.path,
       requiredRoles,
       requiredPermissions,
+      ipAddress: request.ip ?? null,
+      userAgent: this.extractUserAgent(request),
+      reason: 'insufficient_permissions',
     });
 
     throw new ForbiddenException('Permissão insuficiente para esta operação');
+  }
+
+  private extractReauthToken(request: RequestWithUser): string | null {
+    const headerValue = request.headers?.['x-reauth-token'];
+    if (!headerValue) {
+      return null;
+    }
+
+    if (Array.isArray(headerValue)) {
+      return headerValue[0] ?? null;
+    }
+
+    return headerValue;
+  }
+
+  private extractUserAgent(request: RequestWithUser): string | null {
+    const headerValue = request.headers?.['user-agent'];
+    if (!headerValue) {
+      return null;
+    }
+
+    if (Array.isArray(headerValue)) {
+      return headerValue[0] ?? null;
+    }
+
+    return headerValue;
   }
 }

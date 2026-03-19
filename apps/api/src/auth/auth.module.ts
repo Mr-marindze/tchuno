@@ -9,6 +9,7 @@ import { AuthService } from './auth.service';
 import { AccessPolicyGuard } from './guards/access-policy.guard';
 import { JwtAuthGuard } from './guards/jwt-auth.guard';
 import { AdminActionAuditInterceptor } from './interceptors/admin-action-audit.interceptor';
+import { ReauthService } from './reauth.service';
 import { SecurityAuditService } from './security-audit.service';
 import { JwtStrategy } from './strategies/jwt.strategy';
 
@@ -29,6 +30,7 @@ import { JwtStrategy } from './strategies/jwt.strategy';
     JwtStrategy,
     JwtAuthGuard,
     AuthorizationService,
+    ReauthService,
     AccessPolicyGuard,
     SecurityAuditService,
     AdminActionAuditInterceptor,
@@ -36,6 +38,7 @@ import { JwtStrategy } from './strategies/jwt.strategy';
   exports: [
     AuthService,
     AuthorizationService,
+    ReauthService,
     AccessPolicyGuard,
     SecurityAuditService,
     AdminActionAuditInterceptor,

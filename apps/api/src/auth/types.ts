@@ -4,6 +4,7 @@ export type AuthResponse = {
     email: string;
     name: string | null;
     role: 'USER' | 'ADMIN';
+    adminSubrole?: 'SUPPORT_ADMIN' | 'OPS_ADMIN' | 'SUPER_ADMIN' | null;
   };
   accessToken: string;
   refreshToken: string;

@@ -54,10 +54,10 @@ export type WorkerComparisonItem = {
 
 export function getWorkerPriceLabel(hourlyRate: number | null): string {
   if (typeof hourlyRate !== "number") {
-    return "Sob cotação";
+    return "Valor negociado com o profissional";
   }
 
-  return `${hourlyRate.toLocaleString("pt-MZ")} MZN/h`;
+  return `Referência ${hourlyRate.toLocaleString("pt-MZ")} MZN/h (negociável)`;
 }
 
 export function getWorkerMainCategoryLabel(worker: WorkerProfile): string {
@@ -299,27 +299,27 @@ export function getWorkerCtaCopy(input: WorkerCtaInput): WorkerCtaCopy {
 
   if (!input.isAvailable) {
     return {
-      primaryLabel: "Pedir disponibilidade",
-      secondaryLabel: "Ver fluxo de contratação",
+      primaryLabel: "Ver perfil",
+      secondaryLabel: "Pedir serviço",
       helperText:
-        "Sem compromisso: envia o pedido e confirma agenda antes de avançar.",
+        "A agenda pode estar limitada. Vê o perfil e envia um pedido para combinar disponibilidade.",
     };
   }
 
   if (!input.hasHourlyRate) {
     return {
-      primaryLabel: "Pedir orçamento",
-      secondaryLabel: "Ver fluxo de contratação",
+      primaryLabel: "Pedir serviço",
+      secondaryLabel: "Ver perfil",
       helperText:
-        "Partilha o serviço e recebe proposta antes de aceitar o job.",
+        "Partilha o que precisas e negocia o valor diretamente na plataforma.",
     };
   }
 
   return {
     primaryLabel: "Pedir serviço",
-    secondaryLabel: "Pedir orçamento",
+    secondaryLabel: "Ver perfil",
     helperText:
-      "Confirma em poucos passos e acompanha o progresso no dashboard.",
+      "O valor final é combinado entre cliente e profissional dentro do Tchuno.",
   };
 }
 
@@ -401,7 +401,7 @@ export function getWorkerDecisionBadges(
   }
 
   if ((input.priceRank ?? 0) === 1 && typeof input.hourlyRate === "number") {
-    badges.push({ label: "Preço competitivo", tone: "is-ok" });
+    badges.push({ label: "Preço de referência", tone: "is-ok" });
   }
 
   if (
@@ -463,7 +463,7 @@ export function getWorkerComparisonItems(
       tone: ratingTone,
     },
     {
-      label: "Preço",
+      label: "Preço ref.",
       value: priceValue,
       tone: priceTone,
     },

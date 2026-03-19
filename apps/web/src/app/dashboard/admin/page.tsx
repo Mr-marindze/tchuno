@@ -1,10 +1,5 @@
-import { RouteGuard } from "@/components/access/route-guard";
-import { AdminDashboardView } from "@/components/dashboard/views/admin-dashboard-view";
+import { LegacyDashboardRedirect } from "@/components/access/legacy-dashboard-redirect";
 
 export default function DashboardAdminPage() {
-  return (
-    <RouteGuard requiredAccess="admin">
-      <AdminDashboardView />
-    </RouteGuard>
-  );
+  return <LegacyDashboardRedirect target="admin" />;
 }

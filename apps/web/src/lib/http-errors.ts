@@ -1,6 +1,9 @@
 type ApiErrorBody = {
   message?: string | string[];
   error?: string;
+  code?: string;
+  reauthRequired?: boolean;
+  reason?: string;
 };
 
 const humanMessages: Record<string, string> = {
@@ -211,11 +214,45 @@ export function humanizeUnknownError(
   return fallback;
 }
 
-export async function readApiError(response: Response): Promise<string> {
+export class ReauthRequiredError extends Error {
+  readonly code = "REAUTH_REQUIRED";
+  readonly reauthRequired = true;
+  readonly reason: string | null;
+
+  constructor(message: string, reason?: string | null) {
+    super(message);
+    this.name = "ReauthRequiredError";
+    this.reason = reason ?? null;
+  }
+}
+
+export type ParsedApiError = {
+  message: string;
+  code: string | null;
+  reauthRequired: boolean;
+  reason: string | null;
+};
+
+export function toApiError(parsed: ParsedApiError): Error {
+  if (parsed.reauthRequired || parsed.code === "REAUTH_REQUIRED") {
+    return new ReauthRequiredError(parsed.message, parsed.reason);
+  }
+
+  return new Error(parsed.message);
+}
+
+export async function parseApiError(response: Response): Promise<ParsedApiError> {
   let detail = `Erro (${response.status}).`;
+  let code: string | null = null;
+  let reauthRequired = false;
+  let reason: string | null = null;
 
   try {
     const body = (await response.json()) as ApiErrorBody;
+    code = typeof body.code === "string" ? body.code : null;
+    reauthRequired = body.reauthRequired === true;
+    reason = typeof body.reason === "string" ? body.reason : null;
+
     const message = Array.isArray(body.message)
       ? body.message
           .map((item) => humanizeMessage(item))
@@ -228,7 +265,12 @@ export async function readApiError(response: Response): Promise<string> {
           : undefined;
 
     if (message && message.trim().length > 0) {
-      return humanizeMessage(message);
+      return {
+        message: humanizeMessage(message),
+        code,
+        reauthRequired,
+        reason,
+      };
     }
   } catch {
     // Keep fallback if API does not return JSON.
@@ -250,5 +292,15 @@ export async function readApiError(response: Response): Promise<string> {
     detail = "Erro interno do servidor. Tenta novamente em instantes.";
   }
 
-  return detail;
+  return {
+    message: detail,
+    code,
+    reauthRequired,
+    reason,
+  };
+}
+
+export async function readApiError(response: Response): Promise<string> {
+  const parsed = await parseApiError(response);
+  return parsed.message;
 }

@@ -33,11 +33,15 @@ import { ErrorResponseDto } from './dto/error-response.dto';
 import { ListSessionsQueryDto } from './dto/list-sessions-query.dto';
 import { LoginDto } from './dto/login.dto';
 import { RefreshTokenDto } from './dto/refresh-token.dto';
+import { ConfirmReauthDto } from './dto/confirm-reauth.dto';
+import { ReauthResponseDto } from './dto/reauth-response.dto';
 import { RegisterDto } from './dto/register.dto';
 import { SessionListResponseDto } from './dto/session-list-response.dto';
 import { AuthorizationService } from './authorization.service';
 import { JwtAuthGuard } from './guards/jwt-auth.guard';
+import { ReauthService } from './reauth.service';
 import { SessionClientInfo } from './types';
+import { AdminSubrole } from '@prisma/client';
 
 type AuthenticatedRequest = {
   user: {
@@ -45,6 +49,7 @@ type AuthenticatedRequest = {
     email: string;
     user?: {
       role?: 'USER' | 'ADMIN';
+      adminSubrole?: AdminSubrole | null;
     };
   };
 };
@@ -55,6 +60,7 @@ export class AuthController {
   constructor(
     private readonly authService: AuthService,
     private readonly authorizationService: AuthorizationService,
+    private readonly reauthService: ReauthService,
   ) {}
 
   @Post('register')
@@ -94,6 +100,31 @@ export class AuthController {
       dto.refreshToken,
       this.extractClientInfo(req),
     );
+  }
+
+  @UseGuards(JwtAuthGuard)
+  @ApiBearerAuth()
+  @Post('reauth/confirm')
+  @HttpCode(HttpStatus.OK)
+  @Throttle({ default: { limit: 20, ttl: 60_000 } })
+  @ApiOperation({
+    summary:
+      'Reauthenticate current session by confirming password for critical actions',
+  })
+  @ApiBody({ type: ConfirmReauthDto })
+  @ApiOkResponse({ type: ReauthResponseDto })
+  @ApiUnauthorizedResponse({ type: ErrorResponseDto })
+  @ApiTooManyRequestsResponse({ type: ErrorResponseDto })
+  confirmReauth(
+    @Req() req: Request & AuthenticatedRequest,
+    @Body() dto: ConfirmReauthDto,
+  ) {
+    return this.reauthService.confirmByPassword({
+      userId: req.user.sub,
+      password: dto.password,
+      purpose: dto.purpose,
+      clientInfo: this.extractClientInfo(req),
+    });
   }
 
   @Post('logout')
@@ -180,6 +211,7 @@ export class AuthController {
     const access = await this.authorizationService.resolveAccessContext({
       userId: req.user.sub,
       platformRole: req.user.user?.role ?? null,
+      adminSubrole: req.user.user?.adminSubrole ?? null,
     });
 
     return {

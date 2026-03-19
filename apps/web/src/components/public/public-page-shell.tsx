@@ -25,7 +25,7 @@ export function PublicPageShell({
           <Link href="/">Início</Link>
           <Link href="/como-funciona">Como funciona</Link>
           <Link href="/categorias">Categorias</Link>
-          <Link href="/prestadores">Prestadores</Link>
+          <Link href="/prestadores">Profissionais</Link>
           <Link href="/faq">FAQ</Link>
           <Link href="/sobre">Sobre</Link>
           <Link href="/contacto">Contacto</Link>

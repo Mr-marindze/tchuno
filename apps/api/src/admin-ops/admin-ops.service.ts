@@ -1,5 +1,17 @@
-import { Injectable } from '@nestjs/common';
-import { JobPricingMode, JobStatus, Prisma } from '@prisma/client';
+import {
+  BadRequestException,
+  Injectable,
+  NotFoundException,
+} from '@nestjs/common';
+import {
+  AdminSubrole,
+  JobPricingMode,
+  JobStatus,
+  Prisma,
+  UserRole,
+} from '@prisma/client';
+import { SecurityAuditService } from '../auth/security-audit.service';
+import { AppRole } from '../auth/authorization.types';
 import { PrismaService } from '../prisma/prisma.service';
 
 const RECENT_JOBS_LIMIT = 8;
@@ -45,7 +57,10 @@ const pricingModeOrder: JobPricingMode[] = ['FIXED_PRICE', 'QUOTE_REQUEST'];
 
 @Injectable()
 export class AdminOpsService {
-  constructor(private readonly prisma: PrismaService) {}
+  constructor(
+    private readonly prisma: PrismaService,
+    private readonly securityAuditService: SecurityAuditService,
+  ) {}
 
   async getOverview() {
     const [
@@ -198,6 +213,368 @@ export class AdminOpsService {
     };
   }
 
+  listAuditLogs(input?: {
+    page?: number;
+    limit?: number;
+    action?: string;
+    status?: 'SUCCESS' | 'DENIED' | 'FAILED';
+    actorUserId?: string;
+  }) {
+    return this.securityAuditService.listAuditLogs(input);
+  }
+
+  async updateUserRole(input: {
+    targetUserId: string;
+    role: UserRole;
+    adminSubrole?: AdminSubrole | null;
+    actor: {
+      userId: string;
+      role: AppRole;
+      method: string;
+      path: string;
+      ipAddress?: string | null;
+      userAgent?: string | null;
+    };
+  }) {
+    const targetUser = await this.prisma.user.findUnique({
+      where: { id: input.targetUserId },
+      select: {
+        id: true,
+        email: true,
+        name: true,
+        role: true,
+        adminSubrole: true,
+        isActive: true,
+        updatedAt: true,
+      },
+    });
+
+    if (!targetUser) {
+      throw new NotFoundException('Utilizador não encontrado.');
+    }
+
+    if (targetUser.id === input.actor.userId && input.role !== 'ADMIN') {
+      throw new BadRequestException(
+        'Não podes remover o teu próprio acesso admin nesta operação.',
+      );
+    }
+
+    const nextAdminSubrole =
+      input.role === 'ADMIN' ? (input.adminSubrole ?? null) : null;
+    const previousRoleLabel = this.formatRoleLabel(
+      targetUser.role,
+      targetUser.adminSubrole,
+    );
+    const nextRoleLabel = this.formatRoleLabel(input.role, nextAdminSubrole);
+
+    const updatedUser = await this.prisma.user.update({
+      where: { id: targetUser.id },
+      data: {
+        role: input.role,
+        adminSubrole: nextAdminSubrole,
+      },
+      select: {
+        id: true,
+        email: true,
+        name: true,
+        role: true,
+        adminSubrole: true,
+        isActive: true,
+        updatedAt: true,
+      },
+    });
+
+    if (
+      targetUser.role !== updatedUser.role ||
+      targetUser.adminSubrole !== updatedUser.adminSubrole
+    ) {
+      await this.prisma.session.updateMany({
+        where: {
+          userId: updatedUser.id,
+          revokedAt: null,
+        },
+        data: {
+          revokedAt: new Date(),
+        },
+      });
+    }
+
+    await this.securityAuditService.logRoleChange({
+      actorUserId: input.actor.userId,
+      actorRole: input.actor.role,
+      targetUserId: updatedUser.id,
+      previousRole: previousRoleLabel,
+      nextRole: nextRoleLabel,
+      method: input.actor.method,
+      path: input.actor.path,
+      ipAddress: input.actor.ipAddress ?? null,
+      userAgent: input.actor.userAgent ?? null,
+    });
+
+    return updatedUser;
+  }
+
+  async updateUserStatus(input: {
+    targetUserId: string;
+    isActive: boolean;
+    actor: {
+      userId: string;
+      role: AppRole;
+      method: string;
+      path: string;
+      ipAddress?: string | null;
+      userAgent?: string | null;
+    };
+  }) {
+    const targetUser = await this.prisma.user.findUnique({
+      where: { id: input.targetUserId },
+      select: {
+        id: true,
+        email: true,
+        name: true,
+        role: true,
+        adminSubrole: true,
+        isActive: true,
+        updatedAt: true,
+      },
+    });
+
+    if (!targetUser) {
+      throw new NotFoundException('Utilizador não encontrado.');
+    }
+
+    if (targetUser.id === input.actor.userId && input.isActive === false) {
+      throw new BadRequestException(
+        'Não podes suspender a tua própria conta nesta operação.',
+      );
+    }
+
+    const updatedUser = await this.prisma.user.update({
+      where: { id: targetUser.id },
+      data: {
+        isActive: input.isActive,
+      },
+      select: {
+        id: true,
+        email: true,
+        name: true,
+        role: true,
+        adminSubrole: true,
+        isActive: true,
+        updatedAt: true,
+      },
+    });
+
+    if (!updatedUser.isActive) {
+      await this.prisma.session.updateMany({
+        where: {
+          userId: updatedUser.id,
+          revokedAt: null,
+        },
+        data: {
+          revokedAt: new Date(),
+        },
+      });
+    }
+
+    await this.securityAuditService.logUserStatusChange({
+      actorUserId: input.actor.userId,
+      actorRole: input.actor.role,
+      targetUserId: updatedUser.id,
+      isActive: updatedUser.isActive,
+      method: input.actor.method,
+      path: input.actor.path,
+      ipAddress: input.actor.ipAddress ?? null,
+      userAgent: input.actor.userAgent ?? null,
+    });
+
+    return updatedUser;
+  }
+
+  async deleteUser(input: {
+    targetUserId: string;
+    actor: {
+      userId: string;
+      role: AppRole;
+      method: string;
+      path: string;
+      ipAddress?: string | null;
+      userAgent?: string | null;
+    };
+  }) {
+    if (input.targetUserId === input.actor.userId) {
+      throw new BadRequestException(
+        'Não podes apagar a tua própria conta administrativa.',
+      );
+    }
+
+    const existing = await this.prisma.user.findUnique({
+      where: { id: input.targetUserId },
+      select: { id: true },
+    });
+
+    if (!existing) {
+      throw new NotFoundException('Utilizador não encontrado.');
+    }
+
+    await this.prisma.user.delete({
+      where: { id: existing.id },
+    });
+
+    await this.securityAuditService.logUserDeletion({
+      actorUserId: input.actor.userId,
+      actorRole: input.actor.role,
+      targetUserId: existing.id,
+      method: input.actor.method,
+      path: input.actor.path,
+      ipAddress: input.actor.ipAddress ?? null,
+      userAgent: input.actor.userAgent ?? null,
+    });
+
+    return {
+      id: existing.id,
+      deleted: true,
+    };
+  }
+
+  async upsertPlatformSetting(input: {
+    key: string;
+    value: Record<string, unknown>;
+    actor: {
+      userId: string;
+      role: AppRole;
+      method: string;
+      path: string;
+      ipAddress?: string | null;
+      userAgent?: string | null;
+    };
+  }) {
+    const settingKey = this.normalizeSettingKey(input.key);
+
+    const setting = await this.prisma.platformSetting.upsert({
+      where: { key: settingKey },
+      update: {
+        value: input.value as Prisma.InputJsonValue,
+        updatedByUserId: input.actor.userId,
+      },
+      create: {
+        key: settingKey,
+        value: input.value as Prisma.InputJsonValue,
+        updatedByUserId: input.actor.userId,
+      },
+      select: {
+        key: true,
+        value: true,
+        updatedByUserId: true,
+        updatedAt: true,
+      },
+    });
+
+    await this.securityAuditService.logSettingChange({
+      actorUserId: input.actor.userId,
+      actorRole: input.actor.role,
+      settingKey: setting.key,
+      method: input.actor.method,
+      path: input.actor.path,
+      ipAddress: input.actor.ipAddress ?? null,
+      userAgent: input.actor.userAgent ?? null,
+    });
+
+    return setting;
+  }
+
+  async exportUsersSnapshot(input: {
+    actor: {
+      userId: string;
+      role: AppRole;
+      method: string;
+      path: string;
+      ipAddress?: string | null;
+      userAgent?: string | null;
+    };
+  }) {
+    const [
+      userRoleCount,
+      adminRoleCount,
+      noneAdminSubroleCount,
+      supportAdminCount,
+      opsAdminCount,
+      superAdminCount,
+      activeUsers,
+      inactiveUsers,
+    ] = await this.prisma.$transaction([
+      this.prisma.user.count({
+        where: { role: 'USER' },
+      }),
+      this.prisma.user.count({
+        where: { role: 'ADMIN' },
+      }),
+      this.prisma.user.count({
+        where: {
+          role: 'ADMIN',
+          adminSubrole: null,
+        },
+      }),
+      this.prisma.user.count({
+        where: {
+          role: 'ADMIN',
+          adminSubrole: 'SUPPORT_ADMIN',
+        },
+      }),
+      this.prisma.user.count({
+        where: {
+          role: 'ADMIN',
+          adminSubrole: 'OPS_ADMIN',
+        },
+      }),
+      this.prisma.user.count({
+        where: {
+          role: 'ADMIN',
+          adminSubrole: 'SUPER_ADMIN',
+        },
+      }),
+      this.prisma.user.count({
+        where: { isActive: true },
+      }),
+      this.prisma.user.count({
+        where: { isActive: false },
+      }),
+    ]);
+
+    const totalsByRole: Record<UserRole, number> = {
+      USER: userRoleCount,
+      ADMIN: adminRoleCount,
+    };
+
+    const totalsByAdminSubrole: Record<AdminSubrole | 'none', number> = {
+      none: noneAdminSubroleCount,
+      SUPPORT_ADMIN: supportAdminCount,
+      OPS_ADMIN: opsAdminCount,
+      SUPER_ADMIN: superAdminCount,
+    };
+
+    const totalRecords = totalsByRole.USER + totalsByRole.ADMIN;
+
+    await this.securityAuditService.logSensitiveExport({
+      actorUserId: input.actor.userId,
+      actorRole: input.actor.role,
+      exportName: 'users_snapshot',
+      method: input.actor.method,
+      path: input.actor.path,
+      ipAddress: input.actor.ipAddress ?? null,
+      userAgent: input.actor.userAgent ?? null,
+      records: totalRecords,
+    });
+
+    return {
+      totalsByRole,
+      totalsByAdminSubrole,
+      activeUsers,
+      inactiveUsers,
+      exportedAt: new Date().toISOString(),
+    };
+  }
+
   private buildStatusSummary(
     rows: Array<{
       status: JobStatus;
@@ -286,5 +663,40 @@ export class AdminOpsService {
       completedAt: item.completedAt,
       canceledAt: item.canceledAt,
     };
+  }
+
+  private normalizeSettingKey(value: string): string {
+    const normalized = value.trim().toLowerCase();
+
+    if (!/^[a-z0-9]+(?:[._-][a-z0-9]+)*$/.test(normalized)) {
+      throw new BadRequestException(
+        'Chave de configuração inválida. Usa letras minúsculas, números, ".", "_" ou "-".',
+      );
+    }
+
+    return normalized.slice(0, 80);
+  }
+
+  private formatRoleLabel(
+    role: UserRole,
+    adminSubrole: AdminSubrole | null,
+  ): string {
+    if (role !== 'ADMIN') {
+      return 'customer';
+    }
+
+    if (adminSubrole === 'SUPPORT_ADMIN') {
+      return 'support_admin';
+    }
+
+    if (adminSubrole === 'OPS_ADMIN') {
+      return 'ops_admin';
+    }
+
+    if (adminSubrole === 'SUPER_ADMIN') {
+      return 'super_admin';
+    }
+
+    return 'admin';
   }
 }

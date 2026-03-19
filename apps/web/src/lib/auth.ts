@@ -6,9 +6,15 @@ export type AuthResponse = {
     email: string;
     name: string | null;
     role: "USER" | "ADMIN";
+    adminSubrole?: "SUPPORT_ADMIN" | "OPS_ADMIN" | "SUPER_ADMIN" | null;
   };
   accessToken: string;
   refreshToken: string;
+};
+
+export type ReauthResponse = {
+  reauthToken: string;
+  expiresAt: string;
 };
 
 export type SessionState = {
@@ -48,7 +54,7 @@ export type SessionListResponse = {
   meta: SessionListMeta;
 };
 
-const API_URL = process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:3001";
+export const API_URL = process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:3001";
 const ACCESS_TOKEN_KEY = "tchuno_access_token";
 const REFRESH_TOKEN_KEY = "tchuno_refresh_token";
 const DEVICE_ID_KEY = "tchuno_device_id";
@@ -155,6 +161,30 @@ export async function login(input: {
   password: string;
 }): Promise<AuthResponse> {
   return postJson<AuthResponse>("/auth/login", input);
+}
+
+export async function confirmReauth(input: {
+  accessToken: string;
+  password: string;
+  purpose?: string;
+}): Promise<ReauthResponse> {
+  const response = await fetch(`${API_URL}/auth/reauth/confirm`, {
+    method: "POST",
+    headers: {
+      Authorization: `Bearer ${input.accessToken}`,
+      "Content-Type": "application/json",
+    },
+    body: JSON.stringify({
+      password: input.password,
+      purpose: input.purpose,
+    }),
+  });
+
+  if (!response.ok) {
+    throw new Error(await readApiError(response));
+  }
+
+  return (await response.json()) as ReauthResponse;
 }
 
 export async function refresh(refreshToken: string): Promise<AuthResponse> {
@@ -289,5 +319,3 @@ export function startAutoRefresh(onSuccess?: (auth: AuthResponse) => void): () =
 
   return () => window.clearInterval(timer);
 }
-
-export { API_URL };

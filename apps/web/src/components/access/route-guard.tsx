@@ -84,7 +84,14 @@ export function RouteGuard({ requiredAccess, children }: RouteGuardProps) {
       let role = resolveAppRoleFromMe(session.me);
 
       if (!role && session.auth.user.role === "ADMIN") {
-        role = "admin";
+        role =
+          session.auth.user.adminSubrole === "SUPPORT_ADMIN"
+            ? "support_admin"
+            : session.auth.user.adminSubrole === "OPS_ADMIN"
+              ? "ops_admin"
+              : session.auth.user.adminSubrole === "SUPER_ADMIN"
+                ? "super_admin"
+                : "admin";
       }
 
       if (requiredAccess === "admin") {
