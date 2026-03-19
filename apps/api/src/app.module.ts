@@ -18,6 +18,7 @@ import { JobsModule } from './jobs/jobs.module';
 import { ObservabilityModule } from './observability/observability.module';
 import { PrismaModule } from './prisma/prisma.module';
 import { ReviewsModule } from './reviews/reviews.module';
+import { TrackingModule } from './tracking/tracking.module';
 import { WorkerProfileModule } from './worker-profile/worker-profile.module';
 
 @Module({
@@ -36,6 +37,7 @@ import { WorkerProfileModule } from './worker-profile/worker-profile.module';
     JobsModule,
     ObservabilityModule,
     ReviewsModule,
+    TrackingModule,
     WorkerProfileModule,
   ],
   controllers: [AppController],

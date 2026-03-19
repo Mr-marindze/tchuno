@@ -62,12 +62,18 @@ export class AdminOpsService {
       this.prisma.job.count(),
       this.prisma.job.groupBy({
         by: ['status'],
+        orderBy: {
+          status: 'asc',
+        },
         _count: {
           _all: true,
         },
       }),
       this.prisma.job.groupBy({
         by: ['pricingMode'],
+        orderBy: {
+          pricingMode: 'asc',
+        },
         _count: {
           _all: true,
         },
@@ -195,15 +201,18 @@ export class AdminOpsService {
   private buildStatusSummary(
     rows: Array<{
       status: JobStatus;
-      _count: {
-        _all: number;
-      };
+      _count?:
+        | {
+            _all?: number;
+          }
+        | true
+        | null;
     }>,
   ): StatusSummary {
     const summary = this.createStatusSummary();
 
     for (const row of rows) {
-      summary[row.status] = row._count._all;
+      summary[row.status] = this.readGroupCount(row._count);
     }
 
     return summary;
@@ -219,18 +228,37 @@ export class AdminOpsService {
   private buildPricingModeSummary(
     rows: Array<{
       pricingMode: JobPricingMode;
-      _count: {
-        _all: number;
-      };
+      _count?:
+        | {
+            _all?: number;
+          }
+        | true
+        | null;
     }>,
   ): PricingModeSummary {
     const summary = this.createPricingModeSummary();
 
     for (const row of rows) {
-      summary[row.pricingMode] = row._count._all;
+      summary[row.pricingMode] = this.readGroupCount(row._count);
     }
 
     return summary;
+  }
+
+  private readGroupCount(
+    count:
+      | {
+          _all?: number;
+        }
+      | true
+      | null
+      | undefined,
+  ): number {
+    if (count === true) {
+      return 0;
+    }
+
+    return count?._all ?? 0;
   }
 
   private createPricingModeSummary(): PricingModeSummary {

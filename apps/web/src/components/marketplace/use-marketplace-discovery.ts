@@ -5,8 +5,10 @@ import { shortenId } from "@/components/dashboard/dashboard-formatters";
 import { buildWorkerRankingContext } from "@/components/marketplace/marketplace-worker-presenter";
 import { listCategories } from "@/lib/categories";
 import { humanizeUnknownError } from "@/lib/http-errors";
+import { listSharedWorkerRanking } from "@/lib/shared-worker-ranking";
 import {
   getBehaviorAggregationVersion,
+  setSharedWorkerBehaviorSignals,
   subscribeBehaviorAggregation,
   trackEvent,
 } from "@/lib/tracking";
@@ -136,6 +138,43 @@ export function useMarketplaceDiscovery(): UseMarketplaceDiscoveryResult {
     return subscribeBehaviorAggregation(() => {
       setBehaviorAggregationVersion(getBehaviorAggregationVersion());
     });
+  }, []);
+
+  useEffect(() => {
+    let isActive = true;
+
+    async function bootstrapSharedRanking() {
+      try {
+        const response = await listSharedWorkerRanking({
+          page: 1,
+          limit: 100,
+          includeUnavailable: true,
+        });
+
+        if (!isActive) {
+          return;
+        }
+
+        setSharedWorkerBehaviorSignals(
+          response.data.map((item) => ({
+            workerProfileId: item.workerProfileId,
+            interactions: item.interactions,
+            clicks: item.clicks,
+            ctaClicks: item.ctaClicks,
+            conversions: item.conversions,
+            lastEventAt: item.lastEventAt,
+          })),
+        );
+      } catch {
+        // Keep local-only ranking when shared ranking is unavailable.
+      }
+    }
+
+    void bootstrapSharedRanking();
+
+    return () => {
+      isActive = false;
+    };
   }, []);
 
   const normalizedSearch = discoverySearch.trim().toLowerCase();

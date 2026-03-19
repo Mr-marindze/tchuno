@@ -117,6 +117,31 @@ model Review {
   @@index([reviewerId, createdAt])
 }
 
+model TrackingWorkerAggregate {
+  workerProfileId String   @id
+  interactions    Int      @default(0)
+  clicks          Int      @default(0)
+  ctaClicks       Int      @default(0)
+  conversions     Int      @default(0)
+  lastEventAt     DateTime?
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+
+  @@index([updatedAt])
+  @@index([conversions, ctaClicks, clicks])
+}
+
+model TrackingCategoryAggregate {
+  categorySlug String   @id
+  interactions Int      @default(0)
+  lastEventAt  DateTime?
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+
+  @@index([updatedAt])
+  @@index([interactions])
+}
+
 enum JobStatus {
   REQUESTED
   ACCEPTED

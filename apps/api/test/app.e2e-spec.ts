@@ -72,6 +72,23 @@ type PaginatedResponse<T> = {
   };
 };
 
+type TrackingWorkerRankingResponse = {
+  data: Array<{
+    workerProfileId: string;
+    score: number;
+    clicks: number;
+    ctaClicks: number;
+    conversions: number;
+    isAvailable: boolean;
+  }>;
+  meta: {
+    total: number;
+    page: number;
+    limit: number;
+    hasNext: boolean;
+  };
+};
+
 describe('Auth and Sessions (e2e)', () => {
   let app: INestApplication<App>;
   let prisma: PrismaClient;
@@ -360,6 +377,184 @@ describe('Auth and Sessions (e2e)', () => {
     expect(Array.isArray(overview.recentJobs)).toBe(true);
     expect(Array.isArray(overview.recentlyCanceledJobs)).toBe(true);
     expect(Array.isArray(overview.completedWithoutReviewJobs)).toBe(true);
+  });
+
+  it('ingests tracking events and exposes shared worker ranking', async () => {
+    const workerAEmail = `tracking_worker_a_${Date.now()}@tchuno.local`;
+    const workerBEmail = `tracking_worker_b_${Date.now()}@tchuno.local`;
+
+    const [workerAUser, workerBUser] = await Promise.all([
+      prisma.user.create({
+        data: {
+          email: workerAEmail,
+          name: 'Tracking Worker A',
+          passwordHash: 'e2e-placeholder-hash',
+          role: 'USER',
+          isActive: true,
+        },
+        select: {
+          id: true,
+        },
+      }),
+      prisma.user.create({
+        data: {
+          email: workerBEmail,
+          name: 'Tracking Worker B',
+          passwordHash: 'e2e-placeholder-hash',
+          role: 'USER',
+          isActive: true,
+        },
+        select: {
+          id: true,
+        },
+      }),
+    ]);
+
+    const [workerA, workerB] = await Promise.all([
+      prisma.workerProfile.create({
+        data: {
+          userId: workerAUser.id,
+          location: 'Maputo',
+          experienceYears: 6,
+          isAvailable: true,
+          ratingAvg: 4.8,
+          ratingCount: 12,
+        },
+        select: {
+          id: true,
+        },
+      }),
+      prisma.workerProfile.create({
+        data: {
+          userId: workerBUser.id,
+          location: 'Matola',
+          experienceYears: 3,
+          isAvailable: false,
+          ratingAvg: 4.5,
+          ratingCount: 5,
+        },
+        select: {
+          id: true,
+        },
+      }),
+    ]);
+
+    const baseTimestamp = new Date().toISOString();
+
+    await request(app.getHttpServer())
+      .post('/tracking/events')
+      .send({
+        sessionId: `sess_${Date.now()}`,
+        sentAt: baseTimestamp,
+        events: [
+          {
+            name: 'marketplace.worker.card.click',
+            timestamp: baseTimestamp,
+            metadata: {
+              workerId: workerA.id,
+              source: 'landing.worker_card',
+            },
+          },
+          {
+            name: 'marketplace.worker.card.click',
+            timestamp: baseTimestamp,
+            metadata: {
+              workerId: workerA.id,
+              source: 'landing.worker_card',
+            },
+          },
+          {
+            name: 'marketplace.cta.click',
+            timestamp: baseTimestamp,
+            metadata: {
+              workerId: workerA.id,
+              source: 'landing.worker_card',
+            },
+          },
+          {
+            name: 'job.create.submit',
+            timestamp: baseTimestamp,
+            metadata: {
+              workerProfileId: workerA.id,
+              source: 'dashboard.jobs.create',
+            },
+          },
+          {
+            name: 'marketplace.worker.card.click',
+            timestamp: baseTimestamp,
+            metadata: {
+              workerId: workerB.id,
+              source: 'landing.worker_card',
+            },
+          },
+          {
+            name: 'marketplace.category.select',
+            timestamp: baseTimestamp,
+            metadata: {
+              categorySlug: 'canalizacao',
+              source: 'landing.discovery',
+            },
+          },
+        ],
+      })
+      .expect(201);
+
+    let rankedWithUnavailable: TrackingWorkerRankingResponse | null = null;
+
+    for (let attempt = 0; attempt < 20; attempt += 1) {
+      const response = await request(app.getHttpServer())
+        .get(
+          '/tracking/ranking/workers?page=1&limit=20&includeUnavailable=true',
+        )
+        .expect(200);
+
+      const body = response.body as TrackingWorkerRankingResponse;
+      const hasWorkerA = body.data.some(
+        (item) => item.workerProfileId === workerA.id,
+      );
+
+      if (hasWorkerA) {
+        rankedWithUnavailable = body;
+        break;
+      }
+
+      await new Promise((resolve) => setTimeout(resolve, 25));
+    }
+
+    expect(rankedWithUnavailable).not.toBeNull();
+    if (!rankedWithUnavailable) {
+      throw new Error('Expected shared ranking to include worker A');
+    }
+
+    expect(rankedWithUnavailable.meta.page).toBe(1);
+    expect(rankedWithUnavailable.meta.limit).toBe(20);
+
+    const rankedWorkerA = rankedWithUnavailable.data.find(
+      (item) => item.workerProfileId === workerA.id,
+    );
+    const rankedWorkerB = rankedWithUnavailable.data.find(
+      (item) => item.workerProfileId === workerB.id,
+    );
+
+    expect(rankedWorkerA).toBeDefined();
+    expect(rankedWorkerB).toBeDefined();
+
+    if (!rankedWorkerA || !rankedWorkerB) {
+      throw new Error('Expected both worker profiles in shared ranking');
+    }
+
+    expect(rankedWorkerA.conversions).toBeGreaterThanOrEqual(1);
+    expect(rankedWorkerA.score).toBeGreaterThan(rankedWorkerB.score);
+
+    const availableOnlyResponse = await request(app.getHttpServer())
+      .get('/tracking/ranking/workers?page=1&limit=20')
+      .expect(200);
+
+    const availableOnly =
+      availableOnlyResponse.body as TrackingWorkerRankingResponse;
+    expect(
+      availableOnly.data.some((item) => item.workerProfileId === workerB.id),
+    ).toBe(false);
   });
 
   it('does not allow user A to revoke user B session', async () => {

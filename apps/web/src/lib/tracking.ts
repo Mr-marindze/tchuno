@@ -219,6 +219,23 @@ export type WorkerRelevanceScoreBreakdown = {
   reasons: string[];
 };
 
+export type SharedWorkerBehaviorSignalInput = {
+  workerProfileId: string;
+  interactions: number;
+  clicks: number;
+  ctaClicks: number;
+  conversions: number;
+  lastEventAt: string | null;
+};
+
+type SharedWorkerBehaviorSignal = {
+  interactions: number;
+  clicks: number;
+  ctaClicks: number;
+  conversions: number;
+  lastEventAtMs: number | null;
+};
+
 type JobFlowSessionState = {
   active: boolean;
   submitted: boolean;
@@ -239,6 +256,8 @@ const BEHAVIOR_AGGREGATION_STORAGE_KEY = "tchuno_behavior_aggregation_v1";
 const LEGACY_BEHAVIOR_AGGREGATION_STORAGE_VERSION = 1;
 const BEHAVIOR_AGGREGATION_STORAGE_VERSION = 2;
 const BEHAVIOR_AGGREGATION_TTL_MS = 1000 * 60 * 60 * 24 * 7;
+const TRACKING_API_URL =
+  process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:3001";
 
 type PersistedWorkerBehaviorAggregate = {
   interactions: number;
@@ -278,6 +297,7 @@ let sessionEventIndex = 0;
 let lifecycleHooksInitialized = false;
 let behaviorAggregationHydrated = false;
 let behaviorPersistenceScheduled = false;
+let trackingBackendForwardingWarned = false;
 
 const trackingSessionId = createTrackingSessionId();
 const trackingSessionStartedAt = nowIso();
@@ -292,6 +312,7 @@ const jobFlowSessionState: JobFlowSessionState = {
 };
 const workerBehaviorById: Record<string, WorkerBehaviorAggregate> = {};
 const categoryInteractionBySlug: Record<string, number> = {};
+const sharedWorkerBehaviorById: Record<string, SharedWorkerBehaviorSignal> = {};
 const behaviorAggregationListeners = new Set<() => void>();
 let behaviorAggregationVersion = 0;
 
@@ -309,6 +330,15 @@ const HISTORY_DECAY_MIN_MULTIPLIER = 0.1;
 const LOW_CONFIDENCE_INTERACTION_FLOOR = 3;
 const LOW_CONFIDENCE_GUARD_MULTIPLIER = 0.72;
 const VERY_LOW_CONFIDENCE_GUARD_MULTIPLIER = 0.52;
+const SHARED_SIGNAL_WEIGHT = 0.65;
+const FORWARDED_TRACKING_EVENTS = new Set<TrackingEventName>([
+  "marketplace.worker.card.click",
+  "dashboard.worker.card.click",
+  "marketplace.cta.click",
+  "dashboard.cta.click",
+  "marketplace.category.select",
+  "job.create.submit",
+]);
 
 function nowIso(): string {
   return new Date().toISOString();
@@ -431,6 +461,51 @@ function getTemporalDecayMultiplier(
   const halfLives = ageMs / HISTORY_DECAY_HALF_LIFE_MS;
   const decay = Math.pow(0.5, halfLives);
   return Math.max(HISTORY_DECAY_MIN_MULTIPLIER, Math.min(1, decay));
+}
+
+function normalizeSharedWorkerSignalItem(
+  item: SharedWorkerBehaviorSignalInput,
+): SharedWorkerBehaviorSignal | null {
+  const workerProfileId = item.workerProfileId?.trim();
+  if (!workerProfileId || workerProfileId.length > 64) {
+    return null;
+  }
+
+  const lastEventAtMs = parseTimestamp(item.lastEventAt);
+
+  return {
+    interactions: normalizeCounter(item.interactions),
+    clicks: normalizeCounter(item.clicks),
+    ctaClicks: normalizeCounter(item.ctaClicks),
+    conversions: normalizeCounter(item.conversions),
+    lastEventAtMs,
+  };
+}
+
+export function setSharedWorkerBehaviorSignals(
+  items: SharedWorkerBehaviorSignalInput[],
+) {
+  const nextSignals: Record<string, SharedWorkerBehaviorSignal> = {};
+
+  items.forEach((item) => {
+    const normalized = normalizeSharedWorkerSignalItem(item);
+    const workerProfileId = item.workerProfileId?.trim();
+    if (!normalized || !workerProfileId) {
+      return;
+    }
+
+    nextSignals[workerProfileId] = normalized;
+  });
+
+  Object.keys(sharedWorkerBehaviorById).forEach((key) => {
+    delete sharedWorkerBehaviorById[key];
+  });
+
+  Object.entries(nextSignals).forEach(([workerProfileId, signal]) => {
+    sharedWorkerBehaviorById[workerProfileId] = signal;
+  });
+
+  notifyBehaviorAggregationChanged();
 }
 
 function removePersistedBehaviorAggregation() {
@@ -904,6 +979,72 @@ function defaultTrackingTransport(events: AnyTrackingEvent[]): void {
   }
 
   browserWindow.__tchunoTrackingBuffer__.push(...events);
+  void forwardTrackingEventsToBackend(events);
+}
+
+function shouldForwardEvent(name: TrackingEventName): boolean {
+  return FORWARDED_TRACKING_EVENTS.has(name);
+}
+
+function pickForwardableMetadata(
+  event: AnyTrackingEvent,
+): Record<string, unknown> | undefined {
+  const metadata = event.metadata as Record<string, unknown>;
+  const picked: Record<string, unknown> = {};
+
+  if (typeof metadata.workerId === "string") {
+    picked.workerId = metadata.workerId;
+  }
+  if (typeof metadata.workerProfileId === "string") {
+    picked.workerProfileId = metadata.workerProfileId;
+  }
+  if (typeof metadata.categorySlug === "string") {
+    picked.categorySlug = metadata.categorySlug;
+  }
+  if (typeof metadata.source === "string") {
+    picked.source = metadata.source;
+  }
+
+  return Object.keys(picked).length > 0 ? picked : undefined;
+}
+
+async function forwardTrackingEventsToBackend(events: AnyTrackingEvent[]) {
+  const browserWindow = getBrowserWindow();
+  if (!browserWindow || typeof fetch !== "function") {
+    return;
+  }
+
+  const eventsToForward = events
+    .filter((event) => shouldForwardEvent(event.name))
+    .map((event) => ({
+      name: event.name,
+      timestamp: event.timestamp,
+      metadata: pickForwardableMetadata(event),
+    }));
+
+  if (eventsToForward.length === 0) {
+    return;
+  }
+
+  try {
+    await fetch(`${TRACKING_API_URL}/tracking/events`, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+      },
+      keepalive: true,
+      body: JSON.stringify({
+        sessionId: trackingSessionId,
+        sentAt: nowIso(),
+        events: eventsToForward,
+      }),
+    });
+  } catch (error) {
+    if (isDebugModeEnabled() && !trackingBackendForwardingWarned) {
+      trackingBackendForwardingWarned = true;
+      console.warn("[tchuno-track] backend forwarding unavailable", error);
+    }
+  }
 }
 
 function parseRating(rating: number | string): number {
@@ -955,6 +1096,10 @@ export function getWorkerRelevanceScore(input: {
   const temporalDecayMultiplier = getTemporalDecayMultiplier(
     behavior.historyLastUpdatedAt,
   );
+  const sharedBehavior = sharedWorkerBehaviorById[input.workerId] ?? null;
+  const sharedDecayMultiplier = getTemporalDecayMultiplier(
+    sharedBehavior?.lastEventAtMs ?? null,
+  );
 
   const eventsSinceInteraction = Math.max(
     0,
@@ -983,28 +1128,56 @@ export function getWorkerRelevanceScore(input: {
     behavior.historicalConversions *
     temporalDecayMultiplier *
     HISTORY_SIGNAL_WEIGHT;
+  const weightedSharedInteractions =
+    (sharedBehavior?.interactions ?? 0) *
+    sharedDecayMultiplier *
+    SHARED_SIGNAL_WEIGHT;
+  const weightedSharedClicks =
+    (sharedBehavior?.clicks ?? 0) *
+    sharedDecayMultiplier *
+    SHARED_SIGNAL_WEIGHT;
+  const weightedSharedCtaClicks =
+    (sharedBehavior?.ctaClicks ?? 0) *
+    sharedDecayMultiplier *
+    SHARED_SIGNAL_WEIGHT;
+  const weightedSharedConversions =
+    (sharedBehavior?.conversions ?? 0) *
+    sharedDecayMultiplier *
+    SHARED_SIGNAL_WEIGHT;
 
   const sessionInterestComponent =
     Math.min(24, weightedSessionClicks) *
     CLICK_WEIGHT *
     sessionRecencyMultiplier;
-  const historicalInterestComponent =
+  const localHistoricalInterestComponent =
     Math.min(24, weightedHistoricalClicks) * CLICK_WEIGHT;
+  const sharedInterestComponent =
+    Math.min(24, weightedSharedClicks) * CLICK_WEIGHT;
+  const historicalInterestComponent =
+    localHistoricalInterestComponent + sharedInterestComponent;
   const interestComponent = sessionInterestComponent + historicalInterestComponent;
 
   const sessionIntentionComponent =
     Math.min(18, weightedSessionCtaClicks) *
     CTA_CLICK_WEIGHT *
     sessionRecencyMultiplier;
-  const historicalIntentionComponent =
+  const localHistoricalIntentionComponent =
     Math.min(18, weightedHistoricalCtaClicks) * CTA_CLICK_WEIGHT;
+  const sharedIntentionComponent =
+    Math.min(18, weightedSharedCtaClicks) * CTA_CLICK_WEIGHT;
+  const historicalIntentionComponent =
+    localHistoricalIntentionComponent + sharedIntentionComponent;
   const intentionComponent =
     sessionIntentionComponent + historicalIntentionComponent;
 
   const sessionConversionComponent =
     Math.min(10, weightedSessionConversions) * CONVERSION_WEIGHT;
-  const historicalConversionComponent =
+  const localHistoricalConversionComponent =
     Math.min(10, weightedHistoricalConversions) * CONVERSION_WEIGHT;
+  const sharedConversionComponent =
+    Math.min(10, weightedSharedConversions) * CONVERSION_WEIGHT;
+  const historicalConversionComponent =
+    localHistoricalConversionComponent + sharedConversionComponent;
   const conversionComponent =
     sessionConversionComponent + historicalConversionComponent;
 
@@ -1022,9 +1195,12 @@ export function getWorkerRelevanceScore(input: {
     behavior.sessionInteractions * SESSION_SIGNAL_WEIGHT +
     behavior.historicalInteractions *
       temporalDecayMultiplier *
-      HISTORY_SIGNAL_WEIGHT;
+      HISTORY_SIGNAL_WEIGHT +
+    weightedSharedInteractions;
   const effectiveConversions =
-    weightedSessionConversions + weightedHistoricalConversions;
+    weightedSessionConversions +
+    weightedHistoricalConversions +
+    weightedSharedConversions;
 
   const evidenceScore = Math.min(20, ratingCount) + effectiveInteractions * 1.1 + effectiveConversions * 4;
   const baseStabilityMultiplier =
@@ -1061,8 +1237,12 @@ export function getWorkerRelevanceScore(input: {
   } else if (effectiveConversions > 0) {
     reasons.push("Conversão inicial");
   }
-  const effectiveClicks = weightedSessionClicks + weightedHistoricalClicks;
-  const effectiveCtaClicks = weightedSessionCtaClicks + weightedHistoricalCtaClicks;
+  const effectiveClicks =
+    weightedSessionClicks + weightedHistoricalClicks + weightedSharedClicks;
+  const effectiveCtaClicks =
+    weightedSessionCtaClicks +
+    weightedHistoricalCtaClicks +
+    weightedSharedCtaClicks;
   if (effectiveCtaClicks >= 3 || effectiveClicks >= 5) {
     reasons.push("Mais procurado");
   } else if (effectiveCtaClicks > 0 || effectiveClicks > 0) {
@@ -1076,10 +1256,16 @@ export function getWorkerRelevanceScore(input: {
   if (temporalDecayMultiplier < 0.85) {
     reasons.push("Histórico com decay temporal");
   }
+  if (sharedBehavior && sharedDecayMultiplier < 0.85) {
+    reasons.push("Sinal global com decay temporal");
+  }
   if (sessionBehaviorSignal >= historicalBehaviorSignal) {
     reasons.push("Sessão atual com maior peso");
   } else {
     reasons.push("Histórico ainda influencia ranking");
+  }
+  if (sharedBehavior && historicalBehaviorSignal > sessionBehaviorSignal) {
+    reasons.push("Ranking global reforça decisão");
   }
   if (confidenceGuardMultiplier < 1) {
     reasons.push("Amostra reduzida com proteção de confiança");
@@ -1111,8 +1297,38 @@ export function getWorkerRelevanceScore(input: {
 
 function getTopBehaviorWorkers(limit = 5) {
   const now = Date.now();
-  return Object.entries(workerBehaviorById)
-    .map(([workerId, stats]) => ({
+  const workerIds = new Set([
+    ...Object.keys(workerBehaviorById),
+    ...Object.keys(sharedWorkerBehaviorById),
+  ]);
+
+  return Array.from(workerIds)
+    .map((workerId) => {
+      const stats = workerBehaviorById[workerId] ?? {
+        interactions: 0,
+        clicks: 0,
+        ctaClicks: 0,
+        conversions: 0,
+        lastInteractionEventIndex: 0,
+        sessionInteractions: 0,
+        sessionClicks: 0,
+        sessionCtaClicks: 0,
+        sessionConversions: 0,
+        historicalInteractions: 0,
+        historicalClicks: 0,
+        historicalCtaClicks: 0,
+        historicalConversions: 0,
+        historyLastUpdatedAt: null,
+      };
+      const shared = sharedWorkerBehaviorById[workerId] ?? {
+        interactions: 0,
+        clicks: 0,
+        ctaClicks: 0,
+        conversions: 0,
+        lastEventAtMs: null,
+      };
+
+      return {
       workerId,
       totalClicks: stats.clicks,
       totalCtaClicks: stats.ctaClicks,
@@ -1123,23 +1339,33 @@ function getTopBehaviorWorkers(limit = 5) {
       historicalClicks: stats.historicalClicks,
       historicalCtaClicks: stats.historicalCtaClicks,
       historicalConversions: stats.historicalConversions,
+      sharedClicks: shared.clicks,
+      sharedCtaClicks: shared.ctaClicks,
+      sharedConversions: shared.conversions,
       temporalDecayMultiplier: getTemporalDecayMultiplier(
         stats.historyLastUpdatedAt,
         now,
       ),
-    }))
+      sharedDecayMultiplier: getTemporalDecayMultiplier(shared.lastEventAtMs, now),
+      };
+    })
     .map((item) => {
       const historicalDecayWeight =
         item.temporalDecayMultiplier * HISTORY_SIGNAL_WEIGHT;
+      const sharedDecayWeight =
+        item.sharedDecayMultiplier * SHARED_SIGNAL_WEIGHT;
       const weightedClicks =
         item.sessionClicks * SESSION_SIGNAL_WEIGHT +
-        item.historicalClicks * historicalDecayWeight;
+        item.historicalClicks * historicalDecayWeight +
+        item.sharedClicks * sharedDecayWeight;
       const weightedCtaClicks =
         item.sessionCtaClicks * SESSION_SIGNAL_WEIGHT +
-        item.historicalCtaClicks * historicalDecayWeight;
+        item.historicalCtaClicks * historicalDecayWeight +
+        item.sharedCtaClicks * sharedDecayWeight;
       const weightedConversions =
         item.sessionConversions * SESSION_SIGNAL_WEIGHT +
-        item.historicalConversions * historicalDecayWeight;
+        item.historicalConversions * historicalDecayWeight +
+        item.sharedConversions * sharedDecayWeight;
 
       return {
         ...item,
@@ -1148,6 +1374,7 @@ function getTopBehaviorWorkers(limit = 5) {
         weightedConversions: roundScore(weightedConversions),
         sessionSignalWeight: SESSION_SIGNAL_WEIGHT,
         historicalSignalWeight: HISTORY_SIGNAL_WEIGHT,
+        sharedSignalWeight: SHARED_SIGNAL_WEIGHT,
         behaviorScore: roundScore(
           weightedClicks * CLICK_WEIGHT +
             weightedCtaClicks * CTA_CLICK_WEIGHT +

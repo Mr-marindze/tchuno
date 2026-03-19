@@ -77,7 +77,8 @@ import { ToastTone, useToast } from "@/components/toast-provider";
 import { humanizeUnknownError } from "@/lib/http-errors";
 import { buildJobActionPlan } from "@/lib/job-cta";
 import { PaginationMeta } from "@/lib/pagination";
-import { trackEvent } from "@/lib/tracking";
+import { listSharedWorkerRanking } from "@/lib/shared-worker-ranking";
+import { setSharedWorkerBehaviorSignals, trackEvent } from "@/lib/tracking";
 
 type DashboardState = {
   me: unknown;
@@ -851,6 +852,43 @@ export function useDashboardRuntime({ view }: UseDashboardRuntimeArgs) {
       stopAutoRefresh();
     };
   }, [router]);
+
+  useEffect(() => {
+    let isActive = true;
+
+    async function bootstrapSharedRanking() {
+      try {
+        const response = await listSharedWorkerRanking({
+          page: 1,
+          limit: 150,
+          includeUnavailable: true,
+        });
+
+        if (!isActive) {
+          return;
+        }
+
+        setSharedWorkerBehaviorSignals(
+          response.data.map((item) => ({
+            workerProfileId: item.workerProfileId,
+            interactions: item.interactions,
+            clicks: item.clicks,
+            ctaClicks: item.ctaClicks,
+            conversions: item.conversions,
+            lastEventAt: item.lastEventAt,
+          })),
+        );
+      } catch {
+        // Keep local ranking as fallback if shared backend is unavailable.
+      }
+    }
+
+    void bootstrapSharedRanking();
+
+    return () => {
+      isActive = false;
+    };
+  }, []);
 
   useEffect(() => {
     if (!isAuthenticated || !shouldLoadCategories) {
