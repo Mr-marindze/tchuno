@@ -13,6 +13,7 @@ import { PrismaService } from '../prisma/prisma.service';
 import { ListSessionsQueryDto } from './dto/list-sessions-query.dto';
 import { LoginDto } from './dto/login.dto';
 import { RegisterDto } from './dto/register.dto';
+import { SecurityAuditService } from './security-audit.service';
 import { AuthResponse, SessionClientInfo } from './types';
 
 type RefreshTokenPayload = {
@@ -42,6 +43,7 @@ export class AuthService {
     private readonly prisma: PrismaService,
     private readonly jwtService: JwtService,
     private readonly metricsService: MetricsService,
+    private readonly securityAuditService: SecurityAuditService,
   ) {}
 
   async register(
@@ -115,6 +117,15 @@ export class AuthService {
       ip: clientInfo?.ip ?? null,
       deviceId: clientInfo?.deviceId ?? null,
     });
+
+    if (user.role === 'ADMIN') {
+      this.securityAuditService.logAdminLogin({
+        userId: user.id,
+        email: user.email,
+        ip: clientInfo?.ip ?? null,
+        deviceId: clientInfo?.deviceId ?? null,
+      });
+    }
 
     return this.issueTokens(user, clientInfo);
   }

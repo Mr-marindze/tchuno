@@ -1,6 +1,7 @@
 "use client";
 
 import Link from "next/link";
+import { useRouter } from "next/navigation";
 import { FormEvent, useEffect, useMemo, useRef, useState } from "react";
 import {
   AuthResponse,
@@ -34,12 +35,14 @@ import {
 import { ToastTone, useToast } from "@/components/toast-provider";
 import { humanizeUnknownError } from "@/lib/http-errors";
 import { trackEvent } from "@/lib/tracking";
+import { buildAuthRoute, saveAuthIntent } from "@/lib/access-control";
 import styles from "./page.module.css";
 
 type Mode = "login" | "register";
 
 export default function Home() {
   const { pushToast } = useToast();
+  const router = useRouter();
   const [mode, setMode] = useState<Mode>("login");
   const [email, setEmail] = useState("user1@tchuno.local");
   const [password, setPassword] = useState("abc12345");
@@ -211,13 +214,25 @@ export default function Home() {
     lastCtaSignatureRef.current = ctaSignature;
   }, [ctaSignature, workerHeuristicSnapshot]);
 
-  function focusAuth(targetMode: Mode = "login"): void {
-    setMode(targetMode);
-    if (typeof document !== "undefined") {
-      document
-        .getElementById("auth-panel")
-        ?.scrollIntoView({ behavior: "smooth", block: "start" });
-    }
+  function redirectToLoginWithIntent(input: {
+    nextPath: string;
+    selectedService?: string;
+    selectedProviderId?: string;
+    sourcePath?: string;
+  }): void {
+    saveAuthIntent({
+      nextPath: input.nextPath,
+      sourcePath: input.sourcePath ?? "/",
+      selectedService: input.selectedService,
+      selectedProviderId: input.selectedProviderId,
+    });
+
+    router.push(
+      buildAuthRoute({
+        mode: "login",
+        nextPath: input.nextPath,
+      }),
+    );
   }
 
   function setFeedback(nextMessage: string, tone: ToastTone = "info"): void {
@@ -526,7 +541,7 @@ export default function Home() {
             <button type="button" onClick={onResetDiscoveryFilters}>
               Limpar filtros
             </button>
-            <Link href="/dashboard/workers" className="primary primary--ghost">
+            <Link href="/prestadores" className="primary primary--ghost">
               Ver todos os profissionais
             </Link>
           </div>
@@ -591,7 +606,7 @@ export default function Home() {
                   </button>
                   {hasSession ? (
                     <Link
-                      href="/dashboard/workers"
+                      href="/prestadores"
                       className="primary primary--ghost"
                     >
                       Abrir catálogo completo
@@ -600,7 +615,14 @@ export default function Home() {
                     <button
                       type="button"
                       className="primary primary--ghost"
-                      onClick={() => focusAuth("login")}
+                      onClick={() =>
+                        redirectToLoginWithIntent({
+                          nextPath: "/app/pedidos",
+                          sourcePath: "/",
+                          selectedService:
+                            discoverySearch.trim() || discoveryCategory || undefined,
+                        })
+                      }
                     >
                       Entrar para continuar
                     </button>
@@ -731,7 +753,7 @@ export default function Home() {
                       <>
                         {hasSession ? (
                           <Link
-                            href="/dashboard/jobs#job-create"
+                            href="/app/pedidos#job-create"
                             className="primary"
                             onClick={() =>
                               trackEvent("marketplace.cta.click", {
@@ -765,14 +787,22 @@ export default function Home() {
                                   ? "fixed-price-or-quote"
                                   : "quote-first",
                               });
-                              focusAuth("login");
+                              redirectToLoginWithIntent({
+                                nextPath: "/app/pedidos#job-create",
+                                sourcePath: "/",
+                                selectedService:
+                                  discoverySearch.trim() ||
+                                  mainCategoryLabel ||
+                                  undefined,
+                                selectedProviderId: worker.id,
+                              });
                             }}
                           >
                             {guestPrimaryLabel}
                           </button>
                         )}
                         <Link
-                          href="/dashboard/workers"
+                          href={`/prestadores/${worker.userId}`}
                           className="primary primary--ghost"
                         >
                           Ver perfil
@@ -793,22 +823,46 @@ export default function Home() {
             fim.
           </p>
           <div className="actions actions--inline">
-            <Link
-              href="/dashboard"
-              className="primary"
-              onClick={() =>
-                trackEvent("marketplace.cta.click", {
-                  source: "landing.hero",
-                  view: "landing",
-                  label: "Entrar no Tchuno",
-                  ctaType: "primary",
-                  sessionState: hasSession ? "authenticated" : "guest",
-                })
-              }
-            >
-              Entrar no Tchuno
-            </Link>
-            <Link href="/dashboard/workers" className="primary primary--ghost">
+            {hasSession ? (
+              <Link
+                href="/app"
+                className="primary"
+                onClick={() =>
+                  trackEvent("marketplace.cta.click", {
+                    source: "landing.hero",
+                    view: "landing",
+                    label: "Entrar no Tchuno",
+                    ctaType: "primary",
+                    sessionState: "authenticated",
+                  })
+                }
+              >
+                Entrar no Tchuno
+              </Link>
+            ) : (
+              <button
+                type="button"
+                className="primary"
+                onClick={() => {
+                  trackEvent("marketplace.cta.click", {
+                    source: "landing.hero",
+                    view: "landing",
+                    label: "Entrar no Tchuno",
+                    ctaType: "primary",
+                    sessionState: "guest",
+                  });
+                  redirectToLoginWithIntent({
+                    nextPath: "/app",
+                    sourcePath: "/",
+                    selectedService:
+                      discoverySearch.trim() || discoveryCategory || undefined,
+                  });
+                }}
+              >
+                Entrar no Tchuno
+              </button>
+            )}
+            <Link href="/prestadores" className="primary primary--ghost">
               Ver profissionais
             </Link>
           </div>
@@ -913,8 +967,8 @@ export default function Home() {
 
           {hasSession ? (
             <p className="status">
-              <Link href="/dashboard" className="nav-link">
-                Ir para dashboard protegido
+              <Link href="/app" className="nav-link">
+                Ir para a área autenticada
               </Link>
             </p>
           ) : (

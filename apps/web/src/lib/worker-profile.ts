@@ -106,6 +106,18 @@ export async function getMyWorkerProfile(
   return (await response.json()) as WorkerProfile;
 }
 
+export async function getWorkerProfileByUserId(
+  userId: string,
+): Promise<WorkerProfile> {
+  const response = await fetch(`${API_URL}/worker-profile/${userId}`);
+
+  if (!response.ok) {
+    throw new Error(await readApiError(response));
+  }
+
+  return (await response.json()) as WorkerProfile;
+}
+
 export async function upsertMyWorkerProfile(
   accessToken: string,
   input: UpsertWorkerProfileInput,

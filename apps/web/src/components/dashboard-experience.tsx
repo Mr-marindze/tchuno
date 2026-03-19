@@ -1,6 +1,7 @@
 "use client";
 
 import Link from "next/link";
+import { usePathname } from "next/navigation";
 import { ReactNode } from "react";
 import {
   DashboardView,
@@ -38,6 +39,65 @@ export function DashboardExperience({
   onLogoutAll,
   children,
 }: DashboardExperienceProps) {
+  const pathname = usePathname();
+
+  const navScope = (() => {
+    if (pathname.startsWith("/app")) {
+      return "customer";
+    }
+
+    if (pathname.startsWith("/pro")) {
+      return "provider";
+    }
+
+    if (pathname.startsWith("/admin")) {
+      return "admin";
+    }
+
+    return "legacy";
+  })();
+
+  const navPaths =
+    navScope === "customer"
+      ? {
+          home: "/app",
+          jobs: "/app/pedidos",
+          workers: "/prestadores",
+          reviews: "/app/pedidos",
+          profile: "/app/perfil",
+          categories: "/categorias",
+          admin: "/admin",
+        }
+      : navScope === "provider"
+        ? {
+            home: "/pro/dashboard",
+            jobs: "/pro/pedidos",
+            workers: "/prestadores",
+            reviews: "/pro/avaliacoes",
+            profile: "/pro/perfil",
+            categories: "/categorias",
+            admin: "/admin",
+          }
+        : navScope === "admin"
+          ? {
+              home: "/admin",
+              jobs: "/admin/orders",
+              workers: "/admin/providers",
+              reviews: "/admin/reports",
+              profile: "/admin/users",
+              categories: "/admin/categories",
+              admin: "/admin",
+            }
+          : {
+              home: "/dashboard",
+              jobs: "/dashboard/jobs",
+              workers: "/dashboard/workers",
+              reviews: "/dashboard/reviews",
+              profile: "/dashboard/profile",
+              categories: "/dashboard/categories",
+              admin: "/dashboard/admin",
+            };
+
   const isHomeView = view === "home";
   const isJobsView = view === "jobs";
   const isWorkersView = view === "workers";
@@ -57,32 +117,32 @@ export function DashboardExperience({
 
         <div className="dashboard-shell-nav">
           <nav className="dashboard-nav" aria-label="Dashboard principal">
-            <Link href="/dashboard" className={isHomeView ? "active" : undefined}>
+            <Link href={navPaths.home} className={isHomeView ? "active" : undefined}>
               Início
             </Link>
-            <Link href="/dashboard/jobs" className={isJobsView ? "active" : undefined}>
+            <Link href={navPaths.jobs} className={isJobsView ? "active" : undefined}>
               Jobs
             </Link>
             <Link
-              href="/dashboard/workers"
+              href={navPaths.workers}
               className={isWorkersView ? "active" : undefined}
             >
               Profissionais
             </Link>
             <Link
-              href="/dashboard/reviews"
+              href={navPaths.reviews}
               className={isReviewsView ? "active" : undefined}
             >
               Reviews
             </Link>
             <Link
-              href="/dashboard/profile"
+              href={navPaths.profile}
               className={isProfileView ? "active" : undefined}
             >
               Perfil
             </Link>
             <Link
-              href="/dashboard/categories"
+              href={navPaths.categories}
               className={isCategoriesView ? "active" : undefined}
             >
               Categorias
@@ -92,7 +152,7 @@ export function DashboardExperience({
           {isAdmin ? (
             <nav className="dashboard-nav dashboard-nav--admin" aria-label="Admin">
               <Link
-                href="/dashboard/admin"
+                href={navPaths.admin}
                 className={isAdminView ? "active" : undefined}
               >
                 Administração
@@ -118,7 +178,7 @@ export function DashboardExperience({
         <div className="dashboard-shell-content">{children}</div>
 
         <p className="status footer-link">
-          <Link href="/" className="nav-link">
+          <Link href="/login" className="nav-link">
             Voltar ao login
           </Link>
         </p>

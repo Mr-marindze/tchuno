@@ -44,7 +44,7 @@ export function DashboardRuntime({ view }: DashboardRuntimeProps) {
         tone="error"
       >
         <p className="status">
-          <Link href="/" className="nav-link">
+          <Link href="/login" className="nav-link">
             Voltar ao login
           </Link>
         </p>
@@ -60,9 +60,9 @@ export function DashboardRuntime({ view }: DashboardRuntimeProps) {
         tone="error"
       >
         <nav className="dashboard-nav">
-          <Link href="/dashboard">Início</Link>
-          <Link href="/dashboard/jobs">Jobs</Link>
-          <Link href="/dashboard/profile">Perfil</Link>
+          <Link href="/app">Início</Link>
+          <Link href="/app/pedidos">Jobs</Link>
+          <Link href="/app/perfil">Perfil</Link>
         </nav>
       </DashboardScreenState>
     );

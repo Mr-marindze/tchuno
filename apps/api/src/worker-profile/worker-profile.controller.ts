@@ -21,7 +21,9 @@ import {
   ApiTags,
   ApiUnauthorizedResponse,
 } from '@nestjs/swagger';
+import { RequirePermissions } from '../auth/decorators/require-permissions.decorator';
 import { ErrorResponseDto } from '../auth/dto/error-response.dto';
+import { AccessPolicyGuard } from '../auth/guards/access-policy.guard';
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
 import { ListWorkerProfilesQueryDto } from './dto/list-worker-profiles-query.dto';
 import { UpdateWorkerProfileDto } from './dto/update-worker-profile.dto';
@@ -46,18 +48,19 @@ export class WorkerProfileController {
     return this.workerProfileService.list(query);
   }
 
-  @UseGuards(JwtAuthGuard)
+  @UseGuards(JwtAuthGuard, AccessPolicyGuard)
   @ApiBearerAuth()
   @Get('me')
   @ApiOperation({ summary: 'Get current user worker profile' })
   @ApiOkResponse({ type: WorkerProfileDto })
   @ApiUnauthorizedResponse({ type: ErrorResponseDto })
   @ApiNotFoundResponse({ type: ErrorResponseDto })
+  @RequirePermissions('provider.profile.manage')
   getMe(@Req() req: AuthenticatedRequest) {
     return this.workerProfileService.getMe(req.user.sub);
   }
 
-  @UseGuards(JwtAuthGuard)
+  @UseGuards(JwtAuthGuard, AccessPolicyGuard)
   @ApiBearerAuth()
   @Put('me')
   @HttpCode(HttpStatus.OK)
@@ -65,6 +68,7 @@ export class WorkerProfileController {
   @ApiOkResponse({ type: WorkerProfileDto })
   @ApiUnauthorizedResponse({ type: ErrorResponseDto })
   @ApiConflictResponse({ type: ErrorResponseDto })
+  @RequirePermissions('provider.profile.manage')
   upsertMe(
     @Req() req: AuthenticatedRequest,
     @Body() dto: UpsertWorkerProfileDto,
@@ -72,7 +76,7 @@ export class WorkerProfileController {
     return this.workerProfileService.upsertMe(req.user.sub, dto);
   }
 
-  @UseGuards(JwtAuthGuard)
+  @UseGuards(JwtAuthGuard, AccessPolicyGuard)
   @ApiBearerAuth()
   @Patch('me')
   @ApiOperation({ summary: 'Update current user worker profile' })
@@ -80,6 +84,7 @@ export class WorkerProfileController {
   @ApiUnauthorizedResponse({ type: ErrorResponseDto })
   @ApiNotFoundResponse({ type: ErrorResponseDto })
   @ApiConflictResponse({ type: ErrorResponseDto })
+  @RequirePermissions('provider.profile.manage')
   updateMe(
     @Req() req: AuthenticatedRequest,
     @Body() dto: UpdateWorkerProfileDto,

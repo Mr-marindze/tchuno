@@ -9,6 +9,7 @@ import {
   Patch,
   Post,
   Query,
+  UseInterceptors,
   UseGuards,
 } from '@nestjs/common';
 import {
@@ -25,8 +26,11 @@ import {
   ApiUnauthorizedResponse,
 } from '@nestjs/swagger';
 import { ErrorResponseDto } from '../auth/dto/error-response.dto';
-import { AdminRoleGuard } from '../auth/guards/admin-role.guard';
+import { RequirePermissions } from '../auth/decorators/require-permissions.decorator';
+import { RequireReauth } from '../auth/decorators/require-reauth.decorator';
+import { AccessPolicyGuard } from '../auth/guards/access-policy.guard';
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
+import { AdminActionAuditInterceptor } from '../auth/interceptors/admin-action-audit.interceptor';
 import { CategoriesService } from './categories.service';
 import { CategoryDto } from './dto/category.dto';
 import { CreateCategoryDto } from './dto/create-category.dto';
@@ -54,7 +58,10 @@ export class CategoriesController {
     return this.categoriesService.getById(id);
   }
 
-  @UseGuards(JwtAuthGuard, AdminRoleGuard)
+  @UseGuards(JwtAuthGuard, AccessPolicyGuard)
+  @UseInterceptors(AdminActionAuditInterceptor)
+  @RequirePermissions('admin.categories.manage')
+  @RequireReauth()
   @ApiBearerAuth()
   @Post()
   @ApiOperation({ summary: 'Create category' })
@@ -66,7 +73,10 @@ export class CategoriesController {
     return this.categoriesService.create(dto);
   }
 
-  @UseGuards(JwtAuthGuard, AdminRoleGuard)
+  @UseGuards(JwtAuthGuard, AccessPolicyGuard)
+  @UseInterceptors(AdminActionAuditInterceptor)
+  @RequirePermissions('admin.categories.manage')
+  @RequireReauth()
   @ApiBearerAuth()
   @Patch(':id')
   @ApiOperation({ summary: 'Update category' })
@@ -80,7 +90,10 @@ export class CategoriesController {
     return this.categoriesService.update(id, dto);
   }
 
-  @UseGuards(JwtAuthGuard, AdminRoleGuard)
+  @UseGuards(JwtAuthGuard, AccessPolicyGuard)
+  @UseInterceptors(AdminActionAuditInterceptor)
+  @RequirePermissions('admin.categories.manage')
+  @RequireReauth()
   @ApiBearerAuth()
   @Delete(':id')
   @HttpCode(HttpStatus.NO_CONTENT)

@@ -20,7 +20,9 @@ import {
   ApiUnauthorizedResponse,
 } from '@nestjs/swagger';
 import { Throttle } from '@nestjs/throttler';
+import { RequirePermissions } from '../auth/decorators/require-permissions.decorator';
 import { ErrorResponseDto } from '../auth/dto/error-response.dto';
+import { AccessPolicyGuard } from '../auth/guards/access-policy.guard';
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
 import { CreateReviewDto } from './dto/create-review.dto';
 import { ListReviewsQueryDto } from './dto/list-reviews-query.dto';
@@ -48,12 +50,13 @@ export class ReviewsController {
     return this.reviewsService.listByWorkerProfile(workerProfileId, query);
   }
 
-  @UseGuards(JwtAuthGuard)
+  @UseGuards(JwtAuthGuard, AccessPolicyGuard)
   @ApiBearerAuth()
   @Get('me')
   @ApiOperation({ summary: 'List reviews created by current user' })
   @ApiOkResponse({ type: ReviewListResponseDto })
   @ApiUnauthorizedResponse({ type: ErrorResponseDto })
+  @RequirePermissions('customer.reviews.read.own')
   listMine(
     @Req() req: AuthenticatedRequest,
     @Query() query: ListReviewsQueryDto,
@@ -61,7 +64,7 @@ export class ReviewsController {
     return this.reviewsService.listMine(req.user.sub, query);
   }
 
-  @UseGuards(JwtAuthGuard)
+  @UseGuards(JwtAuthGuard, AccessPolicyGuard)
   @ApiBearerAuth()
   @Post()
   @Throttle({ default: { limit: 15, ttl: 60_000 } })
@@ -71,6 +74,7 @@ export class ReviewsController {
   @ApiNotFoundResponse({ type: ErrorResponseDto })
   @ApiConflictResponse({ type: ErrorResponseDto })
   @ApiTooManyRequestsResponse({ type: ErrorResponseDto })
+  @RequirePermissions('customer.reviews.create')
   create(@Req() req: AuthenticatedRequest, @Body() dto: CreateReviewDto) {
     return this.reviewsService.create(req.user.sub, dto);
   }

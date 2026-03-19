@@ -35,17 +35,27 @@ import { LoginDto } from './dto/login.dto';
 import { RefreshTokenDto } from './dto/refresh-token.dto';
 import { RegisterDto } from './dto/register.dto';
 import { SessionListResponseDto } from './dto/session-list-response.dto';
+import { AuthorizationService } from './authorization.service';
 import { JwtAuthGuard } from './guards/jwt-auth.guard';
 import { SessionClientInfo } from './types';
 
 type AuthenticatedRequest = {
-  user: { sub: string; email: string };
+  user: {
+    sub: string;
+    email: string;
+    user?: {
+      role?: 'USER' | 'ADMIN';
+    };
+  };
 };
 
 @ApiTags('auth')
 @Controller('auth')
 export class AuthController {
-  constructor(private readonly authService: AuthService) {}
+  constructor(
+    private readonly authService: AuthService,
+    private readonly authorizationService: AuthorizationService,
+  ) {}
 
   @Post('register')
   @Throttle({ default: { limit: 10, ttl: 60_000 } })
@@ -166,8 +176,19 @@ export class AuthController {
   @ApiOperation({ summary: 'Get current user payload from access token' })
   @ApiOkResponse({ description: 'Current user payload' })
   @ApiUnauthorizedResponse({ type: ErrorResponseDto })
-  me(@Req() req: AuthenticatedRequest) {
-    return req.user;
+  async me(@Req() req: AuthenticatedRequest) {
+    const access = await this.authorizationService.resolveAccessContext({
+      userId: req.user.sub,
+      platformRole: req.user.user?.role ?? null,
+    });
+
+    return {
+      ...req.user,
+      access: {
+        appRole: access.role,
+        permissions: access.permissions,
+      },
+    };
   }
 
   private extractClientInfo(req: Request): SessionClientInfo {

@@ -21,7 +21,10 @@ import {
   ApiUnauthorizedResponse,
 } from '@nestjs/swagger';
 import { Throttle } from '@nestjs/throttler';
+import { RequireAppRoles } from '../auth/decorators/require-app-roles.decorator';
+import { RequirePermissions } from '../auth/decorators/require-permissions.decorator';
 import { ErrorResponseDto } from '../auth/dto/error-response.dto';
+import { AccessPolicyGuard } from '../auth/guards/access-policy.guard';
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
 import { CreateJobDto } from './dto/create-job.dto';
 import { JobListResponseDto } from './dto/job-list-response.dto';
@@ -37,7 +40,7 @@ type AuthenticatedRequest = {
 
 @ApiTags('jobs')
 @ApiBearerAuth()
-@UseGuards(JwtAuthGuard)
+@UseGuards(JwtAuthGuard, AccessPolicyGuard)
 @Controller('jobs')
 export class JobsController {
   constructor(private readonly jobsService: JobsService) {}
@@ -50,6 +53,7 @@ export class JobsController {
   @ApiConflictResponse({ type: ErrorResponseDto })
   @ApiNotFoundResponse({ type: ErrorResponseDto })
   @ApiTooManyRequestsResponse({ type: ErrorResponseDto })
+  @RequirePermissions('customer.jobs.create')
   create(@Req() req: AuthenticatedRequest, @Body() dto: CreateJobDto) {
     return this.jobsService.create(req.user.sub, dto);
   }
@@ -58,6 +62,7 @@ export class JobsController {
   @ApiOperation({ summary: 'List jobs where current user is the client' })
   @ApiOkResponse({ type: JobListResponseDto })
   @ApiUnauthorizedResponse({ type: ErrorResponseDto })
+  @RequirePermissions('customer.jobs.read.own')
   listMyClientJobs(
     @Req() req: AuthenticatedRequest,
     @Query() query: ListJobsQueryDto,
@@ -70,6 +75,7 @@ export class JobsController {
   @ApiOkResponse({ type: JobListResponseDto })
   @ApiUnauthorizedResponse({ type: ErrorResponseDto })
   @ApiNotFoundResponse({ type: ErrorResponseDto })
+  @RequirePermissions('provider.jobs.read.own')
   listMyWorkerJobs(
     @Req() req: AuthenticatedRequest,
     @Query() query: ListJobsQueryDto,
@@ -83,6 +89,7 @@ export class JobsController {
   @ApiOkResponse({ type: JobDto })
   @ApiUnauthorizedResponse({ type: ErrorResponseDto })
   @ApiNotFoundResponse({ type: ErrorResponseDto })
+  @RequirePermissions('customer.jobs.read.own')
   getById(@Req() req: AuthenticatedRequest, @Param('id') id: string) {
     return this.jobsService.getById(id, req.user.sub);
   }
@@ -98,6 +105,7 @@ export class JobsController {
   @ApiConflictResponse({ type: ErrorResponseDto })
   @ApiNotFoundResponse({ type: ErrorResponseDto })
   @ApiTooManyRequestsResponse({ type: ErrorResponseDto })
+  @RequirePermissions('provider.jobs.quote.propose')
   proposeQuote(
     @Req() req: AuthenticatedRequest,
     @Param('id') id: string,
@@ -115,6 +123,14 @@ export class JobsController {
   @ApiConflictResponse({ type: ErrorResponseDto })
   @ApiNotFoundResponse({ type: ErrorResponseDto })
   @ApiTooManyRequestsResponse({ type: ErrorResponseDto })
+  @RequireAppRoles(
+    'customer',
+    'provider',
+    'admin',
+    'ops_admin',
+    'support_admin',
+    'super_admin',
+  )
   updateStatus(
     @Req() req: AuthenticatedRequest,
     @Param('id') id: string,
