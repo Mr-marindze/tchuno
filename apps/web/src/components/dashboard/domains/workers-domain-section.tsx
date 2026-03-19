@@ -545,6 +545,7 @@ export function WorkersDomainSection({
                       ? "O teu perfil profissional"
                       : resolveWorkerDisplayName(profile)
                   }
+                  avatarFallbackLabel={resolveWorkerDisplayName(profile)}
                   highlighted={isStrongHighlight}
                   relevanceLabel={rankingLabel}
                   availabilityTone={profile.isAvailable ? "is-ok" : "is-muted"}

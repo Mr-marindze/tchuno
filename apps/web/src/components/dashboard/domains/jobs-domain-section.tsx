@@ -79,6 +79,8 @@ type JobsDomainSectionProps = {
   onJobScheduledForChange: (value: string) => void;
   jobJourneyView: JobJourneyView;
   onJobJourneyViewChange: (value: JobJourneyView) => void;
+  showJourneySwitch: boolean;
+  canCreateJobs: boolean;
   showClientJourney: boolean;
   showWorkerJourney: boolean;
   reviewableJobIdSet: Set<string>;
@@ -147,6 +149,8 @@ export function JobsDomainSection({
   onJobScheduledForChange,
   jobJourneyView,
   onJobJourneyViewChange,
+  showJourneySwitch,
+  canCreateJobs,
   showClientJourney,
   showWorkerJourney,
   reviewableJobIdSet,
@@ -165,6 +169,21 @@ export function JobsDomainSection({
   const inExecutionCount =
     clientJobFlowCounts.ACCEPTED + clientJobFlowCounts.IN_PROGRESS;
   const hasReviewBacklog = reviewableJobs.length > 0;
+  const isWorkerOnlyContext = !canCreateJobs;
+  const hasDualJourney = showClientJourney && showWorkerJourney;
+  const jobsSectionSubtitle = isWorkerOnlyContext
+    ? "Foco no prestador: responde pedidos recebidos, envia cotações quando necessário e mantém o estado dos trabalhos em dia."
+    : "Criação guiada: confirma pré-requisitos, publica o pedido e acompanha as transições de estado.";
+  const nextPageAvailable = hasDualJourney
+    ? Boolean(clientJobsMeta?.hasNext || workerJobsMeta?.hasNext)
+    : showClientJourney
+      ? Boolean(clientJobsMeta?.hasNext)
+      : Boolean(workerJobsMeta?.hasNext);
+  const activeJourneyLabel = hasDualJourney
+    ? "Cliente e prestador"
+    : showClientJourney
+      ? "Só cliente"
+      : "Só prestador";
   const creationSteps = useMemo(
     () => [
       {
@@ -207,6 +226,14 @@ export function JobsDomainSection({
     jobPricingMode === "QUOTE_REQUEST"
       ? "Criar job e pedir cotação"
       : "Criar job de preço fixo";
+  const setupChecklistItems = useMemo(
+    () => jobCreationChecklist.map((item) => ({ label: item.label, ready: item.ready })),
+    [jobCreationChecklist],
+  );
+  const requestChecklistItems = useMemo(
+    () => creationSteps.map((item) => ({ label: item.label, ready: item.ready })),
+    [creationSteps],
+  );
   const creationStepState = useMemo(() => {
     const pendingStepIndex = creationSteps.findIndex((item) => !item.ready);
 
@@ -247,7 +274,7 @@ export function JobsDomainSection({
     <section id="jobs" className="dashboard-section">
       <DashboardSectionHeader
         title="Jobs"
-        subtitle="Criação guiada: confirma pré-requisitos, publica o pedido e acompanha as transições de estado."
+        subtitle={jobsSectionSubtitle}
         status={jobsStatus}
         statusTone={getStatusTone(jobsStatus)}
       />
@@ -255,20 +282,32 @@ export function JobsDomainSection({
       <DashboardActionPanel
         title="Ação recomendada agora"
         description={
-          hasReviewBacklog
-            ? `Tens ${reviewableJobs.length} job(s) concluído(s) sem review. Fecha o ciclo de confiança primeiro.`
-            : "Sem backlog de reviews. Foca em pedidos novos e execução em curso."
+          isWorkerOnlyContext
+            ? visibleWorkerJobs.length > 0
+              ? "Prioriza os pedidos recebidos com ação pendente para evitar atrasos."
+              : "Ainda não recebeste pedidos. Mantém disponibilidade ativa e acompanha novas entradas."
+            : hasReviewBacklog
+              ? `Tens ${reviewableJobs.length} job(s) concluído(s) sem review. Fecha o ciclo de confiança primeiro.`
+              : "Sem backlog de reviews. Foca em pedidos novos e execução em curso."
         }
         actions={
           <>
-            {hasReviewBacklog ? (
-              <a href="#reviews" className="primary">
-                Ir para reviews pendentes
+            {isWorkerOnlyContext ? (
+              <a href="#worker-journey" className="primary">
+                Ver pedidos recebidos
               </a>
             ) : (
-              <a href="#job-create" className="primary">
-                Criar novo job
-              </a>
+              <>
+                {hasReviewBacklog ? (
+                  <a href="#reviews" className="primary">
+                    Ir para reviews pendentes
+                  </a>
+                ) : (
+                  <a href="#job-create" className="primary">
+                    Criar novo job
+                  </a>
+                )}
+              </>
             )}
             <button type="button" onClick={onReloadJobs} disabled={jobsLoading}>
               Recarregar lista
@@ -277,102 +316,110 @@ export function JobsDomainSection({
         }
       />
 
-      <DashboardPanel title="Fluxo do pedido (cliente -> worker -> review)">
-        <div className="flow-summary">
-          <DashboardSummaryCard
-            className="flow-summary-item"
-            label="Aguardando aceitação"
-            value={clientJobFlowCounts.REQUESTED}
-          />
-          <DashboardSummaryCard
-            className="flow-summary-item"
-            label="Em execução"
-            value={inExecutionCount}
-          />
-          <DashboardSummaryCard
-            className="flow-summary-item"
-            label="Concluídos"
-            value={clientJobFlowCounts.COMPLETED}
-          />
-          <DashboardSummaryCard
-            className="flow-summary-item"
-            label="Pendentes de review"
-            value={reviewableJobs.length}
-          />
-          <DashboardSummaryCard
-            className="flow-summary-item"
-            label="Cancelados"
-            value={clientJobFlowCounts.CANCELED}
-          />
-        </div>
-        {reviewableJobs.length > 0 ? (
-          <p className="status" style={{ marginTop: "0.4rem" }}>
-            Tens {reviewableJobs.length} job(s) prontos para avaliação. <a href="#reviews" className="nav-link">Ir para reviews</a>
-          </p>
-        ) : (
-          <p className="muted">
-            Quando um job chega a concluído, ele aparece automaticamente em Reviews.
-          </p>
-        )}
-      </DashboardPanel>
+      {canCreateJobs ? (
+        <>
+          <DashboardPanel title="Fluxo do pedido (cliente -> prestador -> review)">
+            <div className="flow-summary">
+              <DashboardSummaryCard
+                className="flow-summary-item"
+                label="Aguardando aceitação"
+                value={clientJobFlowCounts.REQUESTED}
+              />
+              <DashboardSummaryCard
+                className="flow-summary-item"
+                label="Em execução"
+                value={inExecutionCount}
+              />
+              <DashboardSummaryCard
+                className="flow-summary-item"
+                label="Concluídos"
+                value={clientJobFlowCounts.COMPLETED}
+              />
+              <DashboardSummaryCard
+                className="flow-summary-item"
+                label="Pendentes de review"
+                value={reviewableJobs.length}
+              />
+              <DashboardSummaryCard
+                className="flow-summary-item"
+                label="Cancelados"
+                value={clientJobFlowCounts.CANCELED}
+              />
+            </div>
+            {reviewableJobs.length > 0 ? (
+              <p className="status" style={{ marginTop: "0.4rem" }}>
+                Tens {reviewableJobs.length} job(s) prontos para avaliação.{" "}
+                <a href="#reviews" className="nav-link">Ir para reviews</a>
+              </p>
+            ) : (
+              <p className="muted">
+                Quando um job chega a concluído, ele aparece automaticamente em
+                Reviews.
+              </p>
+            )}
+          </DashboardPanel>
 
-      <DashboardPanel title="Criação guiada de pedido">
-        <div className="flow-summary">
-          <DashboardSummaryCard
-            className="flow-summary-item"
-            label="Passos prontos"
-            value={`${creationStepReadyCount}/${creationSteps.length}`}
-          />
-          <DashboardSummaryCard
-            className="flow-summary-item"
-            label="Progresso"
-            value={`${creationProgressPercent}%`}
-          />
-          <DashboardSummaryCard
-            className="flow-summary-item"
-            label="Profissional selecionado"
-            value={
-              selectedJobWorkerProfile
-                ? shortenId(selectedJobWorkerProfile.userId)
-                : "Nenhum"
-            }
-          />
-          <DashboardSummaryCard
-            className="flow-summary-item"
-            label="Categorias compatíveis"
-            value={availableJobCategories.length}
-          />
-        </div>
-        <div className="dashboard-progress">
-          <div
-            className="dashboard-progress-fill"
-            style={{ width: `${creationProgressPercent}%` }}
-          />
-        </div>
-        <ul className="checklist">
-          {[
-            ...jobCreationChecklist,
-            ...creationSteps.map((item) => ({
-              ...item,
-              help: "Confirma este passo no formulário abaixo.",
-            })),
-          ].map((item, index) => (
-            <li
-              key={`${item.label}-${index}`}
-              className={item.ready ? "is-ready" : "is-blocked"}
-            >
-              <strong>{item.ready ? "Pronto" : "Pendente"}:</strong> {item.label}. {item.help}
-            </li>
-          ))}
-        </ul>
-        <p className="muted">
-          Worker selecionado:{" "}
-          {selectedJobWorkerProfile
-            ? `${shortenId(selectedJobWorkerProfile.userId)} (${selectedJobWorkerProfile.location ?? "n/a"})`
-            : "Nenhum"}
-        </p>
-        <p className="muted">Categorias compatíveis com o worker: {availableJobCategories.length}</p>
-      </DashboardPanel>
+          <DashboardPanel title="Criação guiada de pedido">
+            <div className="flow-summary">
+              <DashboardSummaryCard
+                className="flow-summary-item"
+                label="Passos prontos"
+                value={`${creationStepReadyCount}/${creationSteps.length}`}
+              />
+              <DashboardSummaryCard
+                className="flow-summary-item"
+                label="Progresso"
+                value={`${creationProgressPercent}%`}
+              />
+              <DashboardSummaryCard
+                className="flow-summary-item"
+                label="Profissional selecionado"
+                value={
+                  selectedJobWorkerProfile
+                    ? shortenId(selectedJobWorkerProfile.userId)
+                    : "Nenhum"
+                }
+              />
+              <DashboardSummaryCard
+                className="flow-summary-item"
+                label="Categorias compatíveis"
+                value={availableJobCategories.length}
+              />
+            </div>
+            <div className="dashboard-progress">
+              <div
+                className="dashboard-progress-fill"
+                style={{ width: `${creationProgressPercent}%` }}
+              />
+            </div>
+            <p className="checklist-heading">Dependências base</p>
+            <ul className="checklist">
+              {setupChecklistItems.map((item) => (
+                <li key={`setup-${item.label}`} className={item.ready ? "is-ready" : "is-blocked"}>
+                  <strong>{item.ready ? "Pronto" : "Pendente"}:</strong> {item.label}
+                </li>
+              ))}
+            </ul>
+            <p className="checklist-heading">Passos do pedido</p>
+            <ul className="checklist">
+              {requestChecklistItems.map((item) => (
+                <li key={`step-${item.label}`} className={item.ready ? "is-ready" : "is-blocked"}>
+                  <strong>{item.ready ? "Pronto" : "Pendente"}:</strong> {item.label}
+                </li>
+              ))}
+            </ul>
+            <p className="muted">
+              Profissional selecionado:{" "}
+              {selectedJobWorkerProfile
+                ? `${shortenId(selectedJobWorkerProfile.userId)} (${selectedJobWorkerProfile.location ?? "n/a"})`
+                : "Nenhum"}
+            </p>
+            <p className="muted">
+              Categorias compatíveis com o profissional: {availableJobCategories.length}
+            </p>
+          </DashboardPanel>
+        </>
+      ) : null}
 
       <div className="section-toolbar">
         <label>
@@ -430,23 +477,28 @@ export function JobsDomainSection({
         onPrevious={onJobPreviousPage}
         onNext={onJobNextPage}
         previousDisabled={jobsLoading || jobPage <= 1}
-        nextDisabled={jobsLoading || !(clientJobsMeta?.hasNext || workerJobsMeta?.hasNext)}
+        nextDisabled={jobsLoading || !nextPageAvailable}
       >
         <DashboardMetaStat
           label="Página"
           value={clientJobsMeta?.page ?? workerJobsMeta?.page ?? jobPage}
         />
-        <DashboardMetaStat
-          label="Cliente"
-          value={`${visibleClientJobs.length}/${clientJobsMeta?.total ?? 0}`}
-        />
-        <DashboardMetaStat
-          label="Worker"
-          value={`${visibleWorkerJobs.length}/${workerJobsMeta?.total ?? 0}`}
-        />
+        {showClientJourney ? (
+          <DashboardMetaStat
+            label={hasDualJourney ? "Cliente" : "Pedidos"}
+            value={`${visibleClientJobs.length}/${clientJobsMeta?.total ?? 0}`}
+          />
+        ) : null}
+        {showWorkerJourney ? (
+          <DashboardMetaStat
+            label={hasDualJourney ? "Prestador" : "Recebidos"}
+            value={`${visibleWorkerJobs.length}/${workerJobsMeta?.total ?? 0}`}
+          />
+        ) : null}
       </DashboardPaginationRow>
 
-      <form onSubmit={onCreateJob} className="form job-create-form" id="job-create">
+      {canCreateJobs ? (
+        <form onSubmit={onCreateJob} className="form job-create-form" id="job-create">
         <fieldset className="form-step">
           <legend>Passo 1 · Selecionar profissional e categoria</legend>
           <label>
@@ -550,53 +602,50 @@ export function JobsDomainSection({
           </label>
         </fieldset>
 
-        <button
-          type="submit"
-          className="primary"
-          disabled={
-            jobsLoading ||
-            jobWorkerOptions.length === 0 ||
-            availableJobCategories.length === 0
-          }
-        >
-          {jobsLoading ? "Aguarda..." : createJobCtaLabel}
-        </button>
-      </form>
+          <button
+            type="submit"
+            className="primary"
+            disabled={
+              jobsLoading ||
+              jobWorkerOptions.length === 0 ||
+              availableJobCategories.length === 0
+            }
+          >
+            {jobsLoading ? "Aguarda..." : createJobCtaLabel}
+          </button>
+        </form>
+      ) : null}
 
-      <div className="journey-switch">
-        <button
-          type="button"
-          className={jobJourneyView === "all" ? "active" : ""}
-          onClick={() => onJobJourneyViewChange("all")}
-        >
-          Ambos
-        </button>
-        <button
-          type="button"
-          className={jobJourneyView === "client" ? "active" : ""}
-          onClick={() => onJobJourneyViewChange("client")}
-        >
-          Jornada cliente
-        </button>
-        <button
-          type="button"
-          className={jobJourneyView === "worker" ? "active" : ""}
-          onClick={() => onJobJourneyViewChange("worker")}
-        >
-          Jornada worker
-        </button>
-      </div>
+      {showJourneySwitch ? (
+        <div className="journey-switch">
+          <button
+            type="button"
+            className={jobJourneyView === "all" ? "active" : ""}
+            onClick={() => onJobJourneyViewChange("all")}
+          >
+            Ambos
+          </button>
+          <button
+            type="button"
+            className={jobJourneyView === "client" ? "active" : ""}
+            onClick={() => onJobJourneyViewChange("client")}
+          >
+            Jornada cliente
+          </button>
+          <button
+            type="button"
+            className={jobJourneyView === "worker" ? "active" : ""}
+            onClick={() => onJobJourneyViewChange("worker")}
+          >
+            Jornada prestador
+          </button>
+        </div>
+      ) : null}
       <p className="muted">
-        Foco ativo:{" "}
-        {jobJourneyView === "all"
-          ? "Cliente e worker"
-          : jobJourneyView === "client"
-            ? "Só cliente"
-            : "Só worker"}
-        .
+        Foco ativo: {activeJourneyLabel}.
       </p>
 
-      <div className={`panel-grid ${jobJourneyView === "all" ? "" : "panel-grid--single"}`}>
+      <div className={`panel-grid ${hasDualJourney ? "" : "panel-grid--single"}`}>
         {showClientJourney ? (
           <DashboardPanel title="Acompanhamento de pedidos (cliente)">
             {jobsLoading && visibleClientJobs.length === 0 ? (
@@ -733,14 +782,15 @@ export function JobsDomainSection({
         ) : null}
 
         {showWorkerJourney ? (
-          <DashboardPanel title="Acompanhamento de pedidos (worker)">
+          <div id="worker-journey">
+            <DashboardPanel title="Acompanhamento de pedidos (prestador)">
             {jobsLoading && visibleWorkerJobs.length === 0 ? (
-              <p>A carregar jobs de worker...</p>
+              <p>A carregar pedidos do prestador...</p>
             ) : visibleWorkerJobs.length === 0 ? (
               <DashboardEmptyState
                 message={
                   jobSearch.trim().length > 0
-                    ? "Nenhum job de worker corresponde à pesquisa atual."
+                    ? "Nenhum pedido recebido corresponde à pesquisa atual."
                     : "Ainda não recebeste jobs. Mantém o perfil disponível e com categorias corretas."
                 }
               />
@@ -871,7 +921,8 @@ export function JobsDomainSection({
                 );
               })
             )}
-          </DashboardPanel>
+            </DashboardPanel>
+          </div>
         ) : null}
       </div>
     </section>

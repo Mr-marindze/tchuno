@@ -18,6 +18,8 @@
     "staging:api": "bash scripts/staging/start-api.sh",
     "staging:web": "bash scripts/staging/start-web.sh",
     "staging:check": "bash scripts/staging/health-check.sh",
+    "ops:reset-password": "yarn workspace @tchuno/database reset-password",
+    "ops:sync-categories": "yarn workspace @tchuno/database sync-categories-catalog",
     "lint": "yarn workspaces foreach -Apt run lint",
     "test": "yarn workspaces foreach -Apt run test",
     "test:e2e": "yarn workspace @tchuno/api test:e2e",

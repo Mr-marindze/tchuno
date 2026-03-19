@@ -78,7 +78,11 @@ import { ToastTone, useToast } from "@/components/toast-provider";
 import { humanizeUnknownError, ReauthRequiredError } from "@/lib/http-errors";
 import { buildJobActionPlan } from "@/lib/job-cta";
 import { PaginationMeta } from "@/lib/pagination";
-import { buildDashboardRouteMap, resolveDashboardScope } from "@/lib/dashboard-routes";
+import {
+  buildDashboardRouteMap,
+  DashboardScope,
+  resolveDashboardScope,
+} from "@/lib/dashboard-routes";
 import { listSharedWorkerRanking } from "@/lib/shared-worker-ranking";
 import { setSharedWorkerBehaviorSignals, trackEvent } from "@/lib/tracking";
 
@@ -164,9 +168,25 @@ type UseDashboardRuntimeArgs = {
   view: DashboardView;
 };
 
+function getDefaultJobJourneyView(scope: DashboardScope): JobJourneyView {
+  if (scope === "customer") {
+    return "client";
+  }
+
+  if (scope === "provider") {
+    return "worker";
+  }
+
+  return "all";
+}
+
 export function useDashboardRuntime({ view }: UseDashboardRuntimeArgs) {
   const router = useRouter();
   const pathname = usePathname();
+  const dashboardScope = useMemo(
+    () => resolveDashboardScope(pathname),
+    [pathname],
+  );
   const { pushToast } = useToast();
   const lastToastByChannelRef = useRef<Record<string, string>>({});
   const currentDeviceId = useMemo(() => getOrCreateDeviceId(), []);
@@ -251,7 +271,9 @@ export function useDashboardRuntime({ view }: UseDashboardRuntimeArgs) {
   const [jobStatusFilter, setJobStatusFilter] = useState<"ALL" | JobStatus>(
     "ALL",
   );
-  const [jobJourneyView, setJobJourneyView] = useState<JobJourneyView>("all");
+  const [jobJourneyView, setJobJourneyView] = useState<JobJourneyView>(() =>
+    getDefaultJobJourneyView(dashboardScope),
+  );
   const [jobLimit, setJobLimit] = useState(10);
   const [jobPage, setJobPage] = useState(1);
   const [jobWorkerOptions, setJobWorkerOptions] = useState<WorkerProfile[]>([]);
@@ -303,9 +325,12 @@ export function useDashboardRuntime({ view }: UseDashboardRuntimeArgs) {
   const [reviewLimit, setReviewLimit] = useState(10);
   const [loading, setLoading] = useState(true);
   const dashboardRoutes = useMemo(
-    () => buildDashboardRouteMap(resolveDashboardScope(pathname)),
-    [pathname],
+    () => buildDashboardRouteMap(dashboardScope),
+    [dashboardScope],
   );
+  const isLegacyScope = dashboardScope === "legacy";
+  const isCustomerScope = dashboardScope === "customer";
+  const isProviderScope = dashboardScope === "provider";
   const isAuthenticated = Boolean(state?.auth.accessToken);
   const isAdmin = state?.auth.user.role === "ADMIN";
   const isHomeView = view === "home";
@@ -435,19 +460,19 @@ export function useDashboardRuntime({ view }: UseDashboardRuntimeArgs) {
   const jobCreationChecklist = useMemo(
     () => [
       {
-        label: "Categorias ativas criadas",
+        label: "Categorias ativas disponíveis",
         ready: activeCategories.length > 0,
         help: "Cria pelo menos uma categoria para permitir matching.",
       },
       {
         label: "Profissionais disponíveis",
         ready: jobWorkerOptions.length > 0,
-        help: "Um worker precisa de perfil ativo e disponibilidade.",
+        help: "Um profissional precisa de perfil ativo e disponibilidade.",
       },
       {
-        label: "Categoria compatível com o worker",
+        label: "Categoria compatível com o profissional",
         ready: availableJobCategories.length > 0,
-        help: "Escolhe um worker com categoria compatível com o pedido.",
+        help: "Escolhe um profissional com categoria compatível com o pedido.",
       },
     ],
     [
@@ -496,6 +521,9 @@ export function useDashboardRuntime({ view }: UseDashboardRuntimeArgs) {
     () => new Set(reviewableJobs.map((job) => job.id)),
     [reviewableJobs],
   );
+  useEffect(() => {
+    setJobJourneyView(getDefaultJobJourneyView(dashboardScope));
+  }, [dashboardScope]);
   const clientJobFlowCounts = useMemo(() => {
     const summary = createJobFlowCounter();
     for (const job of clientJobs) {
@@ -512,52 +540,56 @@ export function useDashboardRuntime({ view }: UseDashboardRuntimeArgs) {
     }> = [];
     const seen = new Set<string>();
 
-    for (const job of clientJobs) {
-      const plan = buildJobActionPlan({
-        actor: "client",
-        job,
-        canReview: reviewableJobIdSet.has(job.id),
-      });
-      const primary = plan.primary;
-      const shouldHighlight =
-        primary.kind === "quote" ||
-        primary.kind === "review" ||
-        (primary.kind === "status" && primary.nextStatus !== "CANCELED");
+    if (dashboardScope !== "provider") {
+      for (const job of clientJobs) {
+        const plan = buildJobActionPlan({
+          actor: "client",
+          job,
+          canReview: reviewableJobIdSet.has(job.id),
+        });
+        const primary = plan.primary;
+        const shouldHighlight =
+          primary.kind === "quote" ||
+          primary.kind === "review" ||
+          (primary.kind === "status" && primary.nextStatus !== "CANCELED");
 
-      if (!shouldHighlight || seen.has(job.id)) {
-        continue;
+        if (!shouldHighlight || seen.has(job.id)) {
+          continue;
+        }
+
+        seen.add(job.id);
+        items.push({
+          job,
+          actor: "client",
+          actionLabel: primary.label,
+        });
       }
-
-      seen.add(job.id);
-      items.push({
-        job,
-        actor: "client",
-        actionLabel: primary.label,
-      });
     }
 
-    for (const job of workerJobs) {
-      const plan = buildJobActionPlan({
-        actor: "worker",
-        job,
-        canReview: false,
-      });
-      const primary = plan.primary;
-      const shouldHighlight =
-        primary.kind === "quote" ||
-        primary.kind === "review" ||
-        (primary.kind === "status" && primary.nextStatus !== "CANCELED");
+    if (dashboardScope !== "customer") {
+      for (const job of workerJobs) {
+        const plan = buildJobActionPlan({
+          actor: "worker",
+          job,
+          canReview: false,
+        });
+        const primary = plan.primary;
+        const shouldHighlight =
+          primary.kind === "quote" ||
+          primary.kind === "review" ||
+          (primary.kind === "status" && primary.nextStatus !== "CANCELED");
 
-      if (!shouldHighlight || seen.has(job.id)) {
-        continue;
+        if (!shouldHighlight || seen.has(job.id)) {
+          continue;
+        }
+
+        seen.add(job.id);
+        items.push({
+          job,
+          actor: "worker",
+          actionLabel: primary.label,
+        });
       }
-
-      seen.add(job.id);
-      items.push({
-        job,
-        actor: "worker",
-        actionLabel: primary.label,
-      });
     }
 
     return items
@@ -566,14 +598,20 @@ export function useDashboardRuntime({ view }: UseDashboardRuntimeArgs) {
           new Date(b.job.updatedAt).getTime() - new Date(a.job.updatedAt).getTime(),
       )
       .slice(0, 6);
-  }, [clientJobs, reviewableJobIdSet, workerJobs]);
+  }, [clientJobs, dashboardScope, reviewableJobIdSet, workerJobs]);
   const homeJobCounts = useMemo(() => {
     const deduped = new Map<string, Job>();
-    for (const job of clientJobs) {
-      deduped.set(job.id, job);
+
+    if (dashboardScope !== "provider") {
+      for (const job of clientJobs) {
+        deduped.set(job.id, job);
+      }
     }
-    for (const job of workerJobs) {
-      deduped.set(job.id, job);
+
+    if (dashboardScope !== "customer") {
+      for (const job of workerJobs) {
+        deduped.set(job.id, job);
+      }
     }
 
     let inProgress = 0;
@@ -593,7 +631,7 @@ export function useDashboardRuntime({ view }: UseDashboardRuntimeArgs) {
       }
     }
 
-    pendingReview = reviewableJobs.length;
+    pendingReview = dashboardScope === "provider" ? 0 : reviewableJobs.length;
 
     return {
       inProgress,
@@ -601,34 +639,56 @@ export function useDashboardRuntime({ view }: UseDashboardRuntimeArgs) {
       pendingReview,
       canceled,
     };
-  }, [clientJobs, reviewableJobs.length, workerJobs]);
+  }, [clientJobs, dashboardScope, reviewableJobs.length, workerJobs]);
   const homePrimaryCta = useMemo(() => {
+    const openJobsLabel = isProviderScope
+      ? "Abrir pedidos recebidos"
+      : "Abrir pedidos";
+
     if (homeAttentionItems.length > 0) {
       return {
         href: dashboardRoutes.jobs,
-        label: "Resolver jobs pendentes",
+        label: openJobsLabel,
       };
     }
 
     if (reviewableJobs.length > 0) {
       return {
         href: dashboardRoutes.reviews,
-        label: "Publicar reviews pendentes",
+        label: "Abrir reviews",
       };
     }
 
     return {
       href: dashboardRoutes.jobs,
-      label: "Abrir gestão de jobs",
+      label: openJobsLabel,
     };
   }, [
     dashboardRoutes.jobs,
     dashboardRoutes.reviews,
     homeAttentionItems.length,
+    isProviderScope,
     reviewableJobs.length,
   ]);
-  const showClientJourney = jobJourneyView !== "worker";
-  const showWorkerJourney = jobJourneyView !== "client";
+  const effectiveJobJourneyView = useMemo<JobJourneyView>(() => {
+    if (isCustomerScope) {
+      return "client";
+    }
+
+    if (isProviderScope) {
+      return "worker";
+    }
+
+    return jobJourneyView;
+  }, [isCustomerScope, isProviderScope, jobJourneyView]);
+  const canSwitchJobJourney = isLegacyScope;
+  const canCreateJobs = !isProviderScope;
+  const canCreateReviews = !isProviderScope;
+  const showClientJourney =
+    effectiveJobJourneyView !== "worker" && !isProviderScope;
+  const showWorkerJourney =
+    effectiveJobJourneyView !== "client" && !isCustomerScope;
+  const showHomeActorLabel = isLegacyScope;
 
   const pushStatusToast = useCallback(
     (channel: string, message: string) => {
@@ -2081,6 +2141,7 @@ export function useDashboardRuntime({ view }: UseDashboardRuntimeArgs) {
     homeJobCounts,
     homePrimaryCta,
     dashboardRoutes,
+    showActorLabel: showHomeActorLabel,
     formatJobStatus,
     formatDate,
   } as const;
@@ -2324,8 +2385,10 @@ export function useDashboardRuntime({ view }: UseDashboardRuntimeArgs) {
     onJobBudgetChange: setJobBudget,
     jobScheduledFor,
     onJobScheduledForChange: setJobScheduledFor,
-    jobJourneyView,
+    jobJourneyView: effectiveJobJourneyView,
     onJobJourneyViewChange: setJobJourneyView,
+    showJourneySwitch: canSwitchJobJourney,
+    canCreateJobs,
     showClientJourney,
     showWorkerJourney,
     reviewableJobIdSet,
@@ -2396,6 +2459,7 @@ export function useDashboardRuntime({ view }: UseDashboardRuntimeArgs) {
     visibleWorkerReviews,
     selectedWorkerReviewAverage,
     onCreateReview: handleCreateReview,
+    canCreateReviews,
     reviewJobId,
     onReviewJobIdChange: setReviewJobId,
     reviewRating,

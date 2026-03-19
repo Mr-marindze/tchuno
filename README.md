@@ -73,3 +73,4 @@ corepack yarn ci
 - Observability runbook: `docs/OBSERVABILITY_RUNBOOK.md`
 - Operational checklist: `docs/PILOT_CHECKLIST.md`
 - Real-user test script: `docs/PILOT_USER_TEST_SCRIPT.md`
+- Official MVP categories catalog: `docs/CATEGORIES_MVP_CATALOG.md`

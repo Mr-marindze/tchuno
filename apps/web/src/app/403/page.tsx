@@ -16,7 +16,7 @@ export default function ForbiddenPage() {
           <Link href="/" className="primary">
             Voltar ao início
           </Link>
-          <Link href="/login" className="primary primary--ghost">
+          <Link href="/login?force=1" className="primary primary--ghost">
             Entrar com outra conta
           </Link>
         </div>

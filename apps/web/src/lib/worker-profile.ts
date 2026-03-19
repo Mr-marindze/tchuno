@@ -62,6 +62,21 @@ function normalizePublicName(value: string | null | undefined): string | null {
   return normalized.length > 0 ? normalized : null;
 }
 
+function buildInitials(name: string | null, fallback = "PV"): string {
+  if (!name) {
+    return fallback;
+  }
+
+  const initials = name
+    .split(/\s+/)
+    .filter((token) => token.length > 0)
+    .slice(0, 2)
+    .map((token) => token[0]?.toUpperCase() ?? "")
+    .join("");
+
+  return initials.length > 0 ? initials : fallback;
+}
+
 export function resolveWorkerPublicName(profile: WorkerProfile): string | null {
   const candidates = [
     normalizePublicName(profile.publicName),
@@ -78,6 +93,13 @@ export function resolveWorkerDisplayName(
   fallback = "Profissional verificado",
 ): string {
   return resolveWorkerPublicName(profile) ?? fallback;
+}
+
+export function resolveWorkerInitials(
+  profile: WorkerProfile,
+  fallback = "PV",
+): string {
+  return buildInitials(resolveWorkerPublicName(profile), fallback);
 }
 
 export async function listWorkerProfiles(

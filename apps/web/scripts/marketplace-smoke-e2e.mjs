@@ -28,10 +28,10 @@ const inOneHour = new Date(now.getTime() + 60 * 60 * 1000).toISOString();
 
 const categories = [
   {
-    id: "cat-eletricidade",
-    name: "Eletricidade",
-    slug: "eletricidade",
-    description: "Serviços de eletricidade",
+    id: "cat-eletricista",
+    name: "Eletricista",
+    slug: "eletricista",
+    description: "Serviços de eletricista",
     sortOrder: 10,
     isActive: true,
     createdAt: now.toISOString(),
@@ -42,7 +42,7 @@ const categories = [
 const workerProfile = {
   id: "wp-1",
   userId: "worker-user-1",
-  bio: "Especialista em eletricidade residencial e comercial.",
+  bio: "Especialista em serviços de eletricista residencial e comercial.",
   location: "Maputo, Polana",
   hourlyRate: 1200,
   experienceYears: 6,
@@ -51,9 +51,9 @@ const workerProfile = {
   ratingCount: 8,
   categories: [
     {
-      id: "cat-eletricidade",
-      name: "Eletricidade",
-      slug: "eletricidade",
+      id: "cat-eletricista",
+      name: "Eletricista",
+      slug: "eletricista",
     },
   ],
   createdAt: now.toISOString(),
@@ -64,7 +64,7 @@ const quoteRequestedJob = {
   id: "job-quote-1",
   clientId: "client-1",
   workerProfileId: "wp-1",
-  categoryId: "cat-eletricidade",
+  categoryId: "cat-eletricista",
   pricingMode: "QUOTE_REQUEST",
   title: "Diagnóstico de quadro elétrico",
   description: "Preciso de proposta para revisão do quadro.",
@@ -87,7 +87,7 @@ const completedJob = {
   id: "job-completed-1",
   clientId: "client-1",
   workerProfileId: "wp-1",
-  categoryId: "cat-eletricidade",
+  categoryId: "cat-eletricista",
   pricingMode: "FIXED_PRICE",
   title: "Troca de tomadas",
   description: "Substituição de tomadas antigas.",
@@ -110,7 +110,7 @@ const workerRequestedJob = {
   id: "job-worker-1",
   clientId: "client-2",
   workerProfileId: "wp-1",
-  categoryId: "cat-eletricidade",
+  categoryId: "cat-eletricista",
   pricingMode: "FIXED_PRICE",
   title: "Instalação de disjuntor",
   description: "Preciso trocar disjuntor principal.",
@@ -500,7 +500,7 @@ async function run() {
             { type: "label", value: "Pesquisa principal" },
             { type: "aria", value: "Categorias" },
             { type: "text", value: "Profissionais em destaque" },
-            { type: "text", value: "Encontra profissionais confiáveis" },
+            { type: "text", value: "Encontra profissionais de confiança" },
           ],
         },
         {

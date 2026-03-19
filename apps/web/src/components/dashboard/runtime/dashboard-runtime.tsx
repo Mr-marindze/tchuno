@@ -44,7 +44,7 @@ export function DashboardRuntime({ view }: DashboardRuntimeProps) {
         tone="error"
       >
         <p className="status">
-          <Link href="/login" className="nav-link">
+          <Link href="/login?force=1" className="nav-link">
             Voltar ao login
           </Link>
         </p>

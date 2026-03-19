@@ -1,4 +1,5 @@
 import { MouseEvent, ReactNode } from "react";
+import Image from "next/image";
 import type { StatusBadgeTone } from "@/components/dashboard/dashboard-formatters";
 
 export type MarketplaceWorkerCardDetail = {
@@ -23,6 +24,11 @@ export type MarketplaceWorkerCardComparisonItem = {
   tone?: StatusBadgeTone;
 };
 
+export type MarketplaceWorkerCardImage = {
+  src: string;
+  alt: string;
+};
+
 type MarketplaceWorkerCardProps = {
   title: ReactNode;
   availabilityLabel: string;
@@ -37,6 +43,8 @@ type MarketplaceWorkerCardProps = {
   badges?: ReactNode;
   note?: ReactNode;
   footer?: ReactNode;
+  image?: MarketplaceWorkerCardImage | null;
+  avatarFallbackLabel?: string;
   actions?: ReactNode;
   ctaHint?: ReactNode;
   onCardClick?: () => void;
@@ -57,6 +65,8 @@ export function MarketplaceWorkerCard({
   badges,
   note,
   footer,
+  image = null,
+  avatarFallbackLabel,
   actions,
   ctaHint,
   onCardClick,
@@ -66,6 +76,19 @@ export function MarketplaceWorkerCard({
     rating?.reviewCount === 1
       ? "1 avaliação"
       : `${rating?.reviewCount ?? 0} avaliações`;
+  const fallbackSource =
+    typeof avatarFallbackLabel === "string" && avatarFallbackLabel.trim().length > 0
+      ? avatarFallbackLabel
+      : typeof title === "string"
+        ? title
+        : "Profissional verificado";
+  const avatarInitials = fallbackSource
+    .trim()
+    .split(/\s+/)
+    .filter((token) => token.length > 0)
+    .slice(0, 2)
+    .map((token) => token[0]?.toUpperCase() ?? "")
+    .join("");
 
   function handleCardClick(event: MouseEvent<HTMLElement>) {
     if (!onCardClick) {
@@ -93,18 +116,35 @@ export function MarketplaceWorkerCard({
       onClick={onCardClick ? handleCardClick : undefined}
     >
       <div className="marketplace-worker-card-head">
-        <h3 className="item-title marketplace-worker-name">{title}</h3>
-        <p className="pill-row marketplace-worker-topline">
-          <span className={`status-pill ${availabilityTone}`}>
-            {availabilityLabel}
-          </span>
-          {responseTimeLabel ? (
-            <span className="status-pill is-muted">{responseTimeLabel}</span>
-          ) : null}
-        </p>
-        {relevanceLabel ? (
-          <p className="marketplace-worker-relevance">{relevanceLabel}</p>
-        ) : null}
+        <div className="marketplace-worker-identity">
+          <div className="marketplace-worker-avatar" aria-hidden="true">
+            {image ? (
+              <Image
+                src={image.src}
+                alt={image.alt}
+                width={96}
+                height={96}
+                sizes="56px"
+              />
+            ) : (
+              <span>{avatarInitials || "PV"}</span>
+            )}
+          </div>
+          <div className="marketplace-worker-heading">
+            <h3 className="item-title marketplace-worker-name">{title}</h3>
+            <p className="pill-row marketplace-worker-topline">
+              <span className={`status-pill ${availabilityTone}`}>
+                {availabilityLabel}
+              </span>
+              {responseTimeLabel ? (
+                <span className="status-pill is-muted">{responseTimeLabel}</span>
+              ) : null}
+            </p>
+            {relevanceLabel ? (
+              <p className="marketplace-worker-relevance">{relevanceLabel}</p>
+            ) : null}
+          </div>
+        </div>
       </div>
 
       {rating ? (

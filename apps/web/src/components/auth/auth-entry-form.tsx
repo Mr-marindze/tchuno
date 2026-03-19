@@ -32,6 +32,11 @@ function getSafeQueryNext(searchParams: URLSearchParams | null): string | null {
   return isSafeInternalPath(next) ? next : null;
 }
 
+function getForceLoginFlag(searchParams: URLSearchParams | null): boolean {
+  const value = (searchParams?.get("force") ?? "").trim().toLowerCase();
+  return value === "1" || value === "true" || value === "yes";
+}
+
 function getDefaultPath(auth: AuthResponse, me: unknown): string {
   const fallbackRole =
     auth.user.role === "ADMIN"
@@ -56,6 +61,7 @@ export function AuthEntryForm({ mode }: AuthEntryFormProps) {
   const [status, setStatus] = useState("Pronto para autenticar.");
   const [intentPreview, setIntentPreview] = useState<ReturnType<typeof readAuthIntent>>(null);
   const [safeNextPath, setSafeNextPath] = useState<string | null>(null);
+  const [forceLogin, setForceLogin] = useState(false);
 
   useEffect(() => {
     setIntentPreview(readAuthIntent());
@@ -63,6 +69,7 @@ export function AuthEntryForm({ mode }: AuthEntryFormProps) {
     if (typeof window !== "undefined") {
       const params = new URLSearchParams(window.location.search);
       setSafeNextPath(getSafeQueryNext(params));
+      setForceLogin(getForceLoginFlag(params));
     }
   }, []);
 
@@ -70,6 +77,10 @@ export function AuthEntryForm({ mode }: AuthEntryFormProps) {
     let active = true;
 
     async function bootstrap() {
+      if (forceLogin) {
+        return;
+      }
+
       const session = await ensureSession();
       if (!active || !session) {
         return;
@@ -87,7 +98,7 @@ export function AuthEntryForm({ mode }: AuthEntryFormProps) {
     return () => {
       active = false;
     };
-  }, [router, safeNextPath]);
+  }, [forceLogin, router, safeNextPath]);
 
   async function onSubmit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();

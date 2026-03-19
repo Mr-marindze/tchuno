@@ -33,6 +33,7 @@ type HomeDomainSectionProps = {
   homeJobCounts: HomeJobCounts;
   homePrimaryCta: HomePrimaryCta;
   dashboardRoutes: DashboardRouteMap;
+  showActorLabel: boolean;
   formatJobStatus: (status: JobStatus) => string;
   formatDate: (value: string) => string;
 };
@@ -42,26 +43,27 @@ export function HomeDomainSection({
   homeJobCounts,
   homePrimaryCta,
   dashboardRoutes,
+  showActorLabel,
   formatJobStatus,
   formatDate,
 }: HomeDomainSectionProps) {
   return (
     <section id="overview" className="dashboard-section">
       <DashboardSectionHeader
-        title="Resumo Operacional"
-        subtitle="Onde estás agora, o que está pendente e o próximo passo recomendado."
+        title="Resumo de hoje"
+        subtitle="Estado atual dos teus jobs."
       />
 
       <DashboardActionPanel
         title="Próxima ação principal"
-        description="Foca primeiro no que está pendente para reduzir atrasos no ciclo do job."
+        description="Prioriza o que exige ação agora."
         actions={
           <>
             <Link href={homePrimaryCta.href} className="primary">
               {homePrimaryCta.label}
             </Link>
             <Link href={dashboardRoutes.jobs} className="primary primary--ghost">
-              Ver todos os jobs
+              Ver todos
             </Link>
           </>
         }
@@ -69,36 +71,36 @@ export function HomeDomainSection({
 
       <div className="overview-grid">
         <DashboardSummaryCard
-          label="Jobs com ação pendente"
+          label="Com ação"
           value={homeAttentionItems.length}
-          note="Prioriza estes jobs primeiro."
+          note="Prioriza estes jobs."
         />
         <DashboardSummaryCard
           label="Em progresso"
           value={homeJobCounts.inProgress}
-          note="Serviços ativos que precisam de acompanhamento."
+          note="Serviços ativos."
         />
         <DashboardSummaryCard
-          label="Pendentes de review"
+          label="Sem review"
           value={homeJobCounts.pendingReview}
-          note="Fecha o ciclo de confiança com avaliação."
+          note="Fecha o ciclo com avaliação."
         />
         <DashboardSummaryCard
-          label="Pedidos novos"
+          label="Novos"
           value={homeJobCounts.requested}
-          note="Novos pedidos a aguardar próxima ação."
+          note="Pedidos a aguardar ação."
         />
         <DashboardSummaryCard
           label="Cancelados"
           value={homeJobCounts.canceled}
-          note="Acompanha motivos para evitar recorrência."
+          note="Acompanha os motivos."
         />
       </div>
 
       <div className="result">
         <p className="item-title">Jobs que exigem atenção imediata</p>
         {homeAttentionItems.length === 0 ? (
-          <DashboardEmptyState message="Sem bloqueios imediatos. Podes avançar para gestão completa de jobs." />
+          <DashboardEmptyState message="Sem bloqueios agora. Podes avançar." />
         ) : (
           homeAttentionItems.map((item) => (
             <article key={`${item.actor}-${item.job.id}`} className="list-item job-card">
@@ -108,9 +110,11 @@ export function HomeDomainSection({
                   {formatJobStatus(item.job.status)}
                 </DashboardBadge>
               </p>
-              <p>
-                <strong>Papel:</strong> {item.actor === "client" ? "Cliente" : "Worker"}
-              </p>
+              {showActorLabel ? (
+                <p>
+                  <strong>Papel:</strong> {item.actor === "client" ? "Cliente" : "Prestador"}
+                </p>
+              ) : null}
               <p>
                 <strong>Ação recomendada:</strong> {item.actionLabel}
               </p>
@@ -121,7 +125,7 @@ export function HomeDomainSection({
       </div>
 
       <div className="result">
-        <p className="item-title">Atalhos rápidos</p>
+        <p className="item-title">Atalhos</p>
         <nav className="dashboard-nav" aria-label="Atalhos operacionais">
           <Link href={dashboardRoutes.jobs}>Jobs</Link>
           <Link href={dashboardRoutes.reviews}>Reviews</Link>

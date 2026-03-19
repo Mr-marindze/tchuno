@@ -44,8 +44,8 @@ export function DashboardExperience({
   children,
 }: DashboardExperienceProps) {
   const pathname = usePathname();
-
-  const navPaths = buildDashboardRouteMap(resolveDashboardScope(pathname));
+  const dashboardScope = resolveDashboardScope(pathname);
+  const navPaths = buildDashboardRouteMap(dashboardScope);
 
   const isHomeView = view === "home";
   const isJobsView = view === "jobs";
@@ -54,51 +54,71 @@ export function DashboardExperience({
   const isReviewsView = view === "reviews";
   const isCategoriesView = view === "categories";
   const isAdminView = view === "admin";
+  const navItems =
+    dashboardScope === "customer"
+      ? [
+          { href: navPaths.home, label: "Início", active: isHomeView },
+          { href: navPaths.jobs, label: "Pedidos", active: isJobsView },
+          { href: navPaths.workers, label: "Profissionais", active: isWorkersView },
+          { href: navPaths.profile, label: "Perfil", active: isProfileView },
+        ]
+      : dashboardScope === "provider"
+        ? [
+            { href: navPaths.home, label: "Início", active: isHomeView },
+            { href: navPaths.jobs, label: "Pedidos recebidos", active: isJobsView },
+            { href: navPaths.reviews, label: "Avaliações", active: isReviewsView },
+            {
+              href: navPaths.profile,
+              label: "Perfil profissional",
+              active: isProfileView,
+            },
+          ]
+        : dashboardScope === "admin"
+          ? [
+              { href: navPaths.home, label: "Painel", active: isAdminView },
+              { href: navPaths.workers, label: "Prestadores", active: isWorkersView },
+              { href: navPaths.categories, label: "Categorias", active: isCategoriesView },
+            ]
+          : [
+              { href: navPaths.home, label: "Início", active: isHomeView },
+              { href: navPaths.jobs, label: "Jobs", active: isJobsView },
+              { href: navPaths.workers, label: "Profissionais", active: isWorkersView },
+              { href: navPaths.reviews, label: "Reviews", active: isReviewsView },
+              { href: navPaths.profile, label: "Perfil", active: isProfileView },
+              { href: navPaths.categories, label: "Categorias", active: isCategoriesView },
+            ];
+  const shellKicker =
+    dashboardScope === "customer"
+      ? "Tchuno Cliente"
+      : dashboardScope === "provider"
+        ? "Tchuno Profissional"
+        : dashboardScope === "admin"
+          ? "Tchuno Admin"
+          : "Tchuno Dashboard";
 
   return (
     <main className="shell">
       <section className="card card--wide dashboard-shell">
         <header className="header">
-          <p className="kicker">Tchuno Dashboard</p>
+          <p className="kicker">{shellKicker}</p>
           <h1>{getDashboardTitle(view)}</h1>
           <p className="subtitle">{getDashboardSubtitle(view)}</p>
         </header>
 
         <div className="dashboard-shell-nav">
           <nav className="dashboard-nav" aria-label="Dashboard principal">
-            <Link href={navPaths.home} className={isHomeView ? "active" : undefined}>
-              Início
-            </Link>
-            <Link href={navPaths.jobs} className={isJobsView ? "active" : undefined}>
-              Jobs
-            </Link>
-            <Link
-              href={navPaths.workers}
-              className={isWorkersView ? "active" : undefined}
-            >
-              Profissionais
-            </Link>
-            <Link
-              href={navPaths.reviews}
-              className={isReviewsView ? "active" : undefined}
-            >
-              Reviews
-            </Link>
-            <Link
-              href={navPaths.profile}
-              className={isProfileView ? "active" : undefined}
-            >
-              Perfil
-            </Link>
-            <Link
-              href={navPaths.categories}
-              className={isCategoriesView ? "active" : undefined}
-            >
-              Categorias
-            </Link>
+            {navItems.map((item) => (
+              <Link
+                key={item.href}
+                href={item.href}
+                className={item.active ? "active" : undefined}
+              >
+                {item.label}
+              </Link>
+            ))}
           </nav>
 
-          {isAdmin ? (
+          {isAdmin && dashboardScope !== "admin" ? (
             <nav className="dashboard-nav dashboard-nav--admin" aria-label="Admin">
               <Link
                 href={navPaths.admin}
@@ -110,24 +130,26 @@ export function DashboardExperience({
           ) : null}
         </div>
 
-        <div className="actions cta-actions dashboard-session-actions">
-          <button type="button" onClick={onRefreshNow}>
-            Renovar sessão
-          </button>
-          <button type="button" onClick={onLogout}>
-            Terminar sessão
-          </button>
-          <button type="button" onClick={onLogoutAll}>
-            Terminar todas
-          </button>
-        </div>
+        {isProfileView ? (
+          <div className="actions cta-actions dashboard-session-actions">
+            <button type="button" onClick={onRefreshNow}>
+              Renovar sessão
+            </button>
+            <button type="button" onClick={onLogout}>
+              Terminar sessão
+            </button>
+            <button type="button" onClick={onLogoutAll}>
+              Terminar todas
+            </button>
+          </div>
+        ) : null}
 
         <p className={`status status--${statusTone}`}>Status: {status}</p>
 
         <div className="dashboard-shell-content">{children}</div>
 
         <p className="status footer-link">
-          <Link href="/login" className="nav-link">
+          <Link href="/login?force=1" className="nav-link">
             Voltar ao login
           </Link>
         </p>

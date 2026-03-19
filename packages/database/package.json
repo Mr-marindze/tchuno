@@ -10,6 +10,8 @@
     "postinstall": "prisma generate",
     "migrate:dev": "prisma migrate dev",
     "seed": "prisma db seed",
+    "sync-categories-catalog": "tsx prisma/scripts/sync-categories-catalog.ts",
+    "reset-password": "tsx prisma/scripts/reset-password.ts",
     "lint": "echo \"No lint configured for @tchuno/database\"",
     "test": "echo \"No tests configured for @tchuno/database\""
   },

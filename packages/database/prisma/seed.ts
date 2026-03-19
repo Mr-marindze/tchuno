@@ -1,37 +1,12 @@
 import { JobStatus, PrismaClient } from '@prisma/client';
 import bcrypt from 'bcryptjs';
+import { officialCategories } from './catalog/official-categories';
+import { syncOfficialCategories } from './catalog/sync-official-categories';
 
 const prisma = new PrismaClient();
 const DEMO_PASSWORD = 'demo1234';
 
 type SeedUserKey = 'admin' | 'clientA' | 'clientB' | 'workerA' | 'workerB';
-
-const defaultCategories = [
-  {
-    name: 'Canalizacao',
-    slug: 'canalizacao',
-    description: 'Servicos de canalizacao e reparacoes de agua',
-    sortOrder: 10,
-  },
-  {
-    name: 'Eletricidade',
-    slug: 'eletricidade',
-    description: 'Instalacoes e manutencao eletrica residencial',
-    sortOrder: 20,
-  },
-  {
-    name: 'Pintura',
-    slug: 'pintura',
-    description: 'Pintura de interiores e exteriores',
-    sortOrder: 30,
-  },
-  {
-    name: 'Limpeza',
-    slug: 'limpeza',
-    description: 'Limpeza domestica e pos-obra',
-    sortOrder: 40,
-  },
-];
 
 async function main() {
   const passwordHash = await bcrypt.hash(DEMO_PASSWORD, 10);
@@ -96,23 +71,12 @@ async function main() {
     users[key] = upsertedUser;
   }
 
-  for (const category of defaultCategories) {
-    await prisma.category.upsert({
-      where: { slug: category.slug },
-      update: {
-        name: category.name,
-        description: category.description,
-        sortOrder: category.sortOrder,
-        isActive: true,
-      },
-      create: category,
-    });
-  }
+  const categoriesSync = await syncOfficialCategories(prisma);
 
   const categoryRows = await prisma.category.findMany({
     where: {
       slug: {
-        in: defaultCategories.map((category) => category.slug),
+        in: officialCategories.map((category) => category.slug),
       },
     },
     select: {
@@ -139,7 +103,7 @@ async function main() {
   };
 
   const canalizacaoId = getCategoryId('canalizacao');
-  const eletricidadeId = getCategoryId('eletricidade');
+  const eletricistaId = getCategoryId('eletricista');
   const pinturaId = getCategoryId('pintura');
   const limpezaId = getCategoryId('limpeza');
 
@@ -166,7 +130,7 @@ async function main() {
   const workerAProfile = await prisma.workerProfile.upsert({
     where: { userId: users.workerA.id },
     update: {
-      bio: 'Especialista em eletricidade e pintura de interiores.',
+      bio: 'Especialista em serviços elétricos e pintura de interiores.',
       location: 'Maputo - Polana',
       hourlyRate: 1200,
       experienceYears: 6,
@@ -174,7 +138,7 @@ async function main() {
     },
     create: {
       userId: users.workerA.id,
-      bio: 'Especialista em eletricidade e pintura de interiores.',
+      bio: 'Especialista em serviços elétricos e pintura de interiores.',
       location: 'Maputo - Polana',
       hourlyRate: 1200,
       experienceYears: 6,
@@ -215,11 +179,11 @@ async function main() {
     data: [
       {
         workerProfileId: adminProfile.id,
-        categoryId: eletricidadeId,
+        categoryId: eletricistaId,
       },
       {
         workerProfileId: workerAProfile.id,
-        categoryId: eletricidadeId,
+        categoryId: eletricistaId,
       },
       {
         workerProfileId: workerAProfile.id,
@@ -250,7 +214,7 @@ async function main() {
     data: {
       clientId: users.clientA.id,
       workerProfileId: workerAProfile.id,
-      categoryId: eletricidadeId,
+      categoryId: eletricistaId,
       title: 'Troca de disjuntor principal',
       description: 'Disjuntor antigo com quedas frequentes de energia.',
       budget: 4500,
@@ -293,7 +257,7 @@ async function main() {
     data: {
       clientId: users.clientA.id,
       workerProfileId: workerAProfile.id,
-      categoryId: eletricidadeId,
+      categoryId: eletricistaId,
       title: 'Instalar tomadas no escritorio',
       description: 'Adicionar 3 tomadas e revisar quadro eletrico.',
       budget: 3800,
@@ -373,7 +337,14 @@ async function main() {
     });
   }
 
-  console.log(`Seed completed with ${defaultCategories.length} categories.`);
+  console.log(
+    `Seed completed with ${categoriesSync.upsertedOfficialCount} official categories.`,
+  );
+  if (categoriesSync.mergedLegacyCount > 0) {
+    console.log(
+      `Legacy categories merged: ${categoriesSync.mergedLegacyCount} (worker links reassigned: ${categoriesSync.reassignedWorkerLinks}, jobs reassigned: ${categoriesSync.reassignedJobs}).`,
+    );
+  }
   console.log(`Demo password for seeded users: ${DEMO_PASSWORD}`);
   console.log(
     'Seeded users: admin@tchuno.local, client1@tchuno.local, client2@tchuno.local, worker1@tchuno.local, worker2@tchuno.local',

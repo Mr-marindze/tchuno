@@ -134,7 +134,7 @@ export function RouteGuard({ requiredAccess, children }: RouteGuardProps) {
           }
         }
 
-        if (role === "provider" || adminRoles.has(role)) {
+        if (role === "provider") {
           setState({ status: "allowed" });
           return;
         }
@@ -157,7 +157,7 @@ export function RouteGuard({ requiredAccess, children }: RouteGuardProps) {
       }
 
       if (requiredAccess === "customer") {
-        if (role === "customer" || adminRoles.has(role)) {
+        if (role === "customer") {
           setState({ status: "allowed" });
           return;
         }

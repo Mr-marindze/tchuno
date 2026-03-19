@@ -1029,7 +1029,7 @@ describe('Auth and Sessions (e2e)', () => {
     await request(app.getHttpServer())
       .get('/jobs/me/worker')
       .set('Authorization', `Bearer ${workerAuth.accessToken}`)
-      .expect(404);
+      .expect(403);
 
     await prisma.user.create({
       data: {

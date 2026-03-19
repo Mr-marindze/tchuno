@@ -5,7 +5,7 @@
 .landingSurface {
   display: grid;
   gap: 1.1rem;
-  background: #ffffff;
+  background: linear-gradient(180deg, #f9fcff 0%, #f2f7ff 100%);
 }
 
 .landingHero {
@@ -54,6 +54,18 @@
   color: #dbeafe;
 }
 
+.srOnly {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  margin: -1px;
+  overflow: hidden;
+  clip: rect(0, 0, 0, 0);
+  white-space: nowrap;
+  border: 0;
+}
+
 .landingSearchRow {
   display: flex;
   gap: 0.6rem;
@@ -95,9 +107,9 @@
 }
 
 .heroPrimaryActions :global(.primary--ghost) {
-  border-color: rgba(191, 219, 254, 0.7);
+  border-color: rgba(191, 219, 254, 0.5);
   color: #dbeafe;
-  background: rgba(15, 23, 42, 0.14);
+  background: rgba(15, 23, 42, 0.04);
 }
 
 .heroPrimaryActions :global(.primary--ghost:hover) {
@@ -136,14 +148,7 @@
 .landingTrust {
   border: 1px solid var(--border);
   border-radius: 18px;
-  background: #ffffff;
-  padding: 1rem;
-}
-
-.landingAreas {
-  border: 1px solid var(--border);
-  border-radius: 18px;
-  background: #ffffff;
+  background: var(--surface-soft);
   padding: 1rem;
 }
 
@@ -152,46 +157,12 @@
   gap: 0.18rem;
 }
 
-.landingAreasGrid {
-  margin-top: 0.66rem;
-  display: grid;
-  gap: 0.6rem;
-  grid-template-columns: repeat(3, minmax(0, 1fr));
-}
-
-.landingAreaCard {
-  text-align: left;
-  border: 1px solid var(--border);
-  border-radius: 14px;
-  background: #f8fbff;
-  padding: 0.76rem 0.8rem;
-  cursor: pointer;
-}
-
-.landingAreaCard:hover {
-  border-color: #93c5fd;
-  background: #eff6ff;
-}
-
-.landingAreaTitle {
-  margin: 0;
-  font-size: 0.93rem;
-  font-weight: 700;
-  color: #0f172a;
-}
-
-.landingAreaHint {
-  margin: 0.26rem 0 0;
-  font-size: 0.79rem;
-  color: #475569;
-}
-
 .landingResultActions {
   margin-top: 0.55rem;
 }
 
 .landingTrustGrid :global(.metric-card) {
-  background: #f8fbff;
+  background: #ffffff;
   border-radius: 14px;
 }
 
@@ -204,7 +175,7 @@
 .howItWorks {
   border: 1px solid var(--border);
   border-radius: 18px;
-  background: #ffffff;
+  background: var(--surface-soft);
   padding: 1rem;
 }
 
@@ -218,7 +189,7 @@
 .howJourneyCard {
   border: 1px solid var(--border);
   border-radius: 16px;
-  background: #f8fbff;
+  background: #ffffff;
   padding: 0.82rem;
   display: grid;
   gap: 0.55rem;
@@ -295,10 +266,6 @@
   .heroPrimaryActions :global(.primary),
   .heroPrimaryActions :global(.primary--ghost) {
     width: 100%;
-  }
-
-  .landingAreasGrid {
-    grid-template-columns: 1fr;
   }
 
   .howJourneyGrid {

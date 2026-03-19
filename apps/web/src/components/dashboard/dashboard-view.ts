@@ -10,7 +10,7 @@ export type DashboardView =
 export function getDashboardTitle(view: DashboardView): string {
   switch (view) {
     case "home":
-      return "Home Operacional";
+      return "Painel";
     case "jobs":
       return "Gestão de Jobs";
     case "workers":
@@ -30,7 +30,7 @@ export function getDashboardTitle(view: DashboardView): string {
 
 export function getDashboardSubtitle(view: DashboardView): string {
   if (view === "home") {
-    return "Visão rápida do que está pendente e próximo passo recomendado.";
+    return "Vê o que precisa da tua ação hoje.";
   }
 
   return "Área dedicada para reduzir ruído e focar na ação certa.";

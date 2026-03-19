@@ -17,7 +17,7 @@ export default function RecoverPasswordPage() {
         </p>
 
         <div className="actions actions--inline">
-          <Link href="/login" className="primary">
+          <Link href="/login?force=1" className="primary">
             Voltar ao login
           </Link>
           <Link href="/contacto" className="primary primary--ghost">

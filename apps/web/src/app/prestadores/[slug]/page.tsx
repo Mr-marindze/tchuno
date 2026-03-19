@@ -5,6 +5,7 @@ import { listWorkerReviews } from "@/lib/reviews";
 import {
   getWorkerProfileByUserId,
   resolveWorkerDisplayName,
+  resolveWorkerInitials,
 } from "@/lib/worker-profile";
 
 type ProviderDetailsPageProps = {
@@ -21,6 +22,7 @@ export default async function ProviderDetailsPage({
   try {
     const profile = await getWorkerProfileByUserId(slug);
     const publicName = resolveWorkerDisplayName(profile);
+    const profileInitials = resolveWorkerInitials(profile);
     const reviews = await listWorkerReviews(profile.id, {
       page: 1,
       limit: 5,
@@ -32,6 +34,21 @@ export default async function ProviderDetailsPage({
         title={publicName}
         description="Perfil público com reputação, disponibilidade e contexto para decisão rápida."
       >
+        <article className="panel-card provider-identity">
+          <div className="provider-identity-avatar" aria-hidden="true">
+            <span>{profileInitials}</span>
+          </div>
+          <div className="provider-identity-content">
+            <h2>{publicName}</h2>
+            <p className="subtitle">
+              {profile.categories[0]?.name ?? "Profissional verificado"}
+            </p>
+            <p className="subtitle">
+              {profile.location ?? "Localização não indicada"}
+            </p>
+          </div>
+        </article>
+
         <div className="panel-grid">
           <article className="panel-card">
             <h2>Identidade profissional</h2>

@@ -6,7 +6,6 @@ import { FormEvent, useEffect, useMemo, useRef, useState } from "react";
 import {
   formatRatingValue,
   formatStars,
-  getStatusTone,
 } from "@/components/dashboard/dashboard-formatters";
 import { useMarketplaceDiscovery } from "@/components/marketplace/use-marketplace-discovery";
 import { MarketplaceWorkerCard } from "@/components/marketplace/marketplace-worker-card";
@@ -16,7 +15,6 @@ import {
   getWorkerDecisionBadges,
   getWorkerMainCategoryLabel,
   getWorkerPriceLabel,
-  getWorkerResponseEtaLabel,
 } from "@/components/marketplace/marketplace-worker-presenter";
 import { buildAuthRoute, saveAuthIntent } from "@/lib/access-control";
 import { trackEvent } from "@/lib/tracking";
@@ -25,71 +23,42 @@ import styles from "./page.module.css";
 
 type QuickAreaChip = {
   label: string;
-  searchTerm: string;
-  categorySlugHint?: string;
+  categorySlug: string;
 };
 
 type JourneyFlow = {
+  key: "client" | "provider";
   audience: string;
   title: string;
-  summary: string;
   steps: string[];
   ctaLabel: string;
   ctaHref: string;
 };
 
-const quickAreaChips: QuickAreaChip[] = [
-  {
-    label: "Casa & Reparações",
-    searchTerm: "canalizador",
-    categorySlugHint: "canalizacao",
-  },
-  {
-    label: "Aulas & Formação",
-    searchTerm: "explicador",
-  },
-  {
-    label: "Saúde & Bem-estar",
-    searchTerm: "fisioterapeuta",
-  },
-  {
-    label: "Jurídico & Consultoria",
-    searchTerm: "advogado",
-  },
-  {
-    label: "Negócios & Digital",
-    searchTerm: "designer",
-  },
-  {
-    label: "Eventos & Criativos",
-    searchTerm: "fotógrafo",
-  },
-];
-
 const journeyFlows: JourneyFlow[] = [
   {
+    key: "client",
     audience: "Para clientes",
-    title: "Encontra e contrata com clareza",
-    summary: "Tudo em poucos passos, sem complicação.",
+    title: "Resolve o teu problema rapidamente",
     steps: [
-      "Diga o que precisa.",
-      "Receba respostas dos profissionais.",
-      "Escolha o profissional ideal para si.",
+      "Diz o que precisas",
+      "Recebe respostas de profissionais reais",
+      "Escolhe quem melhor se adapta a ti",
     ],
     ctaLabel: "Encontrar profissional",
     ctaHref: "#discover",
   },
   {
+    key: "provider",
     audience: "Para profissionais",
-    title: "Cria oportunidades com o teu talento",
-    summary: "Mostra o teu perfil e recebe pedidos de várias áreas.",
+    title: "Ganha dinheiro com as tuas competências",
     steps: [
-      "Crie o seu perfil profissional.",
-      "Receba pedidos alinhados à sua área.",
-      "Ganhe pelo seu trabalho com valor negociado.",
+      "Cria o teu perfil em minutos",
+      "Recebe pedidos na tua área",
+      "Define o teu valor e começa a trabalhar",
     ],
     ctaLabel: "Quero trabalhar no Tchuno",
-    ctaHref: "/registo?next=%2Fpro%2Fperfil",
+    ctaHref: "/registo?next=%2Fapp%2Fperfil",
   },
 ];
 
@@ -106,7 +75,6 @@ export default function Home() {
   });
   const {
     discoveryLoading,
-    discoveryMessage,
     discoverySearch,
     discoveryCategory,
     marketCategories,
@@ -126,6 +94,34 @@ export default function Home() {
     () => visibleWorkers.slice(0, 6),
     [visibleWorkers],
   );
+  const quickAreaChips = useMemo<QuickAreaChip[]>(
+    () =>
+      marketCategories.slice(0, 4).map((category) => ({
+        label: category.name,
+        categorySlug: category.slug,
+      })),
+    [marketCategories],
+  );
+  const trustReviewCount = useMemo(
+    () =>
+      featuredPreviewWorkers.reduce(
+        (total, worker) => total + (worker.ratingCount || 0),
+        0,
+      ),
+    [featuredPreviewWorkers],
+  );
+  const trustCountValue =
+    trustSummary.totalCount >= 5 ? String(trustSummary.totalCount) : "A crescer";
+  const trustCountNote =
+    trustSummary.totalCount >= 5
+      ? "Profissionais disponíveis em várias áreas"
+      : "Catálogo em expansão.";
+  const trustRatingValue =
+    trustReviewCount >= 5 ? `${trustSummary.avgRating}/5` : "Em atualização";
+  const trustRatingNote =
+    trustReviewCount >= 5
+      ? `Com base em ${trustReviewCount} avaliações públicas`
+      : "A recolher mais avaliações.";
   const trustResponseEta = useMemo(() => {
     const highConfidence = featuredPreviewWorkers.some(
       (worker) =>
@@ -147,7 +143,6 @@ export default function Home() {
 
     return "Até 1h";
   }, [featuredPreviewWorkers]);
-
   const workerHeuristicSnapshot = useMemo(
     () =>
       featuredPreviewWorkers.map((worker) => {
@@ -324,37 +319,13 @@ export default function Home() {
   }
 
   function onQuickAreaClick(chip: QuickAreaChip) {
-    onDiscoverySearchChange(chip.searchTerm);
-
-    const categoryMatch = marketCategories.find((category) => {
-      const normalizedName = category.name.trim().toLowerCase();
-      const normalizedSlug = category.slug.trim().toLowerCase();
-      const normalizedHint = chip.categorySlugHint?.trim().toLowerCase();
-
-      if (!normalizedHint) {
-        return false;
-      }
-
-      return (
-        normalizedSlug === normalizedHint ||
-        normalizedName.includes(normalizedHint)
-      );
-    });
-
-    if (categoryMatch && discoveryCategory !== categoryMatch.slug) {
-      onToggleDiscoveryCategory(categoryMatch.slug);
+    if (discoverySearch.trim().length > 0) {
+      onDiscoverySearchChange("");
     }
 
-    scrollToDiscoverResults();
+    onToggleDiscoveryCategory(chip.categorySlug);
 
-    trackEvent("marketplace.category.select", {
-      source: "landing.discovery",
-      view: "landing",
-      categorySlug: categoryMatch?.slug ?? null,
-      previousCategorySlug: discoveryCategory || null,
-      categoryCount: marketCategories.length,
-      resultCount: visibleWorkers.length,
-    });
+    scrollToDiscoverResults();
   }
 
   return (
@@ -364,13 +335,13 @@ export default function Home() {
           <p className={`kicker ${styles.heroKicker}`}>Tchuno • Marketplace</p>
           <h1 className={styles.heroTitle}>O que precisas hoje?</h1>
           <p className={`subtitle ${styles.heroSubtitle}`}>
-            Encontra profissionais confiáveis perto de ti.
+            Encontra profissionais de confiança perto de ti.
           </p>
 
           <form className={styles.landingSearch} onSubmit={onSubmitHeroSearch}>
             <label
               htmlFor="landing-search-input"
-              className={styles.landingSearchLabel}
+              className={styles.srOnly}
             >
               Pesquisa principal
             </label>
@@ -380,7 +351,7 @@ export default function Home() {
                 type="search"
                 value={discoverySearch}
                 onChange={(event) => onDiscoverySearchChange(event.target.value)}
-                placeholder="Procurar canalizador, eletricista, limpeza..."
+                placeholder="Procurar professor, eletricista, designer..."
                 className={styles.landingSearchInput}
               />
               <button type="submit" className={`primary ${styles.searchSubmit}`}>
@@ -390,15 +361,8 @@ export default function Home() {
           </form>
 
           <div className={styles.heroPrimaryActions}>
-            <button
-              type="button"
-              className="primary"
-              onClick={scrollToDiscoverResults}
-            >
-              Encontrar profissional
-            </button>
-            <Link href="/registo?next=%2Fpro%2Fperfil" className="primary primary--ghost">
-              Registar-me como profissional
+            <Link href="/registo?next=%2Fapp%2Fperfil" className="primary primary--ghost">
+              Quero trabalhar no Tchuno
             </Link>
           </div>
 
@@ -415,11 +379,8 @@ export default function Home() {
             ))}
           </div>
 
-          <p className={`status status--${getStatusTone(discoveryMessage)} ${styles.heroStatus}`}>
-            {discoveryMessage}
-          </p>
           <p className={styles.heroPolicy}>
-            O valor final é negociado entre cliente e profissional dentro do Tchuno.
+            O valor é combinado entre cliente e profissional no Tchuno.
           </p>
         </header>
 
@@ -429,44 +390,20 @@ export default function Home() {
           </div>
           <div className={`overview-grid ${styles.landingTrustGrid}`}>
             <article className="metric-card">
-              <p className="metric-label">Profissionais em destaque</p>
-              <p className="metric-value">{trustSummary.totalCount}</p>
-              <p className="metric-note">
-                Profissionais disponíveis em várias áreas
-              </p>
+              <p className="metric-label">Profissionais disponíveis</p>
+              <p className="metric-value">{trustCountValue}</p>
+              <p className="metric-note">{trustCountNote}</p>
             </article>
             <article className="metric-card">
               <p className="metric-label">Avaliação média</p>
-              <p className="metric-value">{trustSummary.avgRating}/5</p>
-              <p className="metric-note">Com base em avaliações públicas</p>
+              <p className="metric-value">{trustRatingValue}</p>
+              <p className="metric-note">{trustRatingNote}</p>
             </article>
             <article className="metric-card">
               <p className="metric-label">Resposta média estimada</p>
               <p className="metric-value">{trustResponseEta}</p>
               <p className="metric-note">Estimativa baseada no histórico</p>
             </article>
-          </div>
-        </section>
-
-        <section className={styles.landingAreas} aria-label="Grandes áreas de serviço">
-          <div className={styles.marketplaceSectionHeader}>
-            <h2 className="section-title">Grandes áreas de serviço</h2>
-            <p className="section-lead">
-              O Tchuno liga clientes a profissionais de várias áreas, não só serviços domésticos.
-            </p>
-          </div>
-          <div className={styles.landingAreasGrid}>
-            {quickAreaChips.map((chip) => (
-              <button
-                key={`area-${chip.label}`}
-                type="button"
-                className={styles.landingAreaCard}
-                onClick={() => onQuickAreaClick(chip)}
-              >
-                <p className={styles.landingAreaTitle}>{chip.label}</p>
-                <p className={styles.landingAreaHint}>Explorar profissionais</p>
-              </button>
-            ))}
           </div>
         </section>
 
@@ -479,17 +416,10 @@ export default function Home() {
           </div>
 
           <div className={`actions actions--inline ${styles.landingResultActions}`}>
-            <button type="button" onClick={onResetDiscoveryFilters}>
-              Limpar filtros
-            </button>
             <Link href="/prestadores" className="primary primary--ghost">
               Ver catálogo completo
             </Link>
           </div>
-
-          <p className={styles.discoveryPolicy}>
-            O Tchuno não fixa preços. Cliente e profissional combinam o valor do serviço na plataforma.
-          </p>
 
           <div className="dashboard-nav marketplace-chip-grid" aria-label="Categorias">
             {visibleCategories.length === 0 ? (
@@ -499,7 +429,7 @@ export default function Home() {
                 </p>
               </div>
             ) : (
-              visibleCategories.map((category) => (
+              visibleCategories.slice(0, 6).map((category) => (
                 <button
                   key={category.id}
                   type="button"
@@ -512,7 +442,16 @@ export default function Home() {
                 </button>
               ))
             )}
+            {visibleCategories.length > 6 ? (
+              <Link href="/categorias" className="marketplace-inline-link">
+                Ver todas as áreas
+              </Link>
+            ) : null}
           </div>
+
+          <p className={styles.discoveryPolicy}>
+            Valor combinado diretamente entre cliente e profissional.
+          </p>
 
           <div className="panel-grid marketplace-worker-grid">
             {discoveryLoading ? (
@@ -562,15 +501,6 @@ export default function Home() {
                   workerRanking.strongHighlightById[worker.id] ?? false;
                 const scoreBreakdown =
                   workerRanking.scoreBreakdownById[worker.id] ?? null;
-                const responseEta = getWorkerResponseEtaLabel({
-                  isAvailable: worker.isAvailable,
-                  ratingValue,
-                  ratingCount: worker.ratingCount,
-                  experienceYears: worker.experienceYears,
-                  hourlyRate: worker.hourlyRate,
-                  ratingRank: workerRanking.ratingRankById[worker.id] ?? null,
-                  priceRank: workerRanking.priceRankById[worker.id] ?? null,
-                });
                 const decisionBadges = getWorkerDecisionBadges({
                   isAvailable: worker.isAvailable,
                   ratingValue,
@@ -590,13 +520,13 @@ export default function Home() {
                   <MarketplaceWorkerCard
                     key={worker.id}
                     title={workerTitle}
+                    avatarFallbackLabel={workerTitle}
                     highlighted={isStrongHighlight}
                     relevanceLabel={isStrongHighlight ? rankingLabel : undefined}
                     availabilityTone={worker.isAvailable ? "is-ok" : "is-muted"}
                     availabilityLabel={
                       worker.isAvailable ? "Disponível" : "Agenda limitada"
                     }
-                    responseTimeLabel={responseEta}
                     rating={{
                       stars: formatStars(worker.ratingAvg),
                       value: formatRatingValue(worker.ratingAvg),
@@ -606,10 +536,6 @@ export default function Home() {
                       {
                         label: "Especialidade",
                         value: mainCategoryLabel,
-                      },
-                      {
-                        label: "Localização",
-                        value: worker.location ?? "Não indicada",
                       },
                     ]}
                     badges={
@@ -623,15 +549,14 @@ export default function Home() {
                     }
                     details={[
                       {
+                        label: "Localização",
+                        value: worker.location ?? "Não indicada",
+                      },
+                      {
                         label: "Preço",
                         value: priceLabel,
                       },
                     ]}
-                    ctaHint={
-                      hasSession
-                        ? "Valor combinado diretamente entre cliente e profissional."
-                        : "Faz login para pedir serviço e continuar sem perder o contexto."
-                    }
                     onCardClick={() =>
                       trackEvent("marketplace.worker.card.click", {
                         source: "landing.worker_card",
@@ -642,48 +567,48 @@ export default function Home() {
                       })
                     }
                     actions={
-                      <>
-                        {hasSession ? (
-                          <Link
-                            href="/app/pedidos#job-create"
-                            className="primary"
-                            onClick={() =>
-                              trackEvent("marketplace.cta.click", {
-                                source: "landing.worker_card",
-                                view: "landing",
-                                workerId: worker.id,
-                                label: ctaCopy.primaryLabel,
-                                ctaType: "primary",
-                                sessionState: "authenticated",
-                              })
-                            }
-                          >
-                            {ctaCopy.primaryLabel}
-                          </Link>
-                        ) : (
-                          <button
-                            type="button"
-                            className="primary"
-                            onClick={() =>
-                              redirectToLoginWithIntent({
-                                nextPath: "/app/pedidos#job-create",
-                                sourcePath: "/",
-                                selectedService:
-                                  discoverySearch.trim() || mainCategoryLabel || undefined,
-                                selectedProviderId: worker.id,
-                              })
-                            }
-                          >
-                            Entrar para pedir serviço
-                          </button>
-                        )}
+                      hasSession ? (
                         <Link
-                          href={`/prestadores/${worker.userId}`}
-                          className="primary primary--ghost"
+                          href="/app/pedidos#job-create"
+                          className="primary"
+                          onClick={() =>
+                            trackEvent("marketplace.cta.click", {
+                              source: "landing.worker_card",
+                              view: "landing",
+                              workerId: worker.id,
+                              label: ctaCopy.primaryLabel,
+                              ctaType: "primary",
+                              sessionState: "authenticated",
+                            })
+                          }
                         >
-                          Ver perfil
+                          {ctaCopy.primaryLabel}
                         </Link>
-                      </>
+                      ) : (
+                        <button
+                          type="button"
+                          className="primary"
+                          onClick={() =>
+                            redirectToLoginWithIntent({
+                              nextPath: "/app/pedidos#job-create",
+                              sourcePath: "/",
+                              selectedService:
+                                discoverySearch.trim() || mainCategoryLabel || undefined,
+                              selectedProviderId: worker.id,
+                            })
+                          }
+                        >
+                          Entrar para pedir serviço
+                        </button>
+                      )
+                    }
+                    footer={
+                      <Link
+                        href={`/prestadores/${worker.userId}`}
+                        className="marketplace-inline-link"
+                      >
+                        Ver perfil
+                      </Link>
                     }
                   />
                 );
@@ -692,58 +617,65 @@ export default function Home() {
           </div>
         </section>
 
-        <section className={styles.howItWorks} aria-label="Como funciona">
-          <div className={styles.marketplaceSectionHeader}>
+        <section className="landing-how" aria-label="Como funciona">
+          <div className="landing-how-head">
             <h2 className="section-title">Como funciona no Tchuno</h2>
             <p className="section-lead">
-              Um fluxo simples para quem procura serviços e para quem quer
-              criar oportunidades de trabalho.
+              Encontra quem resolve o teu problema ou começa a ganhar com o teu talento.
+              Tudo em poucos passos.
             </p>
           </div>
 
-          <div className={styles.howJourneyGrid}>
+          <div className="landing-how-grid">
             {journeyFlows.map((journey) => (
-              <article key={journey.audience} className={styles.howJourneyCard}>
-                <p className={styles.howJourneyAudience}>{journey.audience}</p>
+              <article
+                key={journey.audience}
+                className={`landing-how-card ${
+                  journey.key === "client" ? "is-client" : "is-provider"
+                }`}
+              >
+                <p className="landing-how-audience">{journey.audience}</p>
                 <h3>{journey.title}</h3>
-                <p>{journey.summary}</p>
-                <ol className={styles.howJourneySteps}>
-                  {journey.steps.map((step) => (
-                    <li key={step}>{step}</li>
+                <ol className="landing-how-steps">
+                  {journey.steps.map((step, index) => (
+                    <li key={step}>
+                      <span className="landing-how-step-index">{index + 1}</span>
+                      <span>{step}</span>
+                    </li>
                   ))}
                 </ol>
                 {journey.ctaHref.startsWith("#") ? (
                   <button
                     type="button"
-                    className="primary"
+                    className={`primary landing-how-cta${
+                      journey.key === "provider" ? " primary--ghost" : ""
+                    }`}
                     onClick={scrollToDiscoverResults}
                   >
                     {journey.ctaLabel}
                   </button>
                 ) : (
-                  <Link href={journey.ctaHref} className="primary">
+                  <Link
+                    href={journey.ctaHref}
+                    className={`primary landing-how-cta${
+                      journey.key === "provider" ? " primary--ghost" : ""
+                    }`}
+                  >
                     {journey.ctaLabel}
                   </Link>
                 )}
               </article>
             ))}
           </div>
-        </section>
 
-        <section className={styles.landingFinalCta}>
-          <h2>Pronto para avançar?</h2>
-          <p>
-            Escolhe o tipo de ação que faz mais sentido para ti e continua no teu ritmo.
-          </p>
-          <div className="actions actions--inline">
-            <Link href="/dashboard" className="primary">
+          <div className="landing-how-final">
+            <h3>Começa agora, sem complicação</h3>
+            <Link href="/dashboard" className="primary landing-how-final-cta">
               Entrar no Tchuno
-            </Link>
-            <Link href="/registo?next=%2Fpro%2Fperfil" className="primary primary--ghost">
-              Quero trabalhar no Tchuno
             </Link>
           </div>
         </section>
+
       </section>
     </main>
   );
