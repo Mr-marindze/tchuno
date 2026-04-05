@@ -1,5 +1,5 @@
 import { API_URL } from '@/lib/auth';
-import { readApiError } from '@/lib/http-errors';
+import { parseApiError, readApiError, toApiError } from '@/lib/http-errors';
 import { PaginatedResponse } from '@/lib/pagination';
 
 export type PaymentIntentStatus =
@@ -144,6 +144,10 @@ type ListPaymentsQuery = {
   page?: number;
   limit?: number;
   status?: string;
+};
+
+type AdminRequestOptions = {
+  reauthToken?: string;
 };
 
 function buildQuery(query?: ListPaymentsQuery): string {
@@ -402,5 +406,156 @@ export async function reconcileAdminPendingCharges(
     reversed: number;
     stillPending: number;
     errors: Array<{ transactionId: string; reason: string }>;
+  };
+}
+
+export async function createAdminRefund(
+  accessToken: string,
+  input: {
+    paymentIntentId: string;
+    reason: string;
+    amount?: number;
+  },
+  options?: AdminRequestOptions,
+): Promise<RefundRequest> {
+  const response = await fetch(`${API_URL}/admin/payments/refunds`, {
+    method: 'POST',
+    headers: {
+      Authorization: `Bearer ${accessToken}`,
+      'Content-Type': 'application/json',
+      ...(options?.reauthToken
+        ? {
+            'x-reauth-token': options.reauthToken,
+          }
+        : {}),
+    },
+    body: JSON.stringify(input),
+  });
+
+  if (!response.ok) {
+    throw toApiError(await parseApiError(response));
+  }
+
+  return (await response.json()) as RefundRequest;
+}
+
+export async function createAdminPayout(
+  accessToken: string,
+  input: {
+    providerUserId: string;
+    amount: number;
+    paymentIntentId?: string;
+    jobId?: string;
+    currency?: string;
+    provider?: 'INTERNAL' | 'MPESA' | 'EMOLA' | 'MKESH' | 'BANK_TRANSFER' | 'MANUAL';
+  },
+  options?: AdminRequestOptions,
+): Promise<Payout> {
+  const response = await fetch(`${API_URL}/admin/payments/payouts`, {
+    method: 'POST',
+    headers: {
+      Authorization: `Bearer ${accessToken}`,
+      'Content-Type': 'application/json',
+      ...(options?.reauthToken
+        ? {
+            'x-reauth-token': options.reauthToken,
+          }
+        : {}),
+    },
+    body: JSON.stringify(input),
+  });
+
+  if (!response.ok) {
+    throw toApiError(await parseApiError(response));
+  }
+
+  return (await response.json()) as Payout;
+}
+
+export async function approveAdminPayout(
+  accessToken: string,
+  payoutId: string,
+  options?: AdminRequestOptions,
+): Promise<Payout> {
+  const response = await fetch(`${API_URL}/admin/payments/payouts/${payoutId}/approve`, {
+    method: 'POST',
+    headers: {
+      Authorization: `Bearer ${accessToken}`,
+      ...(options?.reauthToken
+        ? {
+            'x-reauth-token': options.reauthToken,
+          }
+        : {}),
+    },
+  });
+
+  if (!response.ok) {
+    throw toApiError(await parseApiError(response));
+  }
+
+  return (await response.json()) as Payout;
+}
+
+export async function processAdminPayout(
+  accessToken: string,
+  payoutId: string,
+  input?: {
+    simulate?: 'success' | 'pending' | 'failed';
+    providerReference?: string;
+  },
+  options?: AdminRequestOptions,
+): Promise<Payout> {
+  const response = await fetch(`${API_URL}/admin/payments/payouts/${payoutId}/process`, {
+    method: 'POST',
+    headers: {
+      Authorization: `Bearer ${accessToken}`,
+      'Content-Type': 'application/json',
+      ...(options?.reauthToken
+        ? {
+            'x-reauth-token': options.reauthToken,
+          }
+        : {}),
+    },
+    body: JSON.stringify(input ?? {}),
+  });
+
+  if (!response.ok) {
+    throw toApiError(await parseApiError(response));
+  }
+
+  return (await response.json()) as Payout;
+}
+
+export async function releaseAdminFunds(
+  accessToken: string,
+  jobId: string,
+  options?: AdminRequestOptions,
+): Promise<{
+  jobId: string;
+  paymentIntentId: string;
+  releasedAmount: number;
+  currency: string;
+}> {
+  const response = await fetch(`${API_URL}/admin/payments/release/${jobId}`, {
+    method: 'POST',
+    headers: {
+      Authorization: `Bearer ${accessToken}`,
+      ...(options?.reauthToken
+        ? {
+            'x-reauth-token': options.reauthToken,
+          }
+        : {}),
+    },
+  });
+
+  if (!response.ok) {
+    throw toApiError(await parseApiError(response));
+  }
+
+  return (await response.json()) as {
+    jobId: string;
+    paymentIntentId: string;
+    releasedAmount: number;
+    currency: string;
   };
 }
