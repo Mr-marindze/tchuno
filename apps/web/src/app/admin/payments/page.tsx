@@ -24,6 +24,43 @@ import {
   releaseAdminFunds,
 } from '@/lib/payments';
 
+type AdminTab = 'intents' | 'payouts' | 'refunds' | 'reconciliation';
+
+const intentStatusLabel: Record<string, string> = {
+  CREATED: 'Criado',
+  AWAITING_PAYMENT: 'Aguardando pagamento',
+  PAID_PARTIAL: 'Sinal pago',
+  PENDING_CONFIRMATION: 'Em confirmação',
+  SUCCEEDED: 'Pago',
+  FAILED: 'Falhado',
+  EXPIRED: 'Expirado',
+  CANCELED: 'Cancelado',
+};
+
+function formatCurrencyMzn(value: number): string {
+  return new Intl.NumberFormat('pt-PT', {
+    style: 'currency',
+    currency: 'MZN',
+    maximumFractionDigits: 0,
+  }).format(value);
+}
+
+function statusBadgeClass(status: string): string {
+  if (['SUCCEEDED', 'PAID_PARTIAL', 'PAID'].includes(status)) {
+    return 'bg-emerald-100 text-emerald-700';
+  }
+
+  if (['AWAITING_PAYMENT', 'PENDING', 'PROCESSING', 'PENDING_CONFIRMATION'].includes(status)) {
+    return 'bg-orange-100 text-orange-700';
+  }
+
+  if (['FAILED', 'REVERSED', 'CANCELED', 'EXPIRED'].includes(status)) {
+    return 'bg-rose-100 text-rose-700';
+  }
+
+  return 'bg-slate-100 text-slate-700';
+}
+
 export default function AdminPaymentsPage() {
   const [accessToken, setAccessToken] = useState<string | null>(null);
   const [overview, setOverview] = useState<AdminPaymentsOverview | null>(null);
@@ -31,8 +68,10 @@ export default function AdminPaymentsPage() {
   const [transactions, setTransactions] = useState<PaymentTransaction[]>([]);
   const [refunds, setRefunds] = useState<RefundRequest[]>([]);
   const [payouts, setPayouts] = useState<Payout[]>([]);
+
+  const [activeTab, setActiveTab] = useState<AdminTab>('intents');
   const [loading, setLoading] = useState(true);
-  const [status, setStatus] = useState('A carregar operação financeira...');
+  const [status, setStatus] = useState('A carregar pagamentos...');
   const [runningReconcile, setRunningReconcile] = useState(false);
   const [runningCriticalAction, setRunningCriticalAction] = useState(false);
 
@@ -55,19 +94,15 @@ export default function AdminPaymentsPage() {
     }
 
     setLoading(true);
-    setStatus('A carregar operação financeira...');
 
     try {
       const [nextOverview, nextIntents, nextTransactions, nextRefunds, nextPayouts] =
         await Promise.all([
           getAdminPaymentsOverview(token),
-          listAdminPaymentIntents(token, { page: 1, limit: 20 }),
-          listAdminPaymentTransactions(token, {
-            page: 1,
-            limit: 40,
-          }),
-          listAdminRefundRequests(token, { page: 1, limit: 20 }),
-          listAdminPayouts(token, { page: 1, limit: 20 }),
+          listAdminPaymentIntents(token, { page: 1, limit: 50 }),
+          listAdminPaymentTransactions(token, { page: 1, limit: 80 }),
+          listAdminRefundRequests(token, { page: 1, limit: 50 }),
+          listAdminPayouts(token, { page: 1, limit: 50 }),
         ]);
 
       setOverview(nextOverview);
@@ -75,11 +110,9 @@ export default function AdminPaymentsPage() {
       setTransactions(nextTransactions.data);
       setRefunds(nextRefunds.data);
       setPayouts(nextPayouts.data);
-      setStatus('Painel financeiro operacional atualizado.');
+      setStatus('Operação financeira atualizada.');
     } catch (error) {
-      setStatus(
-        humanizeUnknownError(error, 'Falha ao carregar painel financeiro.'),
-      );
+      setStatus(humanizeUnknownError(error, 'Falha ao carregar pagamentos.'));
       setOverview(null);
       setIntents([]);
       setTransactions([]);
@@ -143,14 +176,6 @@ export default function AdminPaymentsPage() {
     [transactions],
   );
 
-  function formatCurrencyMzn(value: number): string {
-    return new Intl.NumberFormat('pt-PT', {
-      style: 'currency',
-      currency: 'MZN',
-      maximumFractionDigits: 0,
-    }).format(value);
-  }
-
   async function runCriticalAdminAction<T>(input: {
     purpose: string;
     execute: (reauthToken?: string) => Promise<T>;
@@ -173,9 +198,8 @@ export default function AdminPaymentsPage() {
       const password = window.prompt(
         'Confirma a tua password para concluir a ação financeira:',
       );
-
       if (!password || password.trim().length === 0) {
-        throw new Error('Reautenticação cancelada pelo utilizador.');
+        throw new Error('Reautenticação cancelada.');
       }
 
       const confirmation = await confirmReauth({
@@ -195,7 +219,7 @@ export default function AdminPaymentsPage() {
     }
 
     setRunningReconcile(true);
-    setStatus('A executar reconciliação automática manual...');
+    setStatus('A reconciliar transações pendentes...');
 
     try {
       const summary = await reconcileAdminPendingCharges(accessToken, {
@@ -204,11 +228,11 @@ export default function AdminPaymentsPage() {
       });
 
       setStatus(
-        `Reconciliação concluída: ${summary.reconciled}/${summary.scanned} transações reconciliadas.`,
+        `Reconciliação concluída: ${summary.reconciled}/${summary.scanned} reconciliadas.`,
       );
       await loadDashboard(accessToken);
     } catch (error) {
-      setStatus(humanizeUnknownError(error, 'Falha na reconciliação em lote.'));
+      setStatus(humanizeUnknownError(error, 'Falha na reconciliação.'));
     } finally {
       setRunningReconcile(false);
     }
@@ -225,7 +249,7 @@ export default function AdminPaymentsPage() {
 
     try {
       await reconcileAdminTransaction(accessToken, transactionId);
-      setStatus('Transação reconciliada com sucesso.');
+      setStatus('Transação reconciliada.');
       await loadDashboard(accessToken);
     } catch (error) {
       setStatus(humanizeUnknownError(error, 'Falha ao reconciliar transação.'));
@@ -242,10 +266,9 @@ export default function AdminPaymentsPage() {
 
     const reason = refundReason.trim();
     if (!refundIntentId.trim()) {
-      setStatus('Seleciona um payment intent para o refund.');
+      setStatus('Seleciona um payment intent para refund.');
       return;
     }
-
     if (reason.length < 3) {
       setStatus('Motivo do refund deve ter pelo menos 3 caracteres.');
       return;
@@ -253,13 +276,12 @@ export default function AdminPaymentsPage() {
 
     let parsedAmount: number | undefined;
     if (refundAmount.trim().length > 0) {
-      const numericAmount = Number(refundAmount);
-      if (!Number.isFinite(numericAmount) || numericAmount <= 0) {
-        setStatus('Valor do refund deve ser um número positivo.');
+      const numeric = Number(refundAmount);
+      if (!Number.isFinite(numeric) || numeric <= 0) {
+        setStatus('Valor do refund deve ser positivo.');
         return;
       }
-
-      parsedAmount = Math.trunc(numericAmount);
+      parsedAmount = Math.trunc(numeric);
     }
 
     setRunningCriticalAction(true);
@@ -280,7 +302,7 @@ export default function AdminPaymentsPage() {
           ),
       });
 
-      setStatus(`Refund ${refund.id.slice(0, 8)} criado com estado ${refund.status}.`);
+      setStatus(`Refund ${refund.id.slice(0, 8)} criado com sucesso.`);
       setRefundAmount('');
       await loadDashboard(accessToken);
     } catch (error) {
@@ -298,7 +320,7 @@ export default function AdminPaymentsPage() {
 
     const normalizedJobId = releaseJobId.trim();
     if (!normalizedJobId) {
-      setStatus('Indica o jobId para libertação de fundos.');
+      setStatus('Indica o jobId para libertar fundos.');
       return;
     }
 
@@ -313,7 +335,7 @@ export default function AdminPaymentsPage() {
       });
 
       setStatus(
-        `Fundos libertados: ${formatCurrencyMzn(result.releasedAmount)} para intent ${result.paymentIntentId.slice(0, 8)}.`,
+        `Fundos libertados: ${formatCurrencyMzn(result.releasedAmount)} (intent ${result.paymentIntentId.slice(0, 8)}).`,
       );
       await loadDashboard(accessToken);
     } catch (error) {
@@ -331,11 +353,6 @@ export default function AdminPaymentsPage() {
 
     const normalizedIntentId = payoutIntentId.trim();
     const normalizedProviderUserId = payoutProviderUserId.trim();
-
-    if (!normalizedIntentId) {
-      setStatus('Indica o paymentIntentId para criar payout.');
-      return;
-    }
 
     if (!normalizedProviderUserId) {
       setStatus('Indica o providerUserId para payout.');
@@ -359,14 +376,14 @@ export default function AdminPaymentsPage() {
             accessToken,
             {
               providerUserId: normalizedProviderUserId,
-              paymentIntentId: normalizedIntentId,
               amount: Math.trunc(amount),
+              paymentIntentId: normalizedIntentId || undefined,
             },
             { reauthToken },
           ),
       });
 
-      setStatus(`Payout ${payout.id.slice(0, 8)} criado com estado ${payout.status}.`);
+      setStatus(`Payout ${payout.id.slice(0, 8)} criado com sucesso.`);
       await loadDashboard(accessToken);
     } catch (error) {
       setStatus(humanizeUnknownError(error, 'Falha ao criar payout.'));
@@ -390,7 +407,6 @@ export default function AdminPaymentsPage() {
         execute: (reauthToken) =>
           approveAdminPayout(accessToken, payoutId, { reauthToken }),
       });
-
       setStatus(`Payout ${payoutId.slice(0, 8)} aprovado.`);
       await loadDashboard(accessToken);
     } catch (error) {
@@ -415,7 +431,6 @@ export default function AdminPaymentsPage() {
         execute: (reauthToken) =>
           processAdminPayout(accessToken, payoutId, undefined, { reauthToken }),
       });
-
       setStatus(`Payout ${payoutId.slice(0, 8)} processado.`);
       await loadDashboard(accessToken);
     } catch (error) {
@@ -426,391 +441,499 @@ export default function AdminPaymentsPage() {
   }
 
   return (
-    <main className='shell'>
-      <section className='card card--wide'>
-        <header className='header'>
-          <p className='kicker'>Admin Financeiro</p>
-          <h1>Operação de Pagamentos</h1>
-          <p className='subtitle'>
-            Monitoriza intents, transações pendentes, refunds, payouts e executa
-            ações críticas com reautenticação no mesmo painel.
-          </p>
-        </header>
-
-          <div className='flow-summary'>
-            <article className='flow-summary-item'>
-              <p className='metric-label'>Intents</p>
-              <p className='metric-value'>{overview?.kpis.totalIntents ?? 0}</p>
-            </article>
-            <article className='flow-summary-item'>
-              <p className='metric-label'>Pendentes</p>
-              <p className='metric-value'>
-                {overview?.kpis.intentsAwaitingPayment ?? 0}
-              </p>
-            </article>
-            <article className='flow-summary-item'>
-              <p className='metric-label'>Platform Reserved</p>
-              <p className='metric-value'>
-                {formatCurrencyMzn(overview?.kpis.platformReserved ?? 0)}
-              </p>
-            </article>
-            <article className='flow-summary-item'>
-              <p className='metric-label'>Provider Held</p>
-              <p className='metric-value'>
-                {formatCurrencyMzn(overview?.kpis.providerHeld ?? 0)}
-              </p>
-            </article>
+    <main className='space-y-4'>
+      <section className='rounded-2xl border border-slate-200 bg-white p-4 shadow-sm sm:p-6'>
+        <div className='flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between'>
+          <div>
+            <h1 className='text-2xl font-semibold text-slate-900'>Pagamentos</h1>
+            <p className='mt-1 text-sm text-slate-600'>
+              Gestão de intents, refunds, payouts e reconciliação.
+            </p>
           </div>
-
-          <div className='actions actions--inline'>
+          <div className='flex flex-wrap gap-2'>
             <button
               type='button'
-              className='primary'
-              onClick={() => {
-                void handleReconcilePendingBatch();
-              }}
-              disabled={runningReconcile || runningCriticalAction}
-            >
-              {runningReconcile
-                ? 'A reconciliar...'
-                : 'Reconciliar pendentes em lote'}
-            </button>
-            <button
-              type='button'
+              className='inline-flex items-center rounded-lg border border-slate-300 px-3 py-2 text-sm font-medium text-slate-700 hover:bg-slate-100'
               onClick={() => {
                 void loadDashboard();
               }}
               disabled={loading || runningCriticalAction}
             >
-              Recarregar painel
+              Recarregar
+            </button>
+            <button
+              type='button'
+              className='inline-flex items-center rounded-lg bg-slate-900 px-3 py-2 text-sm font-semibold text-white hover:bg-black disabled:opacity-60'
+              onClick={() => {
+                void handleReconcilePendingBatch();
+              }}
+              disabled={runningReconcile || runningCriticalAction}
+            >
+              {runningReconcile ? 'A reconciliar...' : 'Reconciliar pendentes'}
             </button>
           </div>
+        </div>
 
-          <p className={loading ? 'status status--loading' : 'status'}>{status}</p>
+        <div className='mt-4 grid gap-3 sm:grid-cols-2 lg:grid-cols-5'>
+          <KpiCard
+            label='Intents'
+            value={overview?.kpis.totalIntents ?? 0}
+            tone='slate'
+          />
+          <KpiCard
+            label='Pendentes'
+            value={overview?.kpis.intentsAwaitingPayment ?? 0}
+            tone='orange'
+          />
+          <KpiCard
+            label='Payouts pendentes'
+            value={overview?.kpis.pendingPayouts ?? 0}
+            tone='amber'
+          />
+          <KpiCard
+            label='Refunds pendentes'
+            value={overview?.kpis.pendingRefunds ?? 0}
+            tone='rose'
+          />
+          <KpiCard
+            label='Falhas'
+            value={overview?.kpis.failedTransactions ?? 0}
+            tone='rose'
+          />
+        </div>
 
-          <section>
-            <p className='item-title'>Ações críticas (reauth)</p>
-            <div className='list'>
-              <article className='list-item'>
-                <p className='item-title'>Criar refund</p>
-                <div className='form'>
-                  <label>
-                    Payment intent
-                    <select
-                      value={refundIntentId}
-                      onChange={(event) => setRefundIntentId(event.target.value)}
-                    >
-                      <option value=''>Seleciona intent</option>
-                      {intents.map((intent) => (
-                        <option key={intent.id} value={intent.id}>
-                          {intent.id.slice(0, 8)} | {intent.status} |{' '}
-                          {formatCurrencyMzn(intent.amount)}
-                        </option>
-                      ))}
-                    </select>
-                  </label>
+        <p className={`mt-4 text-sm ${loading ? 'text-blue-700' : 'text-slate-600'}`}>
+          {status}
+        </p>
+      </section>
 
-                  <label>
-                    Valor (opcional)
-                    <input
-                      type='number'
-                      min={1}
-                      value={refundAmount}
-                      onChange={(event) => setRefundAmount(event.target.value)}
-                    />
-                  </label>
+      <section className='rounded-2xl border border-slate-200 bg-white p-3 shadow-sm'>
+        <div className='flex flex-wrap gap-2'>
+          {(
+            [
+              ['intents', 'Intents'],
+              ['payouts', 'Payouts'],
+              ['refunds', 'Refunds'],
+              ['reconciliation', 'Reconciliação'],
+            ] as Array<[AdminTab, string]>
+          ).map(([tab, label]) => (
+            <button
+              key={tab}
+              type='button'
+              className={`rounded-full px-3 py-1.5 text-sm font-medium ${
+                activeTab === tab
+                  ? 'bg-blue-100 text-blue-800'
+                  : 'bg-slate-100 text-slate-700 hover:bg-slate-200'
+              }`}
+              onClick={() => setActiveTab(tab)}
+            >
+              {label}
+            </button>
+          ))}
+        </div>
+      </section>
 
-                  <label>
-                    Motivo
-                    <input
-                      type='text'
-                      minLength={3}
-                      maxLength={240}
-                      value={refundReason}
-                      onChange={(event) => setRefundReason(event.target.value)}
-                    />
-                  </label>
-
-                  <div className='actions actions--inline'>
-                    <button
-                      type='button'
-                      className='primary'
-                      onClick={() => {
-                        void handleCreateRefund();
-                      }}
-                      disabled={runningCriticalAction}
-                    >
-                      Criar refund
-                    </button>
+      {activeTab === 'intents' ? (
+        <section className='space-y-3'>
+          {intents.length === 0 ? (
+            <article className='rounded-2xl border border-dashed border-slate-300 bg-white p-6 text-sm text-slate-600'>
+              Sem payment intents para mostrar.
+            </article>
+          ) : (
+            intents.map((intent) => (
+              <article
+                key={intent.id}
+                className='rounded-2xl border border-slate-200 bg-white p-4 shadow-sm'
+              >
+                <div className='flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between'>
+                  <div className='space-y-1 text-sm text-slate-700'>
+                    <p className='font-semibold text-slate-900'>
+                      Intent #{intent.id.slice(0, 8)}
+                    </p>
+                    <p>
+                      <strong>Job:</strong> {intent.jobId.slice(0, 10)}
+                    </p>
+                    <p>
+                      <strong>Cliente:</strong> {intent.customerId.slice(0, 10)}
+                    </p>
+                    <p>
+                      <strong>Prestador:</strong>{' '}
+                      {intent.providerUserId?.slice(0, 10) ?? 'n/d'}
+                    </p>
+                    <p>
+                      <strong>Valor:</strong> {formatCurrencyMzn(intent.amount)} (
+                      fee {formatCurrencyMzn(intent.platformFeeAmount)})
+                    </p>
                   </div>
+                  <span
+                    className={`inline-flex w-fit rounded-full px-2.5 py-1 text-xs font-semibold ${statusBadgeClass(intent.status)}`}
+                  >
+                    {intentStatusLabel[intent.status] ?? intent.status}
+                  </span>
+                </div>
+
+                <div className='mt-3 flex flex-wrap gap-2'>
+                  <button
+                    type='button'
+                    className='inline-flex items-center rounded-lg border border-slate-300 px-3 py-1.5 text-xs font-medium text-slate-700 hover:bg-slate-100'
+                    onClick={() => {
+                      setRefundIntentId(intent.id);
+                      setActiveTab('refunds');
+                    }}
+                  >
+                    Usar em refund
+                  </button>
+                  <button
+                    type='button'
+                    className='inline-flex items-center rounded-lg border border-slate-300 px-3 py-1.5 text-xs font-medium text-slate-700 hover:bg-slate-100'
+                    onClick={() => {
+                      setPayoutIntentId(intent.id);
+                      setPayoutProviderUserId(intent.providerUserId ?? '');
+                      setPayoutAmount(String(Math.max(1, intent.providerNetAmount)));
+                      setReleaseJobId(intent.jobId);
+                      setActiveTab('payouts');
+                    }}
+                  >
+                    Usar em payout
+                  </button>
                 </div>
               </article>
+            ))
+          )}
+        </section>
+      ) : null}
 
-              <article className='list-item'>
-                <p className='item-title'>Libertar fundos (job completo)</p>
-                <div className='form'>
-                  <label>
-                    Job ID
-                    <input
-                      type='text'
-                      value={releaseJobId}
-                      onChange={(event) => setReleaseJobId(event.target.value)}
-                      placeholder='jobId'
-                    />
-                  </label>
+      {activeTab === 'payouts' ? (
+        <section className='space-y-4'>
+          <article className='rounded-2xl border border-slate-200 bg-white p-4 shadow-sm'>
+            <h2 className='text-lg font-semibold text-slate-900'>Criar payout</h2>
+            <div className='mt-3 grid gap-3 sm:grid-cols-3'>
+              <label className='space-y-1 text-sm text-slate-700'>
+                <span>Payment intent</span>
+                <select
+                  value={payoutIntentId}
+                  onChange={(event) => {
+                    const nextId = event.target.value;
+                    setPayoutIntentId(nextId);
+                    const selectedIntent = intents.find((item) => item.id === nextId);
+                    if (selectedIntent) {
+                      setPayoutProviderUserId(selectedIntent.providerUserId ?? '');
+                      setPayoutAmount(String(Math.max(1, selectedIntent.providerNetAmount)));
+                    }
+                  }}
+                  className='w-full rounded-lg border border-slate-300 px-3 py-2 outline-none focus:border-blue-500'
+                >
+                  <option value=''>Seleciona intent</option>
+                  {intents.map((intent) => (
+                    <option key={intent.id} value={intent.id}>
+                      {intent.id.slice(0, 8)} | {formatCurrencyMzn(intent.providerNetAmount)}
+                    </option>
+                  ))}
+                </select>
+              </label>
 
-                  <div className='actions actions--inline'>
-                    <button
-                      type='button'
-                      className='primary'
-                      onClick={() => {
-                        void handleReleaseFunds();
-                      }}
-                      disabled={runningCriticalAction}
-                    >
-                      Libertar fundos
-                    </button>
-                  </div>
-                </div>
-              </article>
+              <label className='space-y-1 text-sm text-slate-700'>
+                <span>Provider user ID</span>
+                <input
+                  type='text'
+                  value={payoutProviderUserId}
+                  onChange={(event) => setPayoutProviderUserId(event.target.value)}
+                  className='w-full rounded-lg border border-slate-300 px-3 py-2 outline-none focus:border-blue-500'
+                />
+              </label>
 
-              <article className='list-item'>
-                <p className='item-title'>Criar payout</p>
-                <div className='form'>
-                  <label>
-                    Payment intent
-                    <select
-                      value={payoutIntentId}
-                      onChange={(event) => {
-                        const nextId = event.target.value;
-                        setPayoutIntentId(nextId);
-
-                        const selectedIntent = intents.find(
-                          (intent) => intent.id === nextId,
-                        );
-
-                        if (selectedIntent) {
-                          setPayoutProviderUserId(selectedIntent.providerUserId ?? '');
-                          setPayoutAmount(
-                            String(Math.max(1, selectedIntent.providerNetAmount)),
-                          );
-                        }
-                      }}
-                    >
-                      <option value=''>Seleciona intent</option>
-                      {intents.map((intent) => (
-                        <option key={intent.id} value={intent.id}>
-                          {intent.id.slice(0, 8)} | prov:{' '}
-                          {intent.providerUserId?.slice(0, 8) ?? 'n/a'} | net:{' '}
-                          {formatCurrencyMzn(intent.providerNetAmount)}
-                        </option>
-                      ))}
-                    </select>
-                  </label>
-
-                  <label>
-                    Provider user ID
-                    <input
-                      type='text'
-                      value={payoutProviderUserId}
-                      onChange={(event) => setPayoutProviderUserId(event.target.value)}
-                    />
-                  </label>
-
-                  <label>
-                    Valor
-                    <input
-                      type='number'
-                      min={1}
-                      value={payoutAmount}
-                      onChange={(event) => setPayoutAmount(event.target.value)}
-                    />
-                  </label>
-
-                  <div className='actions actions--inline'>
-                    <button
-                      type='button'
-                      className='primary'
-                      onClick={() => {
-                        void handleCreatePayout();
-                      }}
-                      disabled={runningCriticalAction}
-                    >
-                      Criar payout
-                    </button>
-                  </div>
-                </div>
-              </article>
+              <label className='space-y-1 text-sm text-slate-700'>
+                <span>Valor</span>
+                <input
+                  type='number'
+                  min={1}
+                  value={payoutAmount}
+                  onChange={(event) => setPayoutAmount(event.target.value)}
+                  className='w-full rounded-lg border border-slate-300 px-3 py-2 outline-none focus:border-blue-500'
+                />
+              </label>
             </div>
-          </section>
+            <button
+              type='button'
+              className='mt-3 inline-flex items-center rounded-lg bg-slate-900 px-4 py-2 text-sm font-semibold text-white hover:bg-black disabled:opacity-60'
+              onClick={() => {
+                void handleCreatePayout();
+              }}
+              disabled={runningCriticalAction}
+            >
+              Criar payout
+            </button>
+          </article>
 
-          <section>
-            <p className='item-title'>Transações pendentes/processando</p>
-            {pendingTransactions.length === 0 ? (
-              <p className='muted'>Sem transações pendentes no momento.</p>
+          <article className='rounded-2xl border border-slate-200 bg-white p-4 shadow-sm'>
+            <h2 className='text-lg font-semibold text-slate-900'>Payouts</h2>
+            {payouts.length === 0 ? (
+              <p className='mt-3 text-sm text-slate-600'>Sem payouts registados.</p>
             ) : (
-              <div className='list'>
-                {pendingTransactions.map((transaction) => (
-                  <article key={transaction.id} className='list-item'>
-                    <p className='item-title'>
-                      {transaction.type} #{transaction.id.slice(0, 8)}
-                      <span className='status-pill is-muted'>{transaction.status}</span>
-                    </p>
-                    <p>
-                      <strong>Provider:</strong> {transaction.provider}
-                    </p>
-                    <p>
-                      <strong>Valor:</strong>{' '}
-                      {formatCurrencyMzn(transaction.requestedAmount)}
-                    </p>
-                    <p>
-                      <strong>Referência:</strong>{' '}
-                      {transaction.providerReference ?? 'n/a'}
-                    </p>
+              <div className='mt-3 space-y-3'>
+                {payouts.map((payout) => (
+                  <article
+                    key={payout.id}
+                    className='rounded-xl border border-slate-200 bg-slate-50 p-3'
+                  >
+                    <div className='flex flex-col gap-2 sm:flex-row sm:items-start sm:justify-between'>
+                      <div className='space-y-1 text-sm text-slate-700'>
+                        <p className='font-semibold text-slate-900'>
+                          #{payout.id.slice(0, 8)}
+                        </p>
+                        <p>
+                          <strong>Prestador:</strong> {payout.providerUserId.slice(0, 10)}
+                        </p>
+                        <p>
+                          <strong>Valor:</strong> {formatCurrencyMzn(payout.amount)}
+                        </p>
+                      </div>
+                      <span
+                        className={`inline-flex w-fit rounded-full px-2.5 py-1 text-xs font-semibold ${statusBadgeClass(payout.status)}`}
+                      >
+                        {payout.status}
+                      </span>
+                    </div>
 
-                    <div className='actions actions--inline'>
+                    <div className='mt-3 flex flex-wrap gap-2'>
+                      {payout.status === 'PENDING' ? (
+                        <button
+                          type='button'
+                          className='inline-flex items-center rounded-lg border border-slate-300 px-3 py-1.5 text-xs font-medium text-slate-700 hover:bg-slate-100'
+                          onClick={() => {
+                            void handleApprovePayout(payout.id);
+                          }}
+                          disabled={runningCriticalAction}
+                        >
+                          Aprovar
+                        </button>
+                      ) : null}
+                      {payout.status === 'APPROVED' ? (
+                        <button
+                          type='button'
+                          className='inline-flex items-center rounded-lg bg-slate-900 px-3 py-1.5 text-xs font-semibold text-white hover:bg-black disabled:opacity-60'
+                          onClick={() => {
+                            void handleProcessPayout(payout.id);
+                          }}
+                          disabled={runningCriticalAction}
+                        >
+                          Processar
+                        </button>
+                      ) : null}
+                    </div>
+                  </article>
+                ))}
+              </div>
+            )}
+          </article>
+        </section>
+      ) : null}
+
+      {activeTab === 'refunds' ? (
+        <section className='space-y-4'>
+          <article className='rounded-2xl border border-slate-200 bg-white p-4 shadow-sm'>
+            <h2 className='text-lg font-semibold text-slate-900'>Criar refund</h2>
+            <div className='mt-3 grid gap-3 sm:grid-cols-3'>
+              <label className='space-y-1 text-sm text-slate-700'>
+                <span>Payment intent</span>
+                <select
+                  value={refundIntentId}
+                  onChange={(event) => setRefundIntentId(event.target.value)}
+                  className='w-full rounded-lg border border-slate-300 px-3 py-2 outline-none focus:border-blue-500'
+                >
+                  <option value=''>Seleciona intent</option>
+                  {intents.map((intent) => (
+                    <option key={intent.id} value={intent.id}>
+                      {intent.id.slice(0, 8)} | {intent.status} | {formatCurrencyMzn(intent.amount)}
+                    </option>
+                  ))}
+                </select>
+              </label>
+
+              <label className='space-y-1 text-sm text-slate-700'>
+                <span>Valor (opcional)</span>
+                <input
+                  type='number'
+                  min={1}
+                  value={refundAmount}
+                  onChange={(event) => setRefundAmount(event.target.value)}
+                  className='w-full rounded-lg border border-slate-300 px-3 py-2 outline-none focus:border-blue-500'
+                />
+              </label>
+
+              <label className='space-y-1 text-sm text-slate-700'>
+                <span>Motivo</span>
+                <input
+                  type='text'
+                  minLength={3}
+                  maxLength={240}
+                  value={refundReason}
+                  onChange={(event) => setRefundReason(event.target.value)}
+                  className='w-full rounded-lg border border-slate-300 px-3 py-2 outline-none focus:border-blue-500'
+                />
+              </label>
+            </div>
+            <button
+              type='button'
+              className='mt-3 inline-flex items-center rounded-lg bg-slate-900 px-4 py-2 text-sm font-semibold text-white hover:bg-black disabled:opacity-60'
+              onClick={() => {
+                void handleCreateRefund();
+              }}
+              disabled={runningCriticalAction}
+            >
+              Criar refund
+            </button>
+          </article>
+
+          <article className='rounded-2xl border border-slate-200 bg-white p-4 shadow-sm'>
+            <h2 className='text-lg font-semibold text-slate-900'>Refunds</h2>
+            {refunds.length === 0 ? (
+              <p className='mt-3 text-sm text-slate-600'>Sem refunds registados.</p>
+            ) : (
+              <div className='mt-3 space-y-3'>
+                {refunds.map((refund) => (
+                  <article
+                    key={refund.id}
+                    className='rounded-xl border border-slate-200 bg-slate-50 p-3'
+                  >
+                    <div className='flex flex-col gap-2 sm:flex-row sm:items-start sm:justify-between'>
+                      <div className='space-y-1 text-sm text-slate-700'>
+                        <p className='font-semibold text-slate-900'>
+                          #{refund.id.slice(0, 8)}
+                        </p>
+                        <p>
+                          <strong>Intent:</strong> {refund.paymentIntentId.slice(0, 10)}
+                        </p>
+                        <p>
+                          <strong>Valor:</strong> {formatCurrencyMzn(refund.amount)}
+                        </p>
+                        <p>
+                          <strong>Motivo:</strong> {refund.reason}
+                        </p>
+                      </div>
+                      <span
+                        className={`inline-flex w-fit rounded-full px-2.5 py-1 text-xs font-semibold ${statusBadgeClass(refund.status)}`}
+                      >
+                        {refund.status}
+                      </span>
+                    </div>
+                  </article>
+                ))}
+              </div>
+            )}
+          </article>
+        </section>
+      ) : null}
+
+      {activeTab === 'reconciliation' ? (
+        <section className='space-y-4'>
+          <article className='rounded-2xl border border-slate-200 bg-white p-4 shadow-sm'>
+            <h2 className='text-lg font-semibold text-slate-900'>Libertar fundos</h2>
+            <p className='mt-1 text-sm text-slate-600'>
+              Usa o jobId para libertar saldo do prestador após conclusão.
+            </p>
+            <div className='mt-3 flex flex-col gap-2 sm:flex-row'>
+              <input
+                type='text'
+                value={releaseJobId}
+                onChange={(event) => setReleaseJobId(event.target.value)}
+                placeholder='jobId'
+                className='w-full rounded-lg border border-slate-300 px-3 py-2 outline-none focus:border-blue-500'
+              />
+              <button
+                type='button'
+                className='inline-flex items-center justify-center rounded-lg bg-slate-900 px-4 py-2 text-sm font-semibold text-white hover:bg-black disabled:opacity-60'
+                onClick={() => {
+                  void handleReleaseFunds();
+                }}
+                disabled={runningCriticalAction}
+              >
+                Libertar
+              </button>
+            </div>
+          </article>
+
+          <article className='rounded-2xl border border-slate-200 bg-white p-4 shadow-sm'>
+            <h2 className='text-lg font-semibold text-slate-900'>
+              Transações pendentes/processando
+            </h2>
+            {pendingTransactions.length === 0 ? (
+              <p className='mt-3 text-sm text-slate-600'>
+                Sem transações pendentes neste momento.
+              </p>
+            ) : (
+              <div className='mt-3 space-y-3'>
+                {pendingTransactions.map((transaction) => (
+                  <article
+                    key={transaction.id}
+                    className='rounded-xl border border-slate-200 bg-slate-50 p-3'
+                  >
+                    <div className='flex flex-col gap-2 sm:flex-row sm:items-start sm:justify-between'>
+                      <div className='space-y-1 text-sm text-slate-700'>
+                        <p className='font-semibold text-slate-900'>
+                          {transaction.type} #{transaction.id.slice(0, 8)}
+                        </p>
+                        <p>
+                          <strong>Provider:</strong> {transaction.provider}
+                        </p>
+                        <p>
+                          <strong>Valor:</strong>{' '}
+                          {formatCurrencyMzn(transaction.requestedAmount)}
+                        </p>
+                      </div>
                       <button
                         type='button'
+                        className='inline-flex items-center rounded-lg border border-slate-300 px-3 py-1.5 text-xs font-medium text-slate-700 hover:bg-slate-100 disabled:opacity-60'
                         onClick={() => {
                           void handleReconcileTransaction(transaction.id);
                         }}
                         disabled={runningReconcile || runningCriticalAction}
                       >
-                        Reconciliar transação
+                        Reconciliar
                       </button>
                     </div>
                   </article>
                 ))}
               </div>
             )}
-          </section>
+          </article>
+        </section>
+      ) : null}
 
-          <section>
-            <p className='item-title'>Intents recentes</p>
-            {intents.length === 0 ? (
-              <p className='muted'>Sem intents registados ainda.</p>
-            ) : (
-              <div className='list'>
-                {intents.map((intent) => (
-                  <article key={intent.id} className='list-item'>
-                    <p className='item-title'>
-                      Intent #{intent.id.slice(0, 8)}
-                      <span className='status-pill is-muted'>{intent.status}</span>
-                    </p>
-                    <p>
-                      <strong>Job:</strong> {intent.jobId.slice(0, 8)}
-                    </p>
-                    <p>
-                      <strong>Provider:</strong> {intent.provider}
-                    </p>
-                    <p>
-                      <strong>Valor:</strong> {formatCurrencyMzn(intent.amount)}
-                    </p>
-
-                    <div className='actions actions--inline'>
-                      <button
-                        type='button'
-                        onClick={() => {
-                          setRefundIntentId(intent.id);
-                          setStatus(
-                            `Intent ${intent.id.slice(0, 8)} selecionado para refund.`,
-                          );
-                        }}
-                      >
-                        Usar em refund
-                      </button>
-                      <button
-                        type='button'
-                        onClick={() => {
-                          setPayoutIntentId(intent.id);
-                          setPayoutProviderUserId(intent.providerUserId ?? '');
-                          setPayoutAmount(String(Math.max(1, intent.providerNetAmount)));
-                          setReleaseJobId(intent.jobId);
-                          setStatus(
-                            `Intent ${intent.id.slice(0, 8)} carregado para payout/release.`,
-                          );
-                        }}
-                      >
-                        Usar em payout/release
-                      </button>
-                    </div>
-                  </article>
-                ))}
-              </div>
-            )}
-          </section>
-
-          <section>
-            <p className='item-title'>Refunds e payouts</p>
-            <div className='list'>
-              <article className='list-item'>
-                <p className='item-title'>Refunds</p>
-                {refunds.length === 0 ? (
-                  <p className='muted'>Sem refunds em aberto.</p>
-                ) : (
-                  refunds.map((refund) => (
-                    <p key={refund.id}>
-                      {refund.id.slice(0, 8)} | {refund.status} |{' '}
-                      {formatCurrencyMzn(refund.amount)}
-                    </p>
-                  ))
-                )}
-              </article>
-
-              <article className='list-item'>
-                <p className='item-title'>Payouts</p>
-                {payouts.length === 0 ? (
-                  <p className='muted'>Sem payouts em aberto.</p>
-                ) : (
-                  payouts.map((payout) => (
-                    <div key={payout.id} className='result'>
-                      <p>
-                        {payout.id.slice(0, 8)} | {payout.status} |{' '}
-                        {formatCurrencyMzn(payout.amount)}
-                      </p>
-
-                      <div className='actions actions--inline'>
-                        {payout.status === 'PENDING' ? (
-                          <button
-                            type='button'
-                            onClick={() => {
-                              void handleApprovePayout(payout.id);
-                            }}
-                            disabled={runningCriticalAction}
-                          >
-                            Aprovar payout
-                          </button>
-                        ) : null}
-
-                        {payout.status === 'APPROVED' ? (
-                          <button
-                            type='button'
-                            className='primary'
-                            onClick={() => {
-                              void handleProcessPayout(payout.id);
-                            }}
-                            disabled={runningCriticalAction}
-                          >
-                            Processar payout
-                          </button>
-                        ) : null}
-                      </div>
-                    </div>
-                  ))
-                )}
-              </article>
-            </div>
-          </section>
-
-        <div className='actions actions--inline'>
-          <Link href='/admin' className='primary primary--ghost'>
-            Voltar ao painel admin
-          </Link>
-          <Link href='/admin/audit' className='primary primary--ghost'>
-            Ver trilha de auditoria
-          </Link>
-        </div>
+      <section className='flex flex-wrap gap-2'>
+        <Link
+          href='/admin'
+          className='inline-flex items-center rounded-lg border border-slate-300 px-3 py-2 text-sm font-medium text-slate-700 hover:bg-slate-100'
+        >
+          Voltar ao overview
+        </Link>
+        <Link
+          href='/admin/audit'
+          className='inline-flex items-center rounded-lg border border-slate-300 px-3 py-2 text-sm font-medium text-slate-700 hover:bg-slate-100'
+        >
+          Abrir auditoria
+        </Link>
       </section>
     </main>
+  );
+}
+
+function KpiCard(input: {
+  label: string;
+  value: number;
+  tone: 'slate' | 'orange' | 'amber' | 'rose';
+}) {
+  const toneClass = {
+    slate: 'border-slate-200 bg-slate-50 text-slate-800',
+    orange: 'border-orange-200 bg-orange-50 text-orange-800',
+    amber: 'border-amber-200 bg-amber-50 text-amber-800',
+    rose: 'border-rose-200 bg-rose-50 text-rose-800',
+  }[input.tone];
+
+  return (
+    <article className={`rounded-xl border p-3 ${toneClass}`}>
+      <p className='text-xs font-medium uppercase tracking-wide'>{input.label}</p>
+      <p className='mt-1 text-lg font-semibold'>{input.value}</p>
+    </article>
   );
 }
