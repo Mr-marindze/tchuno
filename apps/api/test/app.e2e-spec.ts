@@ -1304,4 +1304,242 @@ describe('Auth and Sessions (e2e)', () => {
 
     expect(received429).toBe(true);
   });
+
+  it('payments foundation flow: create intent, release and payout with reauth', async () => {
+    const adminEmail = `pay_admin_${Date.now()}@tchuno.local`;
+    const customerEmail = `pay_customer_${Date.now()}@tchuno.local`;
+    const workerEmail = `pay_worker_${Date.now()}@tchuno.local`;
+    const password = 'abc12345';
+
+    const passwordHash = await bcrypt.hash(password, 12);
+    const adminUser = await prisma.user.create({
+      data: {
+        email: adminEmail,
+        name: 'Payments Admin',
+        passwordHash,
+        role: 'ADMIN',
+        adminSubrole: 'SUPER_ADMIN',
+        isActive: true,
+      },
+      select: {
+        id: true,
+        email: true,
+      },
+    });
+
+    const customerUser = await prisma.user.create({
+      data: {
+        email: customerEmail,
+        name: 'Payments Customer',
+        passwordHash,
+        role: 'USER',
+        isActive: true,
+      },
+      select: {
+        id: true,
+        email: true,
+      },
+    });
+
+    const workerUser = await prisma.user.create({
+      data: {
+        email: workerEmail,
+        name: 'Payments Worker',
+        passwordHash,
+        role: 'USER',
+        isActive: true,
+      },
+      select: {
+        id: true,
+        email: true,
+      },
+    });
+
+    const jwtService = app.get(JwtService);
+    const secret = process.env.JWT_ACCESS_SECRET ?? 'change-me-access';
+    const adminAccessToken = jwtService.sign(
+      { sub: adminUser.id, email: adminUser.email },
+      { secret, expiresIn: '15m' },
+    );
+    const customerAccessToken = jwtService.sign(
+      { sub: customerUser.id, email: customerUser.email },
+      { secret, expiresIn: '15m' },
+    );
+    const workerAccessToken = jwtService.sign(
+      { sub: workerUser.id, email: workerUser.email },
+      { secret, expiresIn: '15m' },
+    );
+
+    const category = (await prisma.category.create({
+      data: {
+        name: `Pagamentos Categoria ${Date.now()}`,
+        slug: `pagamentos-categoria-${Date.now()}`,
+        description: 'Categoria para fluxo financeiro e2e',
+        sortOrder: 88,
+      },
+      select: {
+        id: true,
+      },
+    })) as { id: string };
+
+    const workerProfileResponse = await request(app.getHttpServer())
+      .put('/worker-profile/me')
+      .set('Authorization', `Bearer ${workerAccessToken}`)
+      .send({
+        bio: 'Perfil de teste para pagamentos',
+        location: 'Maputo',
+        hourlyRate: 1100,
+        experienceYears: 7,
+        isAvailable: true,
+        categoryIds: [category.id],
+      })
+      .expect(200);
+    const workerProfile = workerProfileResponse.body as { id: string };
+
+    const createJobResponse = await request(app.getHttpServer())
+      .post('/jobs')
+      .set('Authorization', `Bearer ${customerAccessToken}`)
+      .send({
+        workerProfileId: workerProfile.id,
+        categoryId: category.id,
+        pricingMode: 'FIXED_PRICE',
+        title: 'Instalação elétrica completa',
+        description:
+          'Execução de instalação elétrica com materiais e teste final.',
+        budget: 10_000,
+      })
+      .expect(201);
+    const job = createJobResponse.body as { id: string };
+
+    const createIntentResponse = await request(app.getHttpServer())
+      .post('/payments/intents')
+      .set('Authorization', `Bearer ${customerAccessToken}`)
+      .send({
+        jobId: job.id,
+      })
+      .expect(201);
+    const intent = createIntentResponse.body as {
+      id: string;
+      providerNetAmount: number;
+      status: string;
+    };
+
+    expect(intent.status).toBe('SUCCEEDED');
+    expect(intent.providerNetAmount).toBeGreaterThan(0);
+
+    await request(app.getHttpServer())
+      .patch(`/jobs/${job.id}/status`)
+      .set('Authorization', `Bearer ${workerAccessToken}`)
+      .send({ status: 'ACCEPTED' })
+      .expect(200);
+
+    await request(app.getHttpServer())
+      .patch(`/jobs/${job.id}/status`)
+      .set('Authorization', `Bearer ${workerAccessToken}`)
+      .send({ status: 'IN_PROGRESS' })
+      .expect(200);
+
+    await request(app.getHttpServer())
+      .patch(`/jobs/${job.id}/status`)
+      .set('Authorization', `Bearer ${workerAccessToken}`)
+      .send({ status: 'COMPLETED' })
+      .expect(200);
+
+    await prisma.job.update({
+      where: { id: job.id },
+      data: {
+        completedAt: new Date(Date.now() - 48 * 60 * 60 * 1000),
+      },
+    });
+
+    const releaseReauthResponse = await request(app.getHttpServer())
+      .post('/auth/reauth/confirm')
+      .set('Authorization', `Bearer ${adminAccessToken}`)
+      .send({
+        password,
+        purpose: 'admin.payments.release',
+      })
+      .expect(200);
+    const releaseReauthBody =
+      releaseReauthResponse.body as ReauthResponsePayload;
+
+    const releaseResponse = await request(app.getHttpServer())
+      .post(`/admin/payments/release/${job.id}`)
+      .set('Authorization', `Bearer ${adminAccessToken}`)
+      .set('x-reauth-token', releaseReauthBody.reauthToken)
+      .send({})
+      .expect(201);
+    const releaseBody = releaseResponse.body as { releasedAmount: number };
+    expect(releaseBody.releasedAmount).toBe(intent.providerNetAmount);
+
+    const createPayoutReauthResponse = await request(app.getHttpServer())
+      .post('/auth/reauth/confirm')
+      .set('Authorization', `Bearer ${adminAccessToken}`)
+      .send({
+        password,
+        purpose: 'admin.payments.payout.create',
+      })
+      .expect(200);
+    const createPayoutReauthBody =
+      createPayoutReauthResponse.body as ReauthResponsePayload;
+
+    const createPayoutResponse = await request(app.getHttpServer())
+      .post('/admin/payments/payouts')
+      .set('Authorization', `Bearer ${adminAccessToken}`)
+      .set('x-reauth-token', createPayoutReauthBody.reauthToken)
+      .send({
+        providerUserId: workerUser.id,
+        paymentIntentId: intent.id,
+        amount: intent.providerNetAmount,
+      })
+      .expect(201);
+    const payout = createPayoutResponse.body as { id: string };
+
+    const approvePayoutReauthResponse = await request(app.getHttpServer())
+      .post('/auth/reauth/confirm')
+      .set('Authorization', `Bearer ${adminAccessToken}`)
+      .send({
+        password,
+        purpose: 'admin.payments.payout.approve',
+      })
+      .expect(200);
+    const approvePayoutReauthBody =
+      approvePayoutReauthResponse.body as ReauthResponsePayload;
+
+    await request(app.getHttpServer())
+      .post(`/admin/payments/payouts/${payout.id}/approve`)
+      .set('Authorization', `Bearer ${adminAccessToken}`)
+      .set('x-reauth-token', approvePayoutReauthBody.reauthToken)
+      .send({})
+      .expect(201);
+
+    const processPayoutReauthResponse = await request(app.getHttpServer())
+      .post('/auth/reauth/confirm')
+      .set('Authorization', `Bearer ${adminAccessToken}`)
+      .send({
+        password,
+        purpose: 'admin.payments.payout.process',
+      })
+      .expect(200);
+    const processPayoutReauthBody =
+      processPayoutReauthResponse.body as ReauthResponsePayload;
+
+    await request(app.getHttpServer())
+      .post(`/admin/payments/payouts/${payout.id}/process`)
+      .set('Authorization', `Bearer ${adminAccessToken}`)
+      .set('x-reauth-token', processPayoutReauthBody.reauthToken)
+      .send({
+        simulate: 'success',
+      })
+      .expect(201);
+
+    const providerSummaryResponse = await request(app.getHttpServer())
+      .get('/payments/provider/summary')
+      .set('Authorization', `Bearer ${workerAccessToken}`)
+      .expect(200);
+    const providerSummary = providerSummaryResponse.body as {
+      balances: { paidOut: number };
+    };
+    expect(providerSummary.balances.paidOut).toBe(intent.providerNetAmount);
+  });
 });
