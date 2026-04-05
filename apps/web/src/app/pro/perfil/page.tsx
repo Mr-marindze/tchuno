@@ -1,6 +1,5 @@
 'use client';
 
-import Link from 'next/link';
 import { FormEvent, useEffect, useMemo, useState } from 'react';
 import { ensureSession } from '@/lib/auth';
 import { listCategories, Category } from '@/lib/categories';
@@ -64,14 +63,12 @@ export default function ProviderProfilePage() {
         );
         setExperienceYears(String(myProfile?.experienceYears ?? 0));
         setIsAvailable(myProfile?.isAvailable ?? true);
-        setCategoryIds(myProfile?.categories.map((item) => item.id) ?? []);
+        setCategoryIds(myProfile?.categories.map((category) => category.id) ?? []);
         setStatus('Perfil profissional carregado.');
       } catch (error) {
-        if (!active) {
-          return;
+        if (active) {
+          setStatus(humanizeUnknownError(error, 'Falha ao carregar perfil.'));
         }
-
-        setStatus(humanizeUnknownError(error, 'Falha ao carregar perfil profissional.'));
       } finally {
         if (active) {
           setLoading(false);
@@ -90,20 +87,14 @@ export default function ProviderProfilePage() {
     if (!profile) {
       return 'Prestador';
     }
-
     return profile.displayName ?? profile.publicName ?? profile.name ?? 'Prestador';
   }, [profile]);
 
   function toggleCategory(categoryId: string, checked: boolean) {
     setCategoryIds((current) => {
       if (checked) {
-        if (current.includes(categoryId)) {
-          return current;
-        }
-
-        return [...current, categoryId];
+        return current.includes(categoryId) ? current : [...current, categoryId];
       }
-
       return current.filter((item) => item !== categoryId);
     });
   }
@@ -119,13 +110,16 @@ export default function ProviderProfilePage() {
     const parsedHourlyRate = Number(hourlyRate);
     const parsedExperienceYears = Number(experienceYears);
 
-    if (hourlyRate.trim().length > 0 && (!Number.isFinite(parsedHourlyRate) || parsedHourlyRate < 0)) {
+    if (
+      hourlyRate.trim().length > 0 &&
+      (!Number.isFinite(parsedHourlyRate) || parsedHourlyRate < 0)
+    ) {
       setStatus('Tarifa/hora inválida.');
       return;
     }
 
     if (!Number.isFinite(parsedExperienceYears) || parsedExperienceYears < 0) {
-      setStatus('Experiência inválida.');
+      setStatus('Anos de experiência inválidos.');
       return;
     }
 
@@ -144,100 +138,118 @@ export default function ProviderProfilePage() {
       });
 
       setProfile(updated);
-      setStatus('Perfil profissional atualizado com sucesso.');
+      setStatus('Perfil profissional atualizado.');
     } catch (error) {
-      setStatus(humanizeUnknownError(error, 'Falha ao guardar perfil profissional.'));
+      setStatus(humanizeUnknownError(error, 'Falha ao guardar perfil.'));
     } finally {
       setSaving(false);
     }
   }
 
   return (
-    <main className='shell'>
-      <section className='card'>
-        <header className='header'>
-          <p className='kicker'>Prestador</p>
-          <h1>Perfil Profissional</h1>
-          <p className='subtitle'>
-            Mantém o teu perfil atualizado para receber propostas alinhadas com a tua disponibilidade.
-          </p>
-        </header>
+    <main className='space-y-4'>
+      <section className='rounded-2xl border border-slate-200 bg-white p-4 shadow-sm sm:p-6'>
+        <h1 className='text-2xl font-semibold text-slate-900'>Perfil profissional</h1>
+        <p className='mt-1 text-sm text-slate-600'>
+          Mantém disponibilidade, categorias e dados públicos sempre atualizados.
+        </p>
 
-        <p className={loading ? 'status status--loading' : 'status'}>{status}</p>
+        <p className={`mt-4 text-sm ${loading ? 'text-blue-700' : 'text-slate-600'}`}>
+          {status}
+        </p>
 
-        <article className='list-item'>
-          <p>
-            <strong>Nome:</strong> {profileName}
-          </p>
-          <p>
-            <strong>Rating:</strong> {profile?.ratingAvg ?? '0.0'} ({profile?.ratingCount ?? 0})
-          </p>
-          <p>
-            <strong>Última atualização:</strong>{' '}
-            {profile?.updatedAt
-              ? new Date(profile.updatedAt).toLocaleString('pt-PT')
-              : 'n/a'}
-          </p>
-        </article>
+        <div className='mt-4 grid gap-3 sm:grid-cols-3'>
+          <article className='rounded-xl border border-slate-200 bg-slate-50 p-3'>
+            <p className='text-xs text-slate-500'>Nome</p>
+            <p className='mt-1 font-semibold text-slate-900'>{profileName}</p>
+          </article>
+          <article className='rounded-xl border border-slate-200 bg-slate-50 p-3'>
+            <p className='text-xs text-slate-500'>Rating</p>
+            <p className='mt-1 font-semibold text-slate-900'>
+              {profile?.ratingAvg ?? '0.0'} ({profile?.ratingCount ?? 0})
+            </p>
+          </article>
+          <article className='rounded-xl border border-slate-200 bg-slate-50 p-3'>
+            <p className='text-xs text-slate-500'>Disponibilidade</p>
+            <p className='mt-1 font-semibold text-slate-900'>
+              {isAvailable ? 'Disponível' : 'Indisponível'}
+            </p>
+          </article>
+        </div>
+      </section>
 
-        <form className='form' onSubmit={handleSubmit}>
-          <label>
-            Bio
+      <section className='rounded-2xl border border-slate-200 bg-white p-4 shadow-sm sm:p-5'>
+        <form className='space-y-4' onSubmit={handleSubmit}>
+          <label className='block space-y-1 text-sm text-slate-700'>
+            <span>Bio</span>
             <textarea
               value={bio}
               onChange={(event) => setBio(event.target.value)}
               maxLength={1000}
+              className='min-h-24 w-full rounded-lg border border-slate-300 px-3 py-2 outline-none focus:border-blue-500'
             />
           </label>
 
-          <label>
-            Localização
-            <input
-              type='text'
-              value={location}
-              onChange={(event) => setLocation(event.target.value)}
-              maxLength={240}
-            />
-          </label>
+          <div className='grid gap-3 sm:grid-cols-2'>
+            <label className='block space-y-1 text-sm text-slate-700'>
+              <span>Localização</span>
+              <input
+                type='text'
+                value={location}
+                onChange={(event) => setLocation(event.target.value)}
+                maxLength={240}
+                className='w-full rounded-lg border border-slate-300 px-3 py-2 outline-none focus:border-blue-500'
+              />
+            </label>
 
-          <label>
-            Tarifa por hora (MZN)
-            <input
-              type='number'
-              min={0}
-              value={hourlyRate}
-              onChange={(event) => setHourlyRate(event.target.value)}
-            />
-          </label>
+            <label className='block space-y-1 text-sm text-slate-700'>
+              <span>Tarifa/hora (MZN)</span>
+              <input
+                type='number'
+                min={0}
+                value={hourlyRate}
+                onChange={(event) => setHourlyRate(event.target.value)}
+                className='w-full rounded-lg border border-slate-300 px-3 py-2 outline-none focus:border-blue-500'
+              />
+            </label>
+          </div>
 
-          <label>
-            Anos de experiência
-            <input
-              type='number'
-              min={0}
-              value={experienceYears}
-              onChange={(event) => setExperienceYears(event.target.value)}
-            />
-          </label>
+          <div className='grid gap-3 sm:grid-cols-2'>
+            <label className='block space-y-1 text-sm text-slate-700'>
+              <span>Anos de experiência</span>
+              <input
+                type='number'
+                min={0}
+                value={experienceYears}
+                onChange={(event) => setExperienceYears(event.target.value)}
+                className='w-full rounded-lg border border-slate-300 px-3 py-2 outline-none focus:border-blue-500'
+              />
+            </label>
 
-          <label className='inline-check'>
-            <input
-              type='checkbox'
-              checked={isAvailable}
-              onChange={(event) => setIsAvailable(event.target.checked)}
-            />
-            Disponível para novos pedidos
-          </label>
+            <label className='inline-flex items-center gap-2 rounded-lg border border-slate-200 bg-slate-50 px-3 py-2 text-sm text-slate-700'>
+              <input
+                type='checkbox'
+                checked={isAvailable}
+                onChange={(event) => setIsAvailable(event.target.checked)}
+              />
+              Disponível para novos pedidos
+            </label>
+          </div>
 
           <fieldset>
-            <legend>Categorias</legend>
-            <div className='checklist'>
+            <legend className='text-sm font-medium text-slate-700'>Categorias</legend>
+            <div className='mt-2 grid gap-2 sm:grid-cols-2'>
               {categories.map((category) => (
-                <label key={category.id} className='inline-check'>
+                <label
+                  key={category.id}
+                  className='inline-flex items-center gap-2 rounded-lg border border-slate-200 bg-slate-50 px-3 py-2 text-sm text-slate-700'
+                >
                   <input
                     type='checkbox'
                     checked={categoryIds.includes(category.id)}
-                    onChange={(event) => toggleCategory(category.id, event.target.checked)}
+                    onChange={(event) =>
+                      toggleCategory(category.id, event.target.checked)
+                    }
                   />
                   {category.name}
                 </label>
@@ -245,14 +257,13 @@ export default function ProviderProfilePage() {
             </div>
           </fieldset>
 
-          <div className='actions actions--inline'>
-            <button type='submit' className='primary' disabled={saving}>
-              {saving ? 'A guardar...' : 'Guardar perfil'}
-            </button>
-            <Link href='/pro/pedidos' className='primary primary--ghost'>
-              Voltar aos pedidos
-            </Link>
-          </div>
+          <button
+            type='submit'
+            className='inline-flex items-center rounded-lg bg-slate-900 px-4 py-2 text-sm font-semibold text-white hover:bg-black disabled:opacity-60'
+            disabled={saving}
+          >
+            {saving ? 'A guardar...' : 'Guardar perfil'}
+          </button>
         </form>
       </section>
     </main>
