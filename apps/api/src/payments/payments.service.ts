@@ -112,10 +112,14 @@ export class PaymentsService {
       );
     }
 
+    if (!job.requestId || !job.proposalId) {
+      throw new ConflictException(
+        'Legacy direct jobs are not eligible. Payment intents are only supported for jobs created from selected proposals.',
+      );
+    }
+
     const chargeAmount = this.resolveChargeAmount({
-      pricingMode: job.pricingMode,
       budget: job.budget,
-      quotedAmount: job.quotedAmount,
       agreedPrice: job.agreedPrice,
     });
 
@@ -158,10 +162,10 @@ export class PaymentsService {
         status: 'AWAITING_PAYMENT',
         provider,
         expiresAt: this.paymentPolicyService.buildIntentExpiryDate(),
-        acceptedQuoteSnapshot:
-          job.pricingMode === 'QUOTE_REQUEST' ? job.quotedAmount : null,
+        acceptedQuoteSnapshot: job.agreedPrice,
         metadata: {
           pricingMode: job.pricingMode,
+          flow: 'service_request',
         } satisfies Prisma.JsonObject,
       },
       include: {
@@ -1297,32 +1301,20 @@ export class PaymentsService {
   }
 
   private resolveChargeAmount(input: {
-    pricingMode: 'FIXED_PRICE' | 'QUOTE_REQUEST';
     budget: number | null;
-    quotedAmount: number | null;
     agreedPrice: number | null;
   }): number {
     if (input.agreedPrice && input.agreedPrice > 0) {
       return input.agreedPrice;
     }
 
-    if (input.pricingMode === 'FIXED_PRICE') {
-      if (!input.budget || input.budget <= 0) {
-        throw new ConflictException(
-          'FIXED_PRICE jobs require positive budget before payment intent creation',
-        );
-      }
-
+    if (input.budget && input.budget > 0) {
       return input.budget;
     }
 
-    if (!input.quotedAmount || input.quotedAmount <= 0) {
-      throw new ConflictException(
-        'QUOTE_REQUEST jobs require accepted quotedAmount before payment intent creation',
-      );
-    }
-
-    return input.quotedAmount;
+    throw new ConflictException(
+      'Jobs created from selected proposals must keep agreedPrice snapshot before payment intent creation',
+    );
   }
 
   private mapGatewayToTransactionStatus(

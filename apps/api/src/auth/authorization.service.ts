@@ -7,7 +7,6 @@ const rolePermissions: Record<AppRole, Permission[]> = {
   guest: ['public.read'],
   customer: [
     'public.read',
-    'customer.jobs.create',
     'customer.jobs.read.own',
     'customer.requests.create',
     'customer.requests.read.own',
@@ -25,7 +24,6 @@ const rolePermissions: Record<AppRole, Permission[]> = {
     'provider.jobs.read.own',
     'provider.requests.read.open',
     'provider.requests.propose',
-    'provider.jobs.quote.propose',
     'provider.jobs.status.update',
     'provider.earnings.read.own',
     'provider.reviews.read.received',

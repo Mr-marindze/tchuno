@@ -12,6 +12,7 @@ import {
 import {
   ApiBearerAuth,
   ApiConflictResponse,
+  ApiGoneResponse,
   ApiNotFoundResponse,
   ApiOkResponse,
   ApiOperation,
@@ -26,11 +27,9 @@ import { RequirePermissions } from '../auth/decorators/require-permissions.decor
 import { ErrorResponseDto } from '../auth/dto/error-response.dto';
 import { AccessPolicyGuard } from '../auth/guards/access-policy.guard';
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
-import { CreateJobDto } from './dto/create-job.dto';
 import { JobListResponseDto } from './dto/job-list-response.dto';
 import { JobDto } from './dto/job.dto';
 import { ListJobsQueryDto } from './dto/list-jobs-query.dto';
-import { ProposeQuoteDto } from './dto/propose-quote.dto';
 import { UpdateJobStatusDto } from './dto/update-job-status.dto';
 import { JobsService } from './jobs.service';
 
@@ -47,15 +46,23 @@ export class JobsController {
 
   @Post()
   @Throttle({ default: { limit: 20, ttl: 60_000 } })
-  @ApiOperation({ summary: 'Create a new job request' })
-  @ApiOkResponse({ type: JobDto })
+  @ApiOperation({
+    summary:
+      'DEPRECATED: direct job creation is disabled, use service request flow',
+    deprecated: true,
+  })
+  @ApiGoneResponse({ type: ErrorResponseDto })
   @ApiUnauthorizedResponse({ type: ErrorResponseDto })
-  @ApiConflictResponse({ type: ErrorResponseDto })
-  @ApiNotFoundResponse({ type: ErrorResponseDto })
   @ApiTooManyRequestsResponse({ type: ErrorResponseDto })
-  @RequirePermissions('customer.jobs.create')
-  create(@Req() req: AuthenticatedRequest, @Body() dto: CreateJobDto) {
-    return this.jobsService.create(req.user.sub, dto);
+  @RequireAppRoles(
+    'customer',
+    'admin',
+    'ops_admin',
+    'support_admin',
+    'super_admin',
+  )
+  create(@Req() req: AuthenticatedRequest) {
+    return this.jobsService.createDeprecated(req.user.sub);
   }
 
   @Get('me/client')
@@ -97,21 +104,23 @@ export class JobsController {
   @Patch(':id/quote')
   @Throttle({ default: { limit: 40, ttl: 60_000 } })
   @ApiOperation({
-    summary: 'Send or update quote proposal for QUOTE_REQUEST job',
+    summary:
+      'DEPRECATED: direct quote proposal on job is disabled, use proposals on service requests',
+    deprecated: true,
   })
   @ApiParam({ name: 'id', type: String })
-  @ApiOkResponse({ type: JobDto })
+  @ApiGoneResponse({ type: ErrorResponseDto })
   @ApiUnauthorizedResponse({ type: ErrorResponseDto })
-  @ApiConflictResponse({ type: ErrorResponseDto })
-  @ApiNotFoundResponse({ type: ErrorResponseDto })
   @ApiTooManyRequestsResponse({ type: ErrorResponseDto })
-  @RequirePermissions('provider.jobs.quote.propose')
-  proposeQuote(
-    @Req() req: AuthenticatedRequest,
-    @Param('id') id: string,
-    @Body() dto: ProposeQuoteDto,
-  ) {
-    return this.jobsService.proposeQuote(id, req.user.sub, dto);
+  @RequireAppRoles(
+    'provider',
+    'admin',
+    'ops_admin',
+    'support_admin',
+    'super_admin',
+  )
+  proposeQuote(@Req() req: AuthenticatedRequest, @Param('id') id: string) {
+    return this.jobsService.proposeQuoteDeprecated(id, req.user.sub);
   }
 
   @Patch(':id/status')
