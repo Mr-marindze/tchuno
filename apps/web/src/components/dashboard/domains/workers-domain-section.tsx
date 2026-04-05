@@ -471,7 +471,7 @@ export function WorkersDomainSection({
                   Limpar filtros
                 </button>
                 <Link
-                  href={`${dashboardRoutes.jobs}#job-create`}
+                  href={`${dashboardRoutes.jobs}#novo-pedido`}
                   className="primary primary--ghost"
                 >
                   Criar pedido mesmo assim
@@ -619,7 +619,7 @@ export function WorkersDomainSection({
                         href={
                           isMe
                             ? dashboardRoutes.profile
-                            : `${dashboardRoutes.jobs}#job-create`
+                            : `${dashboardRoutes.jobs}#novo-pedido`
                         }
                         className="primary"
                         onClick={() =>
@@ -636,7 +636,7 @@ export function WorkersDomainSection({
                         {ctaCopy.primaryLabel}
                       </Link>
                       <Link
-                        href={`${dashboardRoutes.jobs}#job-create`}
+                        href={`${dashboardRoutes.jobs}#novo-pedido`}
                         className="primary primary--ghost"
                         onClick={() =>
                           trackEvent("dashboard.cta.click", {

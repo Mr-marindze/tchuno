@@ -239,7 +239,7 @@ export default function CustomerOrdersPage() {
             </article>
           </div>
 
-          <form className='form' onSubmit={handleCreateRequest}>
+          <form id='novo-pedido' className='form' onSubmit={handleCreateRequest}>
             <label>
               Categoria
               <select

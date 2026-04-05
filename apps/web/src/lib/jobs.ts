@@ -32,16 +32,6 @@ export type Job = {
   updatedAt: string;
 };
 
-export type CreateJobInput = {
-  workerProfileId: string;
-  categoryId: string;
-  title: string;
-  description: string;
-  pricingMode?: "FIXED_PRICE" | "QUOTE_REQUEST";
-  budget?: number;
-  scheduledFor?: string;
-};
-
 export type ListJobsQuery = {
   status?: JobStatus;
   search?: string;
@@ -74,26 +64,6 @@ function buildQueryString(query?: ListJobsQuery): string {
   }
 
   return params.size > 0 ? `?${params.toString()}` : "";
-}
-
-export async function createJob(
-  accessToken: string,
-  input: CreateJobInput,
-): Promise<Job> {
-  const response = await fetch(`${API_URL}/jobs`, {
-    method: "POST",
-    headers: {
-      Authorization: `Bearer ${accessToken}`,
-      "Content-Type": "application/json",
-    },
-    body: JSON.stringify(input),
-  });
-
-  if (!response.ok) {
-    throw new Error(await readApiError(response));
-  }
-
-  return (await response.json()) as Job;
 }
 
 export async function listMyClientJobs(
@@ -146,32 +116,6 @@ export async function listMyWorkerJobs(
   }
 
   return (await response.json()) as PaginatedResponse<Job>;
-}
-
-export type ProposeJobQuoteInput = {
-  quotedAmount: number;
-  quoteMessage?: string;
-};
-
-export async function proposeJobQuote(
-  accessToken: string,
-  jobId: string,
-  input: ProposeJobQuoteInput,
-): Promise<Job> {
-  const response = await fetch(`${API_URL}/jobs/${jobId}/quote`, {
-    method: "PATCH",
-    headers: {
-      Authorization: `Bearer ${accessToken}`,
-      "Content-Type": "application/json",
-    },
-    body: JSON.stringify(input),
-  });
-
-  if (!response.ok) {
-    throw new Error(await readApiError(response));
-  }
-
-  return (await response.json()) as Job;
 }
 
 export async function updateJobStatus(

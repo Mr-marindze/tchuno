@@ -291,7 +291,7 @@ export function getWorkerCtaCopy(input: WorkerCtaInput): WorkerCtaCopy {
   if (input.isOwnProfile) {
     return {
       primaryLabel: "Gerir meu perfil",
-      secondaryLabel: "Criar job de teste",
+      secondaryLabel: "Criar pedido",
       helperText:
         "Mantém disponibilidade, bio e tarifa atualizadas para receber pedidos mais rápidos.",
     };

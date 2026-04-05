@@ -40,12 +40,10 @@ import {
   WorkerProfile,
 } from "@/lib/worker-profile";
 import {
-  createJob,
   Job,
   JobStatus,
   listMyClientJobs,
   listMyWorkerJobs,
-  proposeJobQuote,
   updateJobStatus,
 } from "@/lib/jobs";
 import {
@@ -84,7 +82,7 @@ import {
   resolveDashboardScope,
 } from "@/lib/dashboard-routes";
 import { listSharedWorkerRanking } from "@/lib/shared-worker-ranking";
-import { setSharedWorkerBehaviorSignals, trackEvent } from "@/lib/tracking";
+import { setSharedWorkerBehaviorSignals } from "@/lib/tracking";
 
 type DashboardState = {
   me: unknown;
@@ -1814,135 +1812,9 @@ export function useDashboardRuntime({ view }: UseDashboardRuntimeArgs) {
 
   async function handleCreateJob(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
-
-    const accessToken =
-      state?.auth.accessToken ?? getStoredTokens().accessToken;
-    if (!accessToken) {
-      setJobsStatus("Access token ausente.");
-      return;
-    }
-
-    if (!jobWorkerProfileId) {
-      setJobsStatus("Seleciona um profissional para criar o job.");
-      return;
-    }
-
-    if (!jobCategoryId) {
-      setJobsStatus("Seleciona uma categoria para criar o job.");
-      return;
-    }
-
-    const normalizedTitle = jobTitle.trim();
-    const normalizedDescription = jobDescription.trim();
-    if (normalizedTitle.length < 3 || normalizedTitle.length > 120) {
-      setJobsStatus("Título do job deve ter entre 3 e 120 caracteres.");
-      return;
-    }
-
-    if (
-      normalizedDescription.length < 10 ||
-      normalizedDescription.length > 2000
-    ) {
-      setJobsStatus("Descrição do job deve ter entre 10 e 2000 caracteres.");
-      return;
-    }
-
-    const selectedCategoryStillAllowed = availableJobCategories.some(
-      (category) => category.id === jobCategoryId,
+    setJobsStatus(
+      "Criação direta de job foi descontinuada. Usa o fluxo de pedidos em /app/pedidos.",
     );
-    if (!selectedCategoryStillAllowed) {
-      setJobsStatus(
-        "Categoria inválida para o profissional selecionado. Escolhe outra categoria.",
-      );
-      return;
-    }
-
-    const normalizedBudget = jobBudget.trim();
-    let parsedBudget: number | undefined;
-    if (jobPricingMode === "FIXED_PRICE") {
-      if (normalizedBudget.length === 0) {
-        setJobsStatus("Orçamento é obrigatório para jobs de preço fixo.");
-        return;
-      }
-
-      parsedBudget = Number(normalizedBudget);
-      if (
-        !Number.isInteger(parsedBudget) ||
-        parsedBudget <= 0 ||
-        parsedBudget > 100_000_000
-      ) {
-        setJobsStatus("Orçamento deve ser um inteiro entre 1 e 100000000.");
-        return;
-      }
-    } else if (normalizedBudget.length > 0) {
-      parsedBudget = Number(normalizedBudget);
-      if (
-        !Number.isInteger(parsedBudget) ||
-        parsedBudget < 0 ||
-        parsedBudget > 100_000_000
-      ) {
-        setJobsStatus(
-          "No modo de cotação, orçamento opcional deve ser inteiro entre 0 e 100000000.",
-        );
-        return;
-      }
-    }
-
-    let scheduledForIso: string | undefined;
-    if (jobScheduledFor.trim().length > 0) {
-      const parsedDate = new Date(jobScheduledFor);
-      if (Number.isNaN(parsedDate.getTime())) {
-        setJobsStatus("Data agendada inválida.");
-        return;
-      }
-      if (parsedDate.getTime() <= Date.now()) {
-        setJobsStatus("A data agendada deve ser futura.");
-        return;
-      }
-      scheduledForIso = parsedDate.toISOString();
-    }
-
-    setJobsLoading(true);
-    setJobsStatus("A criar job...");
-
-    try {
-      trackEvent("job.create.submit", {
-        source: "dashboard.jobs.create",
-        view: "dashboard.jobs",
-        pricingMode: jobPricingMode,
-        hasBudget: typeof parsedBudget === "number",
-        hasScheduledFor: Boolean(scheduledForIso),
-        titleLength: normalizedTitle.length,
-        descriptionLength: normalizedDescription.length,
-        workerProfileId: jobWorkerProfileId,
-        categoryId: jobCategoryId,
-      });
-
-      await createJob(accessToken, {
-        workerProfileId: jobWorkerProfileId,
-        categoryId: jobCategoryId,
-        title: normalizedTitle,
-        description: normalizedDescription,
-        pricingMode: jobPricingMode,
-        budget: parsedBudget,
-        scheduledFor: scheduledForIso,
-      });
-
-      setJobTitle("");
-      setJobDescription("");
-      setJobBudget("");
-      setJobScheduledFor("");
-
-      const { clientCount, workerCount } = await loadJobsData(accessToken);
-      await loadCompletedClientJobs(accessToken);
-      setJobsStatus(
-        `Job criado com sucesso. Cliente: ${clientCount} | Worker: ${workerCount}.`,
-      );
-    } catch (error) {
-      setJobsStatus(humanizeUnknownError(error, "Falha ao criar job."));
-    } finally {
-      setJobsLoading(false);
-    }
   }
 
   async function handleUpdateJobStatus(
@@ -1983,50 +1855,9 @@ export function useDashboardRuntime({ view }: UseDashboardRuntimeArgs) {
   }
 
   async function handleProposeQuote(jobId: string) {
-    const accessToken =
-      state?.auth.accessToken ?? getStoredTokens().accessToken;
-    if (!accessToken) {
-      setJobsStatus("Access token ausente.");
-      return;
-    }
-
-    const amountRaw = (jobQuoteDraftAmount[jobId] ?? "").trim();
-    const parsedAmount = Number(amountRaw);
-    if (
-      amountRaw.length === 0 ||
-      !Number.isInteger(parsedAmount) ||
-      parsedAmount <= 0 ||
-      parsedAmount > 100_000_000
-    ) {
-      setJobsStatus("Proposta deve ser um inteiro entre 1 e 100000000.");
-      return;
-    }
-
-    const message = (jobQuoteDraftMessage[jobId] ?? "").trim();
-    if (message.length > 280) {
-      setJobsStatus("Mensagem da proposta deve ter no máximo 280 caracteres.");
-      return;
-    }
-
-    setJobsLoading(true);
-    setJobsStatus("A enviar proposta...");
-
-    try {
-      await proposeJobQuote(accessToken, jobId, {
-        quotedAmount: parsedAmount,
-        quoteMessage: message || undefined,
-      });
-      const { clientCount, workerCount } = await loadJobsData(accessToken);
-      setJobsStatus(
-        `Proposta enviada com sucesso. Cliente: ${clientCount} | Worker: ${workerCount}.`,
-      );
-    } catch (error) {
-      setJobsStatus(
-        humanizeUnknownError(error, "Falha ao enviar proposta de cotação."),
-      );
-    } finally {
-      setJobsLoading(false);
-    }
+    setJobsStatus(
+      `Cotação direta no job (${jobId.slice(0, 8)}) foi descontinuada. Usa propostas em pedidos abertos.`,
+    );
   }
 
   async function handleReloadReviews() {

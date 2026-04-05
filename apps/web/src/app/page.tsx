@@ -569,7 +569,7 @@ export default function Home() {
                     actions={
                       hasSession ? (
                         <Link
-                          href="/app/pedidos#job-create"
+                          href="/app/pedidos#novo-pedido"
                           className="primary"
                           onClick={() =>
                             trackEvent("marketplace.cta.click", {
@@ -590,7 +590,7 @@ export default function Home() {
                           className="primary"
                           onClick={() =>
                             redirectToLoginWithIntent({
-                              nextPath: "/app/pedidos#job-create",
+                              nextPath: "/app/pedidos#novo-pedido",
                               sourcePath: "/",
                               selectedService:
                                 discoverySearch.trim() || mainCategoryLabel || undefined,
