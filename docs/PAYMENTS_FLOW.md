@@ -26,6 +26,7 @@
 - `SUCCEEDED`
 - `FAILED`
 - `REVERSED`
+- External-simulated adapters (`MPESA`, `EMOLA`) default to async `PENDING` and move via reconciliation/webhook.
 - On paid success, ledger receives:
 - `CUSTOMER_CHARGE`
 - `PLATFORM_FEE_RESERVED`
@@ -64,3 +65,5 @@ Ledger move:
 
 - `/admin/payments/overview` exposes operational payment KPIs.
 - Provider summary endpoint exposes held/available/paid-out balances.
+- `/admin/payments/reconcile/pending` allows manual batch reconciliation trigger.
+- Automatic reconciliation runner scans stale pending charges on interval.

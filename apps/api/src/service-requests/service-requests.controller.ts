@@ -89,6 +89,18 @@ export class ServiceRequestsController {
     return this.serviceRequestsService.listOpenForProvider(req.user.sub, query);
   }
 
+  @Get(':id')
+  @ApiOperation({ summary: 'Get one own service request with proposals/job' })
+  @ApiParam({ name: 'id', type: String })
+  @ApiOkResponse({ description: 'Service request detail for customer owner' })
+  @ApiUnauthorizedResponse({ type: ErrorResponseDto })
+  @ApiForbiddenResponse({ type: ErrorResponseDto })
+  @ApiNotFoundResponse({ type: ErrorResponseDto })
+  @RequirePermissions('customer.requests.read.own')
+  getMineById(@Req() req: AuthenticatedRequest, @Param('id') id: string) {
+    return this.serviceRequestsService.getMineById(req.user.sub, id);
+  }
+
   @Post(':id/proposals')
   @ApiOperation({
     summary: 'Submit proposal for open service request (provider)',

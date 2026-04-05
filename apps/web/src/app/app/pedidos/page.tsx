@@ -335,6 +335,9 @@ export default function CustomerOrdersPage() {
                       >
                         Ver propostas
                       </button>
+                      <Link href={`/app/pedidos/${request.id}`} className='primary primary--ghost'>
+                        Abrir detalhe
+                      </Link>
 
                       {pendingIntent ? (
                         <button

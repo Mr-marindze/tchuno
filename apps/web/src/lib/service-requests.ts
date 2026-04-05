@@ -9,6 +9,11 @@ export type ServiceRequest = {
   id: string;
   customerId: string;
   categoryId: string;
+  category?: {
+    id: string;
+    name: string;
+    slug: string;
+  };
   title: string;
   description: string;
   location: string | null;
@@ -21,13 +26,35 @@ export type ServiceRequest = {
     providerId: string;
     price: number;
     status: ProposalStatus;
+    comment?: string | null;
     createdAt: string;
+    updatedAt?: string;
+    provider?: {
+      id: string;
+      name: string | null;
+      workerProfile: {
+        ratingAvg: string;
+        ratingCount: number;
+        location: string | null;
+      } | null;
+    };
   }>;
   job?: {
     id: string;
     status: string;
+    requestId?: string | null;
+    proposalId?: string | null;
     contactUnlockedAt: string | null;
     agreedPrice: number | null;
+    createdAt?: string;
+    paymentIntents?: Array<{
+      id: string;
+      amount: number;
+      status: string;
+      provider: string;
+      createdAt: string;
+      updatedAt: string;
+    }>;
   } | null;
 };
 
@@ -150,6 +177,23 @@ export async function listOpenServiceRequests(
   }
 
   return (await response.json()) as PaginatedResponse<ServiceRequest>;
+}
+
+export async function getServiceRequestById(
+  accessToken: string,
+  requestId: string,
+): Promise<ServiceRequest> {
+  const response = await fetch(`${API_URL}/service-requests/${requestId}`, {
+    headers: {
+      Authorization: `Bearer ${accessToken}`,
+    },
+  });
+
+  if (!response.ok) {
+    throw new Error(await readApiError(response));
+  }
+
+  return (await response.json()) as ServiceRequest;
 }
 
 export async function submitProposal(

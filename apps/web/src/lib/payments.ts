@@ -51,6 +51,43 @@ export type PaymentIntent = {
   transactions: PaymentTransaction[];
 };
 
+export type RefundRequest = {
+  id: string;
+  jobId: string;
+  paymentIntentId: string;
+  transactionId: string | null;
+  requestedByUserId: string;
+  approvedByUserId: string | null;
+  amount: number;
+  currency: string;
+  reason: string;
+  status: string;
+  provider: 'INTERNAL' | 'MPESA' | 'EMOLA' | 'MKESH' | 'BANK_TRANSFER' | 'MANUAL';
+  providerReference: string | null;
+  processedAt: string | null;
+  failureReason: string | null;
+  createdAt: string;
+  updatedAt: string;
+};
+
+export type Payout = {
+  id: string;
+  providerUserId: string;
+  jobId: string | null;
+  paymentIntentId: string | null;
+  amount: number;
+  currency: string;
+  status: string;
+  provider: 'INTERNAL' | 'MPESA' | 'EMOLA' | 'MKESH' | 'BANK_TRANSFER' | 'MANUAL';
+  providerReference: string | null;
+  requestedByUserId: string | null;
+  approvedByUserId: string | null;
+  processedAt: string | null;
+  failureReason: string | null;
+  createdAt: string;
+  updatedAt: string;
+};
+
 export type ProviderEarningsSummary = {
   balances: {
     held: number;
@@ -77,6 +114,30 @@ export type ProviderEarningsSummary = {
     processedAt: string | null;
     providerReference: string | null;
   }>;
+};
+
+export type JobFinancialState = {
+  jobId: string;
+  jobStatus: string;
+  paymentState: string;
+  intents: PaymentIntent[];
+};
+
+export type AdminPaymentsOverview = {
+  kpis: {
+    totalIntents: number;
+    intentsAwaitingPayment: number;
+    intentsSucceeded: number;
+    intentsFailed: number;
+    totalTransactions: number;
+    failedTransactions: number;
+    pendingRefunds: number;
+    pendingPayouts: number;
+    platformReserved: number;
+    providerHeld: number;
+    providerAvailable: number;
+    releaseDelayHours: number;
+  };
 };
 
 type ListPaymentsQuery = {
@@ -162,4 +223,184 @@ export async function payPaymentIntent(
   }
 
   return (await response.json()) as PaymentIntent;
+}
+
+export async function getJobFinancialState(
+  accessToken: string,
+  jobId: string,
+): Promise<JobFinancialState> {
+  const response = await fetch(`${API_URL}/payments/jobs/${jobId}`, {
+    headers: {
+      Authorization: `Bearer ${accessToken}`,
+    },
+  });
+
+  if (!response.ok) {
+    throw new Error(await readApiError(response));
+  }
+
+  return (await response.json()) as JobFinancialState;
+}
+
+export async function getAdminPaymentsOverview(
+  accessToken: string,
+): Promise<AdminPaymentsOverview> {
+  const response = await fetch(`${API_URL}/admin/payments/overview`, {
+    headers: {
+      Authorization: `Bearer ${accessToken}`,
+    },
+  });
+
+  if (!response.ok) {
+    throw new Error(await readApiError(response));
+  }
+
+  return (await response.json()) as AdminPaymentsOverview;
+}
+
+export async function listAdminPaymentIntents(
+  accessToken: string,
+  query?: ListPaymentsQuery,
+): Promise<PaginatedResponse<PaymentIntent>> {
+  const response = await fetch(
+    `${API_URL}/admin/payments/intents${buildQuery(query)}`,
+    {
+      headers: {
+        Authorization: `Bearer ${accessToken}`,
+      },
+    },
+  );
+
+  if (!response.ok) {
+    throw new Error(await readApiError(response));
+  }
+
+  return (await response.json()) as PaginatedResponse<PaymentIntent>;
+}
+
+export async function listAdminPaymentTransactions(
+  accessToken: string,
+  query?: ListPaymentsQuery,
+): Promise<PaginatedResponse<PaymentTransaction>> {
+  const response = await fetch(
+    `${API_URL}/admin/payments/transactions${buildQuery(query)}`,
+    {
+      headers: {
+        Authorization: `Bearer ${accessToken}`,
+      },
+    },
+  );
+
+  if (!response.ok) {
+    throw new Error(await readApiError(response));
+  }
+
+  return (await response.json()) as PaginatedResponse<PaymentTransaction>;
+}
+
+export async function listAdminRefundRequests(
+  accessToken: string,
+  query?: ListPaymentsQuery,
+): Promise<PaginatedResponse<RefundRequest>> {
+  const response = await fetch(
+    `${API_URL}/admin/payments/refunds${buildQuery(query)}`,
+    {
+      headers: {
+        Authorization: `Bearer ${accessToken}`,
+      },
+    },
+  );
+
+  if (!response.ok) {
+    throw new Error(await readApiError(response));
+  }
+
+  return (await response.json()) as PaginatedResponse<RefundRequest>;
+}
+
+export async function listAdminPayouts(
+  accessToken: string,
+  query?: ListPaymentsQuery,
+): Promise<PaginatedResponse<Payout>> {
+  const response = await fetch(
+    `${API_URL}/admin/payments/payouts${buildQuery(query)}`,
+    {
+      headers: {
+        Authorization: `Bearer ${accessToken}`,
+      },
+    },
+  );
+
+  if (!response.ok) {
+    throw new Error(await readApiError(response));
+  }
+
+  return (await response.json()) as PaginatedResponse<Payout>;
+}
+
+export async function reconcileAdminTransaction(
+  accessToken: string,
+  transactionId: string,
+  input?: {
+    simulate?: 'success' | 'pending' | 'failed' | 'reversed';
+  },
+): Promise<PaymentTransaction> {
+  const response = await fetch(
+    `${API_URL}/payments/transactions/${transactionId}/reconcile`,
+    {
+      method: 'POST',
+      headers: {
+        Authorization: `Bearer ${accessToken}`,
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify(input ?? {}),
+    },
+  );
+
+  if (!response.ok) {
+    throw new Error(await readApiError(response));
+  }
+
+  return (await response.json()) as PaymentTransaction;
+}
+
+export async function reconcileAdminPendingCharges(
+  accessToken: string,
+  input?: {
+    limit?: number;
+    minAgeMinutes?: number;
+  },
+): Promise<{
+  source: string;
+  scanned: number;
+  reconciled: number;
+  succeeded: number;
+  failed: number;
+  reversed: number;
+  stillPending: number;
+  errors: Array<{ transactionId: string; reason: string }>;
+}> {
+  const response = await fetch(`${API_URL}/admin/payments/reconcile/pending`, {
+    method: 'POST',
+    headers: {
+      Authorization: `Bearer ${accessToken}`,
+      'Content-Type': 'application/json',
+    },
+    body: JSON.stringify(input ?? {}),
+  });
+
+  if (!response.ok) {
+    throw new Error(await readApiError(response));
+  }
+
+  return (await response.json()) as {
+    source: string;
+    scanned: number;
+    reconciled: number;
+    succeeded: number;
+    failed: number;
+    reversed: number;
+    stillPending: number;
+    errors: Array<{ transactionId: string; reason: string }>;
+  };
 }

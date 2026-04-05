@@ -23,7 +23,9 @@ Introduce a safe internal payments domain before integrating real electronic-mon
 ## Current Provider Mode
 
 - `INTERNAL` mock gateway is active.
-- Real providers (`MPESA`, `EMOLA`, `MKESH`) are modeled but not integrated yet.
+- `MPESA` and `EMOLA` now have dedicated adapters in simulated external mode (async/pending-first behavior).
+- `MKESH` and `BANK_TRANSFER` still fallback to internal adapter until dedicated adapters are implemented.
+- Default provider for new deposit intents can be set via `PAYMENT_DEFAULT_PROVIDER`.
 
 ## Implemented API Surface
 
@@ -45,11 +47,13 @@ Introduce a safe internal payments domain before integrating real electronic-mon
 - `GET /admin/payments/intents`
 - `GET /admin/payments/transactions`
 - `GET /admin/payments/refunds`
+- `GET /admin/payments/payouts`
 - `POST /admin/payments/refunds`
 - `POST /admin/payments/payouts`
 - `POST /admin/payments/payouts/:id/approve`
 - `POST /admin/payments/payouts/:id/process`
 - `POST /admin/payments/release/:jobId`
+- `POST /admin/payments/reconcile/pending`
 
 ### System
 
@@ -60,6 +64,9 @@ Introduce a safe internal payments domain before integrating real electronic-mon
 
 - `/app/pagamentos` now lists customer payment intents.
 - `/pro/ganhos` now shows provider balances and movement history.
+- `/app/pedidos/[id]` now exposes operational request/proposal/job/payment detail with protected-contact status.
+- `/app/mensagens` now reflects protected contact availability by job.
+- `/admin/reports` now acts as financial operations panel (KPIs + pending reconciliation actions).
 
 ## Request/Proposal Integration
 
@@ -73,7 +80,7 @@ Payment intents are now also created from the request-selection flow:
 
 ## Next Integration Step
 
-Implement provider adapters that satisfy the existing gateway interface:
+Move `MPESA`/`EMOLA` adapters from simulated external mode to live API integration while preserving the same gateway interface:
 
 - `requestCharge`
 - `queryTransactionStatus`

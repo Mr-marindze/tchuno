@@ -180,9 +180,17 @@ export class PaymentsController {
     const signature = Array.isArray(signatureHeader)
       ? signatureHeader[0]
       : signatureHeader;
+    const timestampHeader =
+      req.headers['x-tchuno-timestamp'] ??
+      req.headers['x-webhook-timestamp'] ??
+      req.headers['x-provider-timestamp'];
+    const timestamp = Array.isArray(timestampHeader)
+      ? timestampHeader[0]
+      : timestampHeader;
 
     return this.paymentsService.handleWebhook(provider, dto, {
       signature,
+      timestamp,
     });
   }
 

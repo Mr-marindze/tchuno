@@ -517,6 +517,7 @@ export class PaymentsService {
     dto: PaymentWebhookDto,
     input?: {
       signature?: string;
+      timestamp?: string;
     },
   ) {
     const externalEventId = dto.externalEventId?.trim();
@@ -524,6 +525,7 @@ export class PaymentsService {
       provider,
       dto,
       signature: input?.signature,
+      timestamp: input?.timestamp,
     });
 
     if (provider !== PaymentProvider.INTERNAL) {
@@ -538,7 +540,7 @@ export class PaymentsService {
       }
     }
 
-    if (dto.externalEventId) {
+    if (externalEventId) {
       const existing = await this.prisma.paymentEvent.findUnique({
         where: {
           provider_externalEventId: {
@@ -667,6 +669,99 @@ export class PaymentsService {
         reason: gatewayResult.reason,
       }),
     );
+  }
+
+  async reconcilePendingChargeTransactions(input?: {
+    source?: 'automatic' | 'manual';
+    limit?: number;
+    minAgeMinutes?: number;
+  }) {
+    const source = input?.source ?? 'manual';
+    const limit = this.resolvePendingReconciliationLimit(input?.limit);
+    const minAgeMinutes = this.resolvePendingReconciliationMinAgeMinutes(
+      input?.minAgeMinutes,
+    );
+    const staleBefore = new Date(Date.now() - minAgeMinutes * 60_000);
+    const providers = this.resolvePendingReconciliationProviders();
+
+    const transactions = await this.prisma.paymentTransaction.findMany({
+      where: {
+        type: 'CHARGE',
+        provider: {
+          in: providers,
+        },
+        status: {
+          in: ['PENDING', 'PROCESSING'],
+        },
+        updatedAt: {
+          lte: staleBefore,
+        },
+      },
+      orderBy: [{ updatedAt: 'asc' }, { id: 'asc' }],
+      take: limit,
+    });
+
+    const summary = {
+      source,
+      scanned: transactions.length,
+      reconciled: 0,
+      succeeded: 0,
+      failed: 0,
+      reversed: 0,
+      stillPending: 0,
+      errors: [] as Array<{ transactionId: string; reason: string }>,
+    };
+
+    for (const transaction of transactions) {
+      try {
+        const updated = await this.reconcileTransaction(transaction.id);
+        summary.reconciled += 1;
+
+        if (updated.status === 'SUCCEEDED') {
+          summary.succeeded += 1;
+          continue;
+        }
+
+        if (updated.status === 'FAILED') {
+          summary.failed += 1;
+          continue;
+        }
+
+        if (updated.status === 'REVERSED') {
+          summary.reversed += 1;
+          continue;
+        }
+
+        summary.stillPending += 1;
+      } catch (error) {
+        const message =
+          error instanceof Error ? error.message : 'unknown_reconcile_error';
+
+        summary.errors.push({
+          transactionId: transaction.id,
+          reason: message,
+        });
+      }
+    }
+
+    this.metricsService.recordBusinessEvent({
+      domain: 'payments',
+      event: 'pending_reconciliation_run',
+      result: summary.errors.length === 0 ? 'success' : 'failed',
+    });
+
+    if (summary.scanned > 0 || summary.errors.length > 0) {
+      this.logger.log(
+        JSON.stringify({
+          event: 'pending_reconciliation_summary',
+          ...summary,
+          minAgeMinutes,
+          providers,
+        }),
+      );
+    }
+
+    return summary;
   }
 
   async adminOverview() {
@@ -844,6 +939,34 @@ export class PaymentsService {
     const [total, data] = await this.prisma.$transaction([
       this.prisma.refundRequest.count({ where }),
       this.prisma.refundRequest.findMany({
+        where,
+        orderBy: [{ createdAt: 'desc' }, { id: 'desc' }],
+        take: limit,
+        skip,
+      }),
+    ]);
+
+    return buildPaginatedResponse({
+      data,
+      total,
+      page,
+      limit,
+    });
+  }
+
+  async adminListPayouts(query: ListPaymentsQueryDto) {
+    const { page, limit, skip } = resolvePagination(query);
+    const where: Prisma.PayoutWhereInput = {
+      ...(query.status
+        ? {
+            status: query.status as PayoutStatus,
+          }
+        : {}),
+    };
+
+    const [total, data] = await this.prisma.$transaction([
+      this.prisma.payout.count({ where }),
+      this.prisma.payout.findMany({
         where,
         orderBy: [{ createdAt: 'desc' }, { id: 'desc' }],
         take: limit,
@@ -1375,6 +1498,58 @@ export class PaymentsService {
     );
   }
 
+  private resolvePendingReconciliationLimit(override?: number): number {
+    if (typeof override === 'number' && Number.isFinite(override)) {
+      return Math.min(500, Math.max(1, Math.trunc(override)));
+    }
+
+    const parsed = Number(process.env.PAYMENT_RECONCILE_BATCH_SIZE);
+    if (!Number.isFinite(parsed)) {
+      return 50;
+    }
+
+    return Math.min(500, Math.max(1, Math.trunc(parsed)));
+  }
+
+  private resolvePendingReconciliationMinAgeMinutes(override?: number): number {
+    if (typeof override === 'number' && Number.isFinite(override)) {
+      return Math.min(24 * 60, Math.max(0, Math.trunc(override)));
+    }
+
+    const parsed = Number(process.env.PAYMENT_RECONCILE_MIN_AGE_MINUTES);
+    if (!Number.isFinite(parsed)) {
+      return 1;
+    }
+
+    return Math.min(24 * 60, Math.max(0, Math.trunc(parsed)));
+  }
+
+  private resolvePendingReconciliationProviders(): PaymentProvider[] {
+    const raw =
+      process.env.PAYMENT_RECONCILE_PROVIDERS?.trim() ?? 'MPESA,EMOLA';
+    const candidates = raw
+      .split(',')
+      .map((item) => item.trim().toUpperCase())
+      .filter((item) => item.length > 0);
+
+    if (candidates.length === 0) {
+      return [PaymentProvider.MPESA, PaymentProvider.EMOLA];
+    }
+
+    const resolved = candidates
+      .filter(
+        (item): item is keyof typeof PaymentProvider => item in PaymentProvider,
+      )
+      .map((item) => PaymentProvider[item])
+      .filter((provider) => provider !== PaymentProvider.INTERNAL);
+
+    if (resolved.length > 0) {
+      return resolved;
+    }
+
+    return [PaymentProvider.MPESA, PaymentProvider.EMOLA];
+  }
+
   private mapGatewayToTransactionStatus(
     status: GatewayOperationStatus,
   ): TransactionStatus {
@@ -1416,6 +1591,7 @@ export class PaymentsService {
     provider: PaymentProvider;
     dto: PaymentWebhookDto;
     signature?: string;
+    timestamp?: string;
   }): boolean {
     if (input.provider === PaymentProvider.INTERNAL) {
       return true;
@@ -1435,9 +1611,19 @@ export class PaymentsService {
       ? provided.slice('sha256='.length)
       : provided;
 
+    const timestamp = input.timestamp?.trim();
+    if (!timestamp) {
+      return false;
+    }
+
+    if (!this.isWebhookTimestampFresh(timestamp)) {
+      return false;
+    }
+
     const payload = this.buildWebhookSignaturePayload(
       input.provider,
       input.dto,
+      timestamp,
     );
     const expected = createHmac('sha256', secret).update(payload).digest('hex');
 
@@ -1454,14 +1640,17 @@ export class PaymentsService {
   private buildWebhookSignaturePayload(
     provider: PaymentProvider,
     dto: PaymentWebhookDto,
+    timestamp: string,
   ): string {
-    return JSON.stringify({
+    const body = JSON.stringify({
       provider,
       externalEventId: dto.externalEventId ?? null,
       providerReference: dto.providerReference ?? null,
       status: dto.status ?? null,
       payload: dto.payload ?? {},
     });
+
+    return `${timestamp}.${body}`;
   }
 
   private resolveWebhookSecret(provider: PaymentProvider): string | null {
@@ -1473,6 +1662,64 @@ export class PaymentsService {
 
     const fallback = process.env.PAYMENT_WEBHOOK_SECRET?.trim() ?? '';
     return fallback.length > 0 ? fallback : null;
+  }
+
+  private isWebhookTimestampFresh(timestamp: string): boolean {
+    const parsedMs = this.parseWebhookTimestampMs(timestamp);
+    if (!Number.isFinite(parsedMs)) {
+      return false;
+    }
+
+    const toleranceSeconds = this.resolveWebhookToleranceSeconds();
+    const allowedFutureSkewSeconds = this.resolveWebhookFutureSkewSeconds();
+    const now = Date.now();
+    const ageMs = now - parsedMs;
+
+    if (ageMs > toleranceSeconds * 1000) {
+      return false;
+    }
+
+    if (ageMs < -allowedFutureSkewSeconds * 1000) {
+      return false;
+    }
+
+    return true;
+  }
+
+  private parseWebhookTimestampMs(timestamp: string): number {
+    const normalized = timestamp.trim();
+    if (/^\d+$/.test(normalized)) {
+      const asNumber = Number(normalized);
+      if (!Number.isFinite(asNumber)) {
+        return Number.NaN;
+      }
+
+      if (normalized.length <= 10) {
+        return asNumber * 1000;
+      }
+
+      return asNumber;
+    }
+
+    return Date.parse(normalized);
+  }
+
+  private resolveWebhookToleranceSeconds(): number {
+    const parsed = Number(process.env.PAYMENT_WEBHOOK_TOLERANCE_SECONDS);
+    if (!Number.isFinite(parsed)) {
+      return 300;
+    }
+
+    return Math.min(3600, Math.max(30, Math.trunc(parsed)));
+  }
+
+  private resolveWebhookFutureSkewSeconds(): number {
+    const parsed = Number(process.env.PAYMENT_WEBHOOK_FUTURE_SKEW_SECONDS);
+    if (!Number.isFinite(parsed)) {
+      return 60;
+    }
+
+    return Math.min(600, Math.max(0, Math.trunc(parsed)));
   }
 
   private parseGatewayStatus(status: string): GatewayOperationStatus {

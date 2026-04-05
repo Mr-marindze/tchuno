@@ -12,12 +12,17 @@ export type JobStatus =
 export type Job = {
   id: string;
   clientId: string;
+  customerId?: string | null;
+  providerId?: string | null;
   workerProfileId: string;
   categoryId: string;
+  requestId?: string | null;
+  proposalId?: string | null;
   pricingMode: "FIXED_PRICE" | "QUOTE_REQUEST";
   title: string;
   description: string;
   budget: number | null;
+  agreedPrice?: number | null;
   quotedAmount: number | null;
   quoteMessage: string | null;
   status: JobStatus;
@@ -28,8 +33,19 @@ export type Job = {
   canceledAt: string | null;
   canceledBy: string | null;
   cancelReason: string | null;
+  contactUnlockedAt?: string | null;
   createdAt: string;
   updatedAt: string;
+};
+
+export type JobDetails = Job & {
+  contactUnlocked: boolean;
+  providerContact: {
+    email: string | null;
+    name: string | null;
+  } | null;
+  paymentRequired: boolean;
+  paymentStatus: string;
 };
 
 export type ListJobsQuery = {
@@ -145,4 +161,21 @@ export async function updateJobStatus(
   }
 
   return (await response.json()) as Job;
+}
+
+export async function getJobById(
+  accessToken: string,
+  jobId: string,
+): Promise<JobDetails> {
+  const response = await fetch(`${API_URL}/jobs/${jobId}`, {
+    headers: {
+      Authorization: `Bearer ${accessToken}`,
+    },
+  });
+
+  if (!response.ok) {
+    throw new Error(await readApiError(response));
+  }
+
+  return (await response.json()) as JobDetails;
 }

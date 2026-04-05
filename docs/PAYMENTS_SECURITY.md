@@ -18,6 +18,7 @@
 - `PaymentTransaction.idempotencyKey` is unique.
 - Provider reference uniqueness is enforced per provider.
 - Webhook events are deduplicated via `(provider, externalEventId)`.
+- External webhook signatures require HMAC plus timestamp freshness validation.
 
 3. Append-only ledger
 - Financial state mutations are recorded as `LedgerEntry` rows.
@@ -31,6 +32,7 @@
 5. Reconciliation hooks
 - Webhook endpoint persists raw event payloads.
 - Manual reconciliation endpoint allows server-side status refresh.
+- Automatic reconciliation runner periodically checks stale pending charge transactions.
 
 6. Contact-gating control
 - Job contact remains blocked before paid deposit.
@@ -41,3 +43,4 @@
 - Track failed transactions and pending intents daily.
 - Investigate any mismatch between transaction status and ledger outcome.
 - Restrict production webhook access to trusted provider origins when available.
+- Keep `PAYMENT_WEBHOOK_SECRET_*` and reconciliation envs configured per environment.

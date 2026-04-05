@@ -5,7 +5,7 @@ import {
   Injectable,
   NotFoundException,
 } from '@nestjs/common';
-import { Prisma, ServiceRequestStatus } from '@prisma/client';
+import { PaymentProvider, Prisma, ServiceRequestStatus } from '@prisma/client';
 import {
   buildPaginatedResponse,
   resolvePagination,
@@ -209,6 +209,71 @@ export class ServiceRequestsService {
       page,
       limit,
     });
+  }
+
+  async getMineById(actorUserId: string, requestId: string) {
+    const request = await this.prisma.serviceRequest.findUnique({
+      where: { id: requestId },
+      include: {
+        category: {
+          select: {
+            id: true,
+            name: true,
+            slug: true,
+          },
+        },
+        proposals: {
+          include: {
+            provider: {
+              select: {
+                id: true,
+                name: true,
+                workerProfile: {
+                  select: {
+                    ratingAvg: true,
+                    ratingCount: true,
+                    location: true,
+                  },
+                },
+              },
+            },
+          },
+          orderBy: [{ createdAt: 'asc' }, { id: 'asc' }],
+        },
+        job: {
+          select: {
+            id: true,
+            status: true,
+            requestId: true,
+            proposalId: true,
+            agreedPrice: true,
+            contactUnlockedAt: true,
+            createdAt: true,
+            paymentIntents: {
+              select: {
+                id: true,
+                amount: true,
+                status: true,
+                provider: true,
+                createdAt: true,
+                updatedAt: true,
+              },
+              orderBy: [{ createdAt: 'desc' }, { id: 'desc' }],
+            },
+          },
+        },
+      },
+    });
+
+    if (!request) {
+      throw new NotFoundException('Service request not found');
+    }
+
+    if (request.customerId !== actorUserId) {
+      throw new ForbiddenException('Only request owner can read this request');
+    }
+
+    return request;
   }
 
   async submitProposal(
@@ -519,7 +584,7 @@ export class ServiceRequestsService {
           platformFeeAmount: split.platformFeeAmount,
           providerNetAmount: split.providerNetAmount,
           status: 'AWAITING_PAYMENT',
-          provider: 'INTERNAL',
+          provider: this.resolveDefaultPaymentProvider(),
           acceptedQuoteSnapshot: proposal.price,
           metadata: {
             kind: 'deposit',
@@ -595,5 +660,18 @@ export class ServiceRequestsService {
     }
 
     return Math.min(9000, Math.max(0, Math.trunc(parsed)));
+  }
+
+  private resolveDefaultPaymentProvider(): PaymentProvider {
+    const raw = process.env.PAYMENT_DEFAULT_PROVIDER?.trim().toUpperCase();
+    if (!raw) {
+      return PaymentProvider.INTERNAL;
+    }
+
+    if (raw in PaymentProvider) {
+      return raw as PaymentProvider;
+    }
+
+    return PaymentProvider.INTERNAL;
   }
 }

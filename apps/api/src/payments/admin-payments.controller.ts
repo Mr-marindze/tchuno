@@ -32,6 +32,7 @@ import { CreatePayoutDto } from './dto/create-payout.dto';
 import { CreateRefundRequestDto } from './dto/create-refund-request.dto';
 import { ListPaymentsQueryDto } from './dto/list-payments-query.dto';
 import { ProcessPayoutDto } from './dto/process-payout.dto';
+import { TriggerReconciliationDto } from './dto/trigger-reconciliation.dto';
 import { PaymentsService } from './payments.service';
 
 type AdminRequest = {
@@ -90,6 +91,16 @@ export class AdminPaymentsController {
   @RequirePermissions('admin.payments.read')
   refunds(@Query() query: ListPaymentsQueryDto) {
     return this.paymentsService.adminListRefunds(query);
+  }
+
+  @Get('payouts')
+  @ApiOperation({ summary: 'List payout requests (admin)' })
+  @ApiOkResponse({ description: 'Paginated payouts' })
+  @ApiUnauthorizedResponse({ type: ErrorResponseDto })
+  @ApiForbiddenResponse({ type: ErrorResponseDto })
+  @RequirePermissions('admin.payments.read')
+  payouts(@Query() query: ListPaymentsQueryDto) {
+    return this.paymentsService.adminListPayouts(query);
   }
 
   @Post('refunds')
@@ -162,5 +173,21 @@ export class AdminPaymentsController {
   @RequireReauth('admin.payments.release')
   releaseFunds(@Req() req: AdminRequest, @Param('jobId') jobId: string) {
     return this.paymentsService.adminReleaseProviderFunds(req.user.sub, jobId);
+  }
+
+  @Post('reconcile/pending')
+  @ApiOperation({
+    summary: 'Trigger reconciliation for stale pending charge transactions',
+  })
+  @ApiOkResponse({ description: 'Pending reconciliation summary' })
+  @ApiUnauthorizedResponse({ type: ErrorResponseDto })
+  @ApiForbiddenResponse({ type: ErrorResponseDto })
+  @RequirePermissions('admin.payments.manage')
+  reconcilePending(@Body() dto: TriggerReconciliationDto) {
+    return this.paymentsService.reconcilePendingChargeTransactions({
+      source: 'manual',
+      limit: dto.limit,
+      minAgeMinutes: dto.minAgeMinutes,
+    });
   }
 }
