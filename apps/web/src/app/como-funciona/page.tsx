@@ -16,13 +16,13 @@ export default function HowItWorksPage() {
         <article className="panel-card">
           <h2>2. Pede serviço</h2>
           <p className="subtitle">
-            Cria o pedido com preço fixo ou sob cotação e acompanha o estado no dashboard.
+            Cria um pedido aberto, recebe propostas de prestadores e seleciona a melhor opção.
           </p>
         </article>
         <article className="panel-card">
           <h2>3. Conclui e avalia</h2>
           <p className="subtitle">
-            Finaliza o trabalho, deixa review e ajuda outros clientes a decidir melhor.
+            Paga o sinal para desbloquear contacto, acompanha a execução e deixa review no final.
           </p>
         </article>
       </div>

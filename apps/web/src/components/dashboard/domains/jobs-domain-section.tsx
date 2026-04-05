@@ -1,3 +1,4 @@
+import Link from "next/link";
 import { FormEvent, useEffect, useMemo, useRef } from "react";
 import {
   getJobStatusBadgeTone,
@@ -303,9 +304,9 @@ export function JobsDomainSection({
                     Ir para reviews pendentes
                   </a>
                 ) : (
-                  <a href="#job-create" className="primary">
+                  <Link href="/app/pedidos#novo-pedido" className="primary">
                     Criar novo job
-                  </a>
+                  </Link>
                 )}
               </>
             )}
@@ -498,7 +499,7 @@ export function JobsDomainSection({
       </DashboardPaginationRow>
 
       {canCreateJobs ? (
-        <form onSubmit={onCreateJob} className="form job-create-form" id="job-create">
+        <form onSubmit={onCreateJob} className="form job-create-form" id="novo-pedido">
         <fieldset className="form-step">
           <legend>Passo 1 · Selecionar profissional e categoria</legend>
           <label>

@@ -75,7 +75,7 @@ export default async function ProviderDetailsPage({
               Disponibilidade: {profile.isAvailable ? "Disponível" : "Agenda limitada"}
             </p>
             <p className="subtitle">
-              O valor final é negociado diretamente entre cliente e profissional no Tchuno.
+              O valor final é acordado por propostas dentro do pedido no Tchuno.
             </p>
           </article>
         </div>
@@ -98,7 +98,7 @@ export default async function ProviderDetailsPage({
 
         <div className="actions actions--inline">
           <Link
-            href="/login?next=%2Fapp%2Fpedidos%23job-create"
+            href="/login?next=%2Fapp%2Fpedidos%23novo-pedido"
             className="primary"
           >
             Pedir serviço

@@ -195,7 +195,7 @@ export function PublicWorkersPage() {
   }, [locationSearch, search, selectedCategoryName]);
 
   function redirectToLogin(worker?: WorkerProfile) {
-    const nextPath = "/app/pedidos#job-create";
+    const nextPath = "/app/pedidos#novo-pedido";
 
     saveAuthIntent({
       nextPath,
@@ -227,12 +227,12 @@ export function PublicWorkersPage() {
     });
   }
 
-  function getPrimaryCtaLabel(worker: WorkerProfile): string {
-    return worker.isAvailable ? "Pedir serviço" : "Contactar";
+  function getPrimaryCtaLabel(): string {
+    return "Iniciar pedido";
   }
 
-  function getGuestCtaLabel(worker: WorkerProfile): string {
-    return worker.isAvailable ? "Entrar para pedir serviço" : "Entrar para contactar";
+  function getGuestCtaLabel(): string {
+    return "Entrar para iniciar pedido";
   }
 
   function getTrustIndicator(worker: WorkerProfile): WorkerTrustIndicator {
@@ -305,8 +305,8 @@ export function PublicWorkersPage() {
         }
         actions={
           hasSession ? (
-            <Link href="/app/pedidos#job-create" className="primary">
-              {getPrimaryCtaLabel(worker)}
+            <Link href="/app/pedidos#novo-pedido" className="primary">
+              {getPrimaryCtaLabel()}
             </Link>
           ) : (
             <button
@@ -314,7 +314,7 @@ export function PublicWorkersPage() {
               className="primary"
               onClick={() => redirectToLogin(worker)}
             >
-              {getGuestCtaLabel(worker)}
+              {getGuestCtaLabel()}
             </button>
           )
         }
@@ -346,7 +346,7 @@ export function PublicWorkersPage() {
       description="Pesquisa por serviço, área ou profissional e decide com confiança em poucos segundos."
     >
       <p className="marketplace-signal-note">
-        No Tchuno, o valor final é negociado entre cliente e profissional.
+        No Tchuno, o cliente cria pedido, recebe propostas e paga sinal antes do contacto.
       </p>
 
       <form className="section-toolbar marketplace-search-toolbar" onSubmit={onSearchSubmit}>

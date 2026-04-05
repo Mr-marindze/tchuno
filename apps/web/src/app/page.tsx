@@ -41,9 +41,9 @@ const journeyFlows: JourneyFlow[] = [
     audience: "Para clientes",
     title: "Resolve o teu problema rapidamente",
     steps: [
-      "Diz o que precisas",
-      "Recebe respostas de profissionais reais",
-      "Escolhe quem melhor se adapta a ti",
+      "Cria o teu pedido de serviço",
+      "Recebe propostas de profissionais reais",
+      "Seleciona, paga sinal e acompanha a execução",
     ],
     ctaLabel: "Encontrar profissional",
     ctaHref: "#discover",
@@ -380,7 +380,7 @@ export default function Home() {
           </div>
 
           <p className={styles.heroPolicy}>
-            O valor é combinado entre cliente e profissional no Tchuno.
+            O valor é acordado por propostas no pedido e o contacto desbloqueia após sinal.
           </p>
         </header>
 
