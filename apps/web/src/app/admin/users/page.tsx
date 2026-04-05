@@ -23,6 +23,7 @@ export default function AdminUsersPage() {
   const [rows, setRows] = useState<UserRow[]>([]);
   const [loading, setLoading] = useState(true);
   const [status, setStatus] = useState('A carregar utilizadores...');
+  const [copiedUserId, setCopiedUserId] = useState<string | null>(null);
 
   useEffect(() => {
     let active = true;
@@ -185,6 +186,25 @@ export default function AdminUsersPage() {
     );
   }, [rows]);
 
+  async function handleCopyUserId(userId: string) {
+    try {
+      if (!navigator.clipboard) {
+        setStatus('Clipboard não disponível neste browser.');
+        return;
+      }
+
+      await navigator.clipboard.writeText(userId);
+      setCopiedUserId(userId);
+      setStatus(`ID ${shortId(userId)} copiado para clipboard.`);
+
+      window.setTimeout(() => {
+        setCopiedUserId((current) => (current === userId ? null : current));
+      }, 1500);
+    } catch {
+      setStatus('Falha ao copiar ID do utilizador.');
+    }
+  }
+
   return (
     <main className='space-y-4'>
       <section className='rounded-2xl border border-slate-200 bg-white p-4 shadow-sm sm:p-6'>
@@ -239,10 +259,10 @@ export default function AdminUsersPage() {
                     type='button'
                     className='inline-flex items-center rounded-lg border border-slate-300 px-3 py-1.5 text-xs font-medium text-slate-700 hover:bg-slate-100'
                     onClick={() => {
-                      void navigator.clipboard?.writeText(row.userId);
+                      void handleCopyUserId(row.userId);
                     }}
                   >
-                    Copiar ID
+                    {copiedUserId === row.userId ? 'Copiado' : 'Copiar ID'}
                   </button>
                   <Link
                     href='/admin/payments'

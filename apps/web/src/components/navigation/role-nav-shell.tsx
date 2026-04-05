@@ -30,13 +30,13 @@ export function RoleNavShell({
   return (
     <RouteGuard requiredAccess={requiredAccess}>
       <div className='min-h-screen bg-slate-50'>
-        <header className='border-b border-slate-200 bg-white/90 backdrop-blur'>
+        <header className='sticky top-0 z-20 border-b border-slate-200 bg-white/95 backdrop-blur'>
           <div className='mx-auto flex w-full max-w-6xl flex-col gap-3 px-4 py-4 sm:flex-row sm:items-center sm:justify-between sm:px-6'>
             <p className='text-sm font-semibold uppercase tracking-wide text-slate-600'>
               {title}
             </p>
             <nav
-              className='flex flex-wrap items-center gap-2'
+              className='flex items-center gap-2 overflow-x-auto pb-1'
               aria-label={`Navegação ${title}`}
             >
               {items.map((item) => {
@@ -49,9 +49,9 @@ export function RoleNavShell({
                     key={item.href}
                     href={item.href}
                     className={[
-                      'rounded-full px-3 py-1.5 text-sm font-medium transition',
+                      'whitespace-nowrap rounded-full px-3 py-1.5 text-sm font-medium transition',
                       isActive
-                        ? 'bg-blue-100 text-blue-800'
+                        ? 'bg-blue-100 text-blue-800 ring-1 ring-inset ring-blue-200'
                         : 'bg-slate-100 text-slate-600 hover:bg-slate-200',
                     ].join(' ')}
                   >
