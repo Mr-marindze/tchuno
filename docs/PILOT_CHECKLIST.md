@@ -1,65 +1,88 @@
-# Pilot Operational Checklist
+# Real Pilot Readiness Checklist
 
-Referências rápidas:
+References:
+
+- `docs/PRODUCT_FLOW.md`
+- `docs/PAYMENTS_FLOW.md`
+- `docs/CANCELLATION_REFUND_POLICY.md`
+- `docs/PAYOUT_SYSTEM.md`
+- `docs/ANTI_LEAKAGE_UX.md`
 - `docs/PILOT_RUNBOOK.md`
-- `docs/PILOT_FEEDBACK_TEMPLATE.md`
 
-## 1. Pre-Pilot (T-7 to T-1)
+## 1. Flow Integrity (Mandatory)
 
-1. Environment
-- Staging database is up and healthy.
-- Migrations are applied.
-- Demo data seed completed.
+- Customer can only start by creating `ServiceRequest`.
+- Providers can submit multiple `Proposal` entries per request.
+- Customer can select exactly one proposal.
+- `Job` is created only from selected proposal (`requestId` + `proposalId` present).
+- `POST /jobs` direct creation remains disabled (`410 Gone`).
+- Contact remains locked until deposit payment confirmation.
+- Execution transitions are blocked if no paid `PaymentIntent`.
 
-2. Application quality
-- `corepack yarn lint` passes.
-- `corepack yarn test` passes.
-- `corepack yarn test:e2e` passes.
+## 2. Financial Readiness (Mandatory)
 
-3. Security baseline
-- JWT secrets are not default values in staging/production.
-- Rate limits are active for auth routes.
-- Refresh token rotation/reuse detection is validated.
+- Commission is calculated only on backend.
+- `PaymentIntent` is created immediately after selection.
+- Deposit payment writes append-only ledger entries:
+  - `CUSTOMER_CHARGE`
+  - `PLATFORM_FEE_RESERVED`
+  - `PROVIDER_BALANCE_HELD`
+- Refund policy is enforced by phase with `cancelReason` required.
+- Release after `COMPLETED` + dispute window.
+- Payout lifecycle (`PENDING -> APPROVED -> PROCESSING -> PAID/FAILED`) is operational.
+- Daily reconciliation run exists and is tested.
 
-4. Observability
-- `/observability/health` reachable.
-- `/observability/metrics` reachable.
-- Structured logs include `requestId`.
+## 3. Security and Fraud Controls (Mandatory)
 
-## 2. Pilot Launch Day
+- Idempotency is enforced for payment, refund, payout and webhook handling.
+- Admin financial actions use RBAC + re-auth.
+- Audit logs exist for intent, charge, refund, release and payout actions.
+- Duplicate/replay events are safely deduplicated.
+- Risk events for leakage attempts are logged and observable.
 
-1. Verify API and Web are reachable from pilot users.
-2. Execute smoke flow:
-- register
-- login
-- create job
-- accept/in-progress/complete
-- create review
-3. Capture first 10 requests with `x-request-id` for traceability.
-4. Confirm metrics are incrementing for business events.
+## 4. UX and Behavioral Alignment (Mandatory)
 
-## 3. Daily Operations
+- No legacy direct-job CTA remains in customer or provider UI.
+- Contact lock/unlock states are explicit and understandable.
+- Proposal selection screen explains deposit and protection value.
+- Payment pending/failure/retry states are clear and actionable.
+- Refund and cancellation expectations are shown before confirmation.
 
-1. Check health endpoint.
-2. Check 5xx rate and auth failure spikes.
-3. Verify job status transition volume and completion rate.
-4. Confirm review creation after completed jobs.
-5. Record top 3 user issues and mitigation action.
+## 5. Operational Readiness (Mandatory)
 
-## 4. Incident Playbook (Minimum)
+- Health and metrics endpoints are reachable in staging/production.
+- Support playbook includes cancellation, refund and payout cases.
+- Finance owner is assigned for reconciliation and payout exceptions.
+- Incident response owner and escalation channel are defined.
+- SLA targets are agreed for refund and payout operations.
 
-1. Severity classification
-- Sev1: outage or auth broken
-- Sev2: major flow degraded (jobs/reviews)
-- Sev3: minor functional issue
+## 6. Validation Commands (Release Gate)
 
-2. Response
-- open incident channel
-- assign owner
-- gather `requestId`, timestamp, user impact
-- rollback or hotfix
+- `corepack yarn lint`
+- `corepack yarn test`
+- `corepack yarn test:e2e`
+- `corepack yarn ci`
 
-3. Closure
-- add root cause
-- add prevention action
-- add regression test if applicable
+All must pass before pilot start.
+
+## 7. Pilot Dry-Run Scenarios (Must Pass)
+
+- Request creation -> multi-proposal -> selection -> job creation.
+- Selection -> payment intent -> successful deposit -> contact unlock.
+- Duplicate payment callback does not duplicate ledger entries.
+- Cancel before payment.
+- Cancel after payment and before `IN_PROGRESS` (full refund path).
+- Cancel after `IN_PROGRESS` (partial/manual path).
+- `COMPLETED` -> release funds after window -> payout execution.
+- Unauthorized admin user blocked from refund/payout approval actions.
+
+## 8. Go / No-Go Decision
+
+Go only if:
+
+- all mandatory sections above are green
+- zero unresolved Sev1/Sev2 defects
+- finance reconciliation mismatch is zero or understood with mitigation
+- support and operations team sign-off is recorded
+
+Otherwise: No-Go and delay pilot.

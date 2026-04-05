@@ -34,22 +34,24 @@ passos claros para subir ambiente, validar fluxos e recolher evidências.
 
 ## 3) Validação funcional rápida
 
-### Fluxo FIXED_PRICE
+### Fluxo oficial Service Request
 
-1. Cliente cria job `FIXED_PRICE`.
-2. Worker aceita job.
-3. Worker inicia (`IN_PROGRESS`).
-4. Worker conclui (`COMPLETED`).
-5. Cliente publica review.
+1. Cliente cria `ServiceRequest`.
+2. Pelo menos 2 prestadores submetem `Proposal`.
+3. Cliente seleciona 1 proposta.
+4. Sistema cria `Job` + `PaymentIntent` de sinal.
+5. Cliente paga sinal.
+6. Confirmar desbloqueio de contacto apenas após pagamento.
+7. Prestador executa: `REQUESTED -> ACCEPTED -> IN_PROGRESS -> COMPLETED`.
+8. Cliente publica review.
 
-### Fluxo QUOTE_REQUEST
+### Fluxos financeiros críticos
 
-1. Cliente cria job `QUOTE_REQUEST`.
-2. Worker envia proposta com valor.
-3. Cliente aceita proposta.
-4. Worker inicia.
-5. Worker conclui.
-6. Cliente publica review.
+1. Cancelamento antes do pagamento.
+2. Cancelamento depois do pagamento e antes de `IN_PROGRESS` (refund total).
+3. Cancelamento após `IN_PROGRESS` (refund parcial/manual).
+4. `COMPLETED` -> janela de disputa -> release -> payout.
+5. Callback duplicado não pode duplicar ledger.
 
 ### Regras operacionais críticas
 
@@ -92,7 +94,8 @@ passos claros para subir ambiente, validar fluxos e recolher evidências.
 ## 7) Gate antes de demo/piloto
 
 1. `corepack yarn ci` verde.
-2. Fluxos FIXED_PRICE e QUOTE_REQUEST validados ponta a ponta.
-3. Cancelamento com motivo validado.
-4. Review pós-COMPLETED validada.
-5. Painel `Admin Ops` a responder no dashboard admin.
+2. Fluxo `ServiceRequest -> Proposal -> Selection -> Job` validado ponta a ponta.
+3. Sinal obrigatório e desbloqueio de contacto pós-pagamento validados.
+4. Cancelamento com motivo + refund por fase validados.
+5. Review pós-`COMPLETED` validada.
+6. Painel `Admin Ops` a responder no dashboard admin.
