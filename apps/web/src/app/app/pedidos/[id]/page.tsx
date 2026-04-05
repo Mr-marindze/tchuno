@@ -3,7 +3,6 @@
 import Link from 'next/link';
 import { useParams } from 'next/navigation';
 import { useEffect, useMemo, useState } from 'react';
-import { RouteGuard } from '@/components/access/route-guard';
 import { ensureSession } from '@/lib/auth';
 import { humanizeUnknownError } from '@/lib/http-errors';
 import { getJobById, JobDetails } from '@/lib/jobs';
@@ -158,17 +157,16 @@ export default function OrderDetailsPage() {
   }
 
   return (
-    <RouteGuard requiredAccess='customer'>
-      <main className='shell'>
-        <section className='card card--wide'>
-          <header className='header'>
-            <p className='kicker'>Pedido</p>
-            <h1>Detalhe do Pedido</h1>
-            <p className='subtitle'>
-              Acompanha propostas, seleção, estado financeiro e desbloqueio de
-              contacto.
-            </p>
-          </header>
+    <main className='shell'>
+      <section className='card card--wide'>
+        <header className='header'>
+          <p className='kicker'>Pedido</p>
+          <h1>Detalhe do Pedido</h1>
+          <p className='subtitle'>
+            Acompanha propostas, seleção, estado financeiro e desbloqueio de
+            contacto.
+          </p>
+        </header>
 
           <div className='flow-summary'>
             <article className='flow-summary-item'>
@@ -295,19 +293,15 @@ export default function OrderDetailsPage() {
             </section>
           ) : null}
 
-          <div className='actions actions--inline'>
-            <Link href='/app/pedidos' className='primary'>
-              Voltar aos pedidos
-            </Link>
-            <Link href='/app/mensagens' className='primary primary--ghost'>
-              Mensagens e contacto
-            </Link>
-            <Link href='/app/pagamentos' className='primary primary--ghost'>
-              Ver pagamentos
-            </Link>
-          </div>
-        </section>
-      </main>
-    </RouteGuard>
+        <div className='actions actions--inline'>
+          <Link href='/app/pedidos' className='primary'>
+            Voltar aos pedidos
+          </Link>
+          <Link href='/app/pagamentos' className='primary primary--ghost'>
+            Ver pagamentos
+          </Link>
+        </div>
+      </section>
+    </main>
   );
 }

@@ -2,7 +2,6 @@
 
 import Link from 'next/link';
 import { useEffect, useMemo, useState } from 'react';
-import { RouteGuard } from '@/components/access/route-guard';
 import { ensureSession } from '@/lib/auth';
 import { humanizeUnknownError } from '@/lib/http-errors';
 import { listMyCustomerPaymentIntents, PaymentIntent } from '@/lib/payments';
@@ -98,17 +97,16 @@ export default function CustomerPaymentsPage() {
   }
 
   return (
-    <RouteGuard requiredAccess='customer'>
-      <main className='shell'>
-        <section className='card'>
-          <header className='header'>
-            <p className='kicker'>Financeiro</p>
-            <h1>Pagamentos</h1>
-            <p className='subtitle'>
-              Acompanha o estado financeiro dos teus pedidos e os valores
-              registados pela plataforma.
-            </p>
-          </header>
+    <main className='shell'>
+      <section className='card'>
+        <header className='header'>
+          <p className='kicker'>Financeiro</p>
+          <h1>Pagamentos</h1>
+          <p className='subtitle'>
+            Acompanha o estado financeiro dos teus pedidos e os valores
+            registados pela plataforma.
+          </p>
+        </header>
 
           <div className='flow-summary'>
             <article className='flow-summary-item'>
@@ -158,16 +156,12 @@ export default function CustomerPaymentsPage() {
             </div>
           )}
 
-          <div className='actions actions--inline'>
-            <Link href='/app/pedidos' className='primary'>
-              Ver pedidos
-            </Link>
-            <Link href='/app' className='primary primary--ghost'>
-              Voltar ao início
-            </Link>
-          </div>
-        </section>
-      </main>
-    </RouteGuard>
+        <div className='actions actions--inline'>
+          <Link href='/app/pedidos' className='primary'>
+            Ver pedidos
+          </Link>
+        </div>
+      </section>
+    </main>
   );
 }

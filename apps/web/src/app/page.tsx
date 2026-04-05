@@ -670,7 +670,10 @@ export default function Home() {
 
           <div className="landing-how-final">
             <h3>Começa agora, sem complicação</h3>
-            <Link href="/dashboard" className="primary landing-how-final-cta">
+            <Link
+              href="/login?next=%2Fapp%2Fpedidos"
+              className="primary landing-how-final-cta"
+            >
               Entrar no Tchuno
             </Link>
           </div>

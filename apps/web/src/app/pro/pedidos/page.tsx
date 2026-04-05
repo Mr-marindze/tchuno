@@ -2,7 +2,6 @@
 
 import Link from 'next/link';
 import { useEffect, useMemo, useState } from 'react';
-import { RouteGuard } from '@/components/access/route-guard';
 import { ensureSession } from '@/lib/auth';
 import { humanizeUnknownError } from '@/lib/http-errors';
 import {
@@ -128,116 +127,114 @@ export default function ProviderOrdersPage() {
   }
 
   return (
-    <RouteGuard requiredAccess='provider'>
-      <main className='shell'>
-        <section className='card'>
-          <header className='header'>
-            <p className='kicker'>Novo Fluxo</p>
-            <h1>Pedidos Disponíveis</h1>
-            <p className='subtitle'>
-              Envia proposta de preço para pedidos abertos. O cliente escolhe uma
-              proposta e o contacto só é desbloqueado após pagamento do sinal.
-            </p>
-          </header>
+    <main className='shell'>
+      <section className='card'>
+        <header className='header'>
+          <p className='kicker'>Novo Fluxo</p>
+          <h1>Pedidos Disponíveis</h1>
+          <p className='subtitle'>
+            Envia proposta de preço para pedidos abertos. O cliente escolhe uma
+            proposta e o contacto só é desbloqueado após pagamento do sinal.
+          </p>
+        </header>
 
-          <div className='flow-summary'>
-            <article className='flow-summary-item'>
-              <p className='item-label'>Pedidos abertos</p>
-              <p className='item-title'>{openCount}</p>
-            </article>
-            <article className='flow-summary-item'>
-              <p className='item-label'>Regra operacional</p>
-              <p className='item-title'>Propor {'->'} esperar seleção</p>
-            </article>
-          </div>
+        <div className='flow-summary'>
+          <article className='flow-summary-item'>
+            <p className='item-label'>Pedidos abertos</p>
+            <p className='item-title'>{openCount}</p>
+          </article>
+          <article className='flow-summary-item'>
+            <p className='item-label'>Regra operacional</p>
+            <p className='item-title'>Propor {'->'} esperar seleção</p>
+          </article>
+        </div>
 
-          <p className={loading ? 'status status--loading' : 'status'}>{status}</p>
+        <p className={loading ? 'status status--loading' : 'status'}>{status}</p>
 
-          {requests.length === 0 ? (
-            <p className='muted'>Não há pedidos abertos para proposta agora.</p>
-          ) : (
-            <div className='list'>
-              {requests.map((request) => {
-                const ownLatestProposal = request.proposals?.[0] ?? null;
+        {requests.length === 0 ? (
+          <p className='muted'>Não há pedidos abertos para proposta agora.</p>
+        ) : (
+          <div className='list'>
+            {requests.map((request) => {
+              const ownLatestProposal = request.proposals?.[0] ?? null;
 
-                return (
-                  <article key={request.id} className='list-item'>
-                    <p className='item-title'>
-                      {request.title}
-                      <span className='badge badge--neutral'>{request.status}</span>
+              return (
+                <article key={request.id} className='list-item'>
+                  <p className='item-title'>
+                    {request.title}
+                    <span className='badge badge--neutral'>{request.status}</span>
+                  </p>
+                  <p>{request.description}</p>
+                  <p>
+                    <strong>Local:</strong> {request.location ?? 'n/a'}
+                  </p>
+
+                  {ownLatestProposal ? (
+                    <p className='muted'>
+                      Tua última proposta: {formatCurrencyMzn(ownLatestProposal.price)} ({' '}
+                      {ownLatestProposal.status})
                     </p>
-                    <p>{request.description}</p>
-                    <p>
-                      <strong>Local:</strong> {request.location ?? 'n/a'}
-                    </p>
+                  ) : (
+                    <p className='muted'>Ainda não enviaste proposta para este pedido.</p>
+                  )}
 
-                    {ownLatestProposal ? (
-                      <p className='muted'>
-                        Tua última proposta: {formatCurrencyMzn(ownLatestProposal.price)} ({' '}
-                        {ownLatestProposal.status})
-                      </p>
-                    ) : (
-                      <p className='muted'>Ainda não enviaste proposta para este pedido.</p>
-                    )}
+                  <div className='form'>
+                    <label>
+                      Preço proposto (MZN)
+                      <input
+                        type='number'
+                        min={1}
+                        value={proposalPrice[request.id] ?? ''}
+                        onChange={(event) =>
+                          setProposalPrice((prev) => ({
+                            ...prev,
+                            [request.id]: event.target.value,
+                          }))
+                        }
+                      />
+                    </label>
 
-                    <div className='form'>
-                      <label>
-                        Preço proposto (MZN)
-                        <input
-                          type='number'
-                          min={1}
-                          value={proposalPrice[request.id] ?? ''}
-                          onChange={(event) =>
-                            setProposalPrice((prev) => ({
-                              ...prev,
-                              [request.id]: event.target.value,
-                            }))
-                          }
-                        />
-                      </label>
+                    <label>
+                      Comentário
+                      <textarea
+                        value={proposalComment[request.id] ?? ''}
+                        onChange={(event) =>
+                          setProposalComment((prev) => ({
+                            ...prev,
+                            [request.id]: event.target.value,
+                          }))
+                        }
+                        maxLength={320}
+                      />
+                    </label>
+                  </div>
 
-                      <label>
-                        Comentário
-                        <textarea
-                          value={proposalComment[request.id] ?? ''}
-                          onChange={(event) =>
-                            setProposalComment((prev) => ({
-                              ...prev,
-                              [request.id]: event.target.value,
-                            }))
-                          }
-                          maxLength={320}
-                        />
-                      </label>
-                    </div>
-
-                    <div className='actions actions--inline'>
-                      <button
-                        type='button'
-                        className='primary'
-                        onClick={() => {
-                          void handleSubmitProposal(request.id);
-                        }}
-                      >
-                        Enviar proposta
-                      </button>
-                    </div>
-                  </article>
-                );
-              })}
-            </div>
-          )}
-
-          <div className='actions actions--inline'>
-            <Link href='/pro/ganhos' className='primary'>
-              Ver ganhos
-            </Link>
-            <Link href='/pro/dashboard' className='primary primary--ghost'>
-              Voltar ao painel
-            </Link>
+                  <div className='actions actions--inline'>
+                    <button
+                      type='button'
+                      className='primary'
+                      onClick={() => {
+                        void handleSubmitProposal(request.id);
+                      }}
+                    >
+                      Enviar proposta
+                    </button>
+                  </div>
+                </article>
+              );
+            })}
           </div>
-        </section>
-      </main>
-    </RouteGuard>
+        )}
+
+        <div className='actions actions--inline'>
+          <Link href='/pro/propostas' className='primary primary--ghost'>
+            Ver propostas enviadas
+          </Link>
+          <Link href='/pro/ganhos' className='primary'>
+            Ver ganhos
+          </Link>
+        </div>
+      </section>
+    </main>
   );
 }

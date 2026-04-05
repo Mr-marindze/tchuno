@@ -2,7 +2,6 @@
 
 import Link from 'next/link';
 import { FormEvent, useEffect, useMemo, useState } from 'react';
-import { RouteGuard } from '@/components/access/route-guard';
 import { ensureSession } from '@/lib/auth';
 import { listCategories, Category } from '@/lib/categories';
 import { humanizeUnknownError } from '@/lib/http-errors';
@@ -216,17 +215,16 @@ export default function CustomerOrdersPage() {
   }
 
   return (
-    <RouteGuard requiredAccess='customer'>
-      <main className='shell'>
-        <section className='card'>
-          <header className='header'>
-            <p className='kicker'>Novo Fluxo</p>
-            <h1>Pedidos de Serviço</h1>
-            <p className='subtitle'>
-              Cria pedido aberto, recebe múltiplas propostas, seleciona prestador e
-              paga sinal para desbloquear contacto.
-            </p>
-          </header>
+    <main className='shell'>
+      <section className='card'>
+        <header className='header'>
+          <p className='kicker'>Novo Fluxo</p>
+          <h1>Pedidos de Serviço</h1>
+          <p className='subtitle'>
+            Cria pedido aberto, recebe múltiplas propostas, seleciona prestador e
+            paga sinal para desbloquear contacto.
+          </p>
+        </header>
 
           <div className='flow-summary'>
             <article className='flow-summary-item'>
@@ -406,16 +404,12 @@ export default function CustomerOrdersPage() {
             </div>
           )}
 
-          <div className='actions actions--inline'>
-            <Link href='/app/pagamentos' className='primary'>
-              Ver pagamentos
-            </Link>
-            <Link href='/app' className='primary primary--ghost'>
-              Voltar ao início
-            </Link>
-          </div>
-        </section>
-      </main>
-    </RouteGuard>
+        <div className='actions actions--inline'>
+          <Link href='/app/pagamentos' className='primary'>
+            Ver pagamentos
+          </Link>
+        </div>
+      </section>
+    </main>
   );
 }

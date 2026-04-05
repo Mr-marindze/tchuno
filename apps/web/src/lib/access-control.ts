@@ -85,7 +85,7 @@ export function getRoleHomePath(role: AppRole): string {
   }
 
   if (role === "provider") {
-    return "/pro/dashboard";
+    return "/pro/pedidos";
   }
 
   if (role === "customer") {

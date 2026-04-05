@@ -161,6 +161,81 @@ const customerPaymentIntents = [
   },
 ];
 
+const adminPaymentTransactions = [
+  {
+    id: "ptx-1",
+    paymentIntentId: "pi-1",
+    type: "CHARGE",
+    status: "PENDING",
+    provider: "INTERNAL",
+    providerReference: "prov-ref-1",
+    requestedAmount: 1260,
+    confirmedAmount: null,
+    currency: "MZN",
+    failureReason: null,
+    processedAt: null,
+    createdAt: now.toISOString(),
+  },
+];
+
+const adminRefunds = [
+  {
+    id: "refund-1",
+    jobId: "job-2",
+    paymentIntentId: "pi-1",
+    transactionId: "ptx-1",
+    requestedByUserId: "admin-1",
+    approvedByUserId: null,
+    amount: 300,
+    currency: "MZN",
+    reason: "Ajuste operacional",
+    status: "PENDING",
+    provider: "INTERNAL",
+    providerReference: null,
+    processedAt: null,
+    failureReason: null,
+    createdAt: now.toISOString(),
+    updatedAt: now.toISOString(),
+  },
+];
+
+const adminPayouts = [
+  {
+    id: "payout-1",
+    providerUserId: "provider-1",
+    jobId: "job-2",
+    paymentIntentId: "pi-1",
+    amount: 1071,
+    currency: "MZN",
+    status: "PENDING",
+    provider: "INTERNAL",
+    providerReference: null,
+    requestedByUserId: "admin-1",
+    approvedByUserId: null,
+    processedAt: null,
+    failureReason: null,
+    createdAt: now.toISOString(),
+    updatedAt: now.toISOString(),
+  },
+];
+
+const adminPaymentsOverview = {
+  kpis: {
+    totalIntents: 1,
+    intentsAwaitingPayment: 0,
+    intentsSucceeded: 0,
+    intentsFailed: 0,
+    totalTransactions: 1,
+    failedTransactions: 0,
+    pendingRefunds: 1,
+    pendingPayouts: 1,
+    platformReserved: 189,
+    providerHeld: 1071,
+    providerAvailable: 0,
+    releaseDelayHours: 24,
+  },
+};
+
 const providerSummary = {
   balances: {
     held: 1071,
@@ -351,6 +426,26 @@ function resolveMockBody(url, request) {
 
   if (url.pathname === "/payments/provider/summary") {
     return providerSummary;
+  }
+
+  if (url.pathname === "/admin/payments/overview") {
+    return adminPaymentsOverview;
+  }
+
+  if (url.pathname === "/admin/payments/intents") {
+    return paginated(customerPaymentIntents, 1, 20);
+  }
+
+  if (url.pathname === "/admin/payments/transactions") {
+    return paginated(adminPaymentTransactions, 1, 20);
+  }
+
+  if (url.pathname === "/admin/payments/refunds") {
+    return paginated(adminRefunds, 1, 20);
+  }
+
+  if (url.pathname === "/admin/payments/payouts") {
+    return paginated(adminPayouts, 1, 20);
   }
 
   if (url.pathname === "/admin/ops/overview") {
@@ -665,11 +760,32 @@ async function run() {
           mustHave: [{ type: "text", value: "Saldo disponível" }],
         },
         {
-          path: "/admin/categories",
+          path: "/pro/propostas",
+          auth: "provider",
+          heading: "Propostas",
+          block: "Histórico das tuas propostas",
+          cta: /Ver pedido aberto/,
+        },
+        {
+          path: "/admin/payments",
           auth: "admin",
-          heading: "Gestão de Categorias",
-          block: "Gestão de categorias",
-          cta: /Criar categoria/,
+          heading: "Operação de Pagamentos",
+          block: "Monitoriza intents",
+          cta: /Reconciliar pendentes em lote/,
+        },
+        {
+          path: "/admin/users",
+          auth: "admin",
+          heading: "Users",
+          block: "utilizadores com atividade financeira",
+          cta: /Abrir payments/,
+        },
+        {
+          path: "/admin/audit",
+          auth: "admin",
+          heading: "Audit",
+          block: "Eventos recentes de transações",
+          cta: /Abrir payments/,
         },
       ];
 
