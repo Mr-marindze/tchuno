@@ -29,31 +29,42 @@ export function RoleNavShell({
 
   return (
     <RouteGuard requiredAccess={requiredAccess}>
-      <div className='shell'>
-        <section className='card card--wide'>
-          <header className='header'>
-            <p className='kicker'>{title}</p>
-          </header>
-          <nav className='dashboard-nav' aria-label={`Navegação ${title}`}>
-            {items.map((item) => {
-              const isActive =
-                pathname === item.href ||
-                (item.href !== '/' && pathname.startsWith(`${item.href}/`));
+      <div className='min-h-screen bg-slate-50'>
+        <header className='border-b border-slate-200 bg-white/90 backdrop-blur'>
+          <div className='mx-auto flex w-full max-w-6xl flex-col gap-3 px-4 py-4 sm:flex-row sm:items-center sm:justify-between sm:px-6'>
+            <p className='text-sm font-semibold uppercase tracking-wide text-slate-600'>
+              {title}
+            </p>
+            <nav
+              className='flex flex-wrap items-center gap-2'
+              aria-label={`Navegação ${title}`}
+            >
+              {items.map((item) => {
+                const isActive =
+                  pathname === item.href ||
+                  (item.href !== '/' && pathname.startsWith(`${item.href}/`));
 
-              return (
-                <Link
-                  key={item.href}
-                  href={item.href}
-                  className={isActive ? 'active' : undefined}
-                >
-                  {item.label}
-                </Link>
-              );
-            })}
-          </nav>
-        </section>
+                return (
+                  <Link
+                    key={item.href}
+                    href={item.href}
+                    className={[
+                      'rounded-full px-3 py-1.5 text-sm font-medium transition',
+                      isActive
+                        ? 'bg-blue-100 text-blue-800'
+                        : 'bg-slate-100 text-slate-600 hover:bg-slate-200',
+                    ].join(' ')}
+                  >
+                    {item.label}
+                  </Link>
+                );
+              })}
+            </nav>
+          </div>
+        </header>
+
+        <div className='mx-auto w-full max-w-6xl px-4 py-6 sm:px-6'>{children}</div>
       </div>
-      {children}
     </RouteGuard>
   );
 }

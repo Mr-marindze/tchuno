@@ -11,10 +11,10 @@ export default function AdminLayout({
       requiredAccess='admin'
       title='Tchuno Admin'
       items={[
-        { href: '/admin', label: 'Painel' },
-        { href: '/admin/payments', label: 'Payments' },
-        { href: '/admin/users', label: 'Users' },
-        { href: '/admin/audit', label: 'Audit' },
+        { href: '/admin', label: 'Overview' },
+        { href: '/admin/payments', label: 'Pagamentos' },
+        { href: '/admin/users', label: 'Utilizadores' },
+        { href: '/admin/audit', label: 'Auditoria' },
       ]}
     >
       {children}
