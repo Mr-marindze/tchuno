@@ -201,6 +201,14 @@ async function main() {
     skipDuplicates: true,
   });
 
+  await prisma.review.deleteMany({
+    where: {
+      reviewerId: {
+        in: [users.clientA.id, users.clientB.id],
+      },
+    },
+  });
+
   await prisma.job.deleteMany({
     where: {
       clientId: {
@@ -209,88 +217,284 @@ async function main() {
     },
   });
 
+  await prisma.serviceRequest.deleteMany({
+    where: {
+      customerId: {
+        in: [users.clientA.id, users.clientB.id],
+      },
+    },
+  });
+
   const now = Date.now();
-  const completedJobA = await prisma.job.create({
-    data: {
-      clientId: users.clientA.id,
-      workerProfileId: workerAProfile.id,
-      categoryId: eletricistaId,
-      title: 'Troca de disjuntor principal',
-      description: 'Disjuntor antigo com quedas frequentes de energia.',
-      budget: 4500,
-      status: JobStatus.COMPLETED,
-      scheduledFor: new Date(now - 3 * 24 * 60 * 60 * 1000),
-      completedAt: new Date(now - 2 * 24 * 60 * 60 * 1000),
-    },
-    select: { id: true, workerProfileId: true, clientId: true },
+
+  async function createServiceRequestBackedJob(input: {
+    customerId: string;
+    providerId: string;
+    workerProfileId: string;
+    categoryId: string;
+    title: string;
+    description: string;
+    location: string;
+    agreedPrice: number;
+    proposalComment: string;
+    status: JobStatus;
+    scheduledFor: Date;
+    acceptedAt?: Date;
+    startedAt?: Date;
+    completedAt?: Date;
+    canceledAt?: Date;
+    canceledBy?: string;
+    cancelReason?: string;
+    paymentStatus: 'AWAITING_PAYMENT' | 'PAID_PARTIAL';
+  }) {
+    const request = await prisma.serviceRequest.create({
+      data: {
+        customerId: input.customerId,
+        categoryId: input.categoryId,
+        title: input.title,
+        description: input.description,
+        location: input.location,
+        status: 'OPEN',
+      },
+      select: {
+        id: true,
+      },
+    });
+
+    const proposal = await prisma.proposal.create({
+      data: {
+        requestId: request.id,
+        providerId: input.providerId,
+        price: input.agreedPrice,
+        comment: input.proposalComment,
+        status: 'SELECTED',
+      },
+      select: {
+        id: true,
+      },
+    });
+
+    await prisma.serviceRequest.update({
+      where: {
+        id: request.id,
+      },
+      data: {
+        status: 'CLOSED',
+        selectedProposalId: proposal.id,
+      },
+    });
+
+    const contactUnlockedAt =
+      input.paymentStatus === 'PAID_PARTIAL' ? new Date(now - 60 * 60 * 1000) : null;
+
+    const job = await prisma.job.create({
+      data: {
+        requestId: request.id,
+        proposalId: proposal.id,
+        clientId: input.customerId,
+        customerId: input.customerId,
+        providerId: input.providerId,
+        workerProfileId: input.workerProfileId,
+        categoryId: input.categoryId,
+        agreedPrice: input.agreedPrice,
+        pricingMode: 'FIXED_PRICE',
+        title: input.title,
+        description: input.description,
+        budget: input.agreedPrice,
+        quotedAmount: input.agreedPrice,
+        quoteMessage: input.proposalComment,
+        status: input.status,
+        scheduledFor: input.scheduledFor,
+        acceptedAt: input.acceptedAt,
+        startedAt: input.startedAt,
+        completedAt: input.completedAt,
+        canceledAt: input.canceledAt,
+        canceledBy: input.canceledBy,
+        cancelReason: input.cancelReason,
+        contactUnlockedAt,
+      },
+      select: {
+        id: true,
+        workerProfileId: true,
+        clientId: true,
+      },
+    });
+
+    const depositAmount = Math.max(1, Math.round((input.agreedPrice * 30) / 100));
+    const platformFeeAmount = Math.min(
+      depositAmount,
+      Math.round((depositAmount * 1500) / 10_000),
+    );
+    const providerNetAmount = Math.max(0, depositAmount - platformFeeAmount);
+
+    const paymentIntent = await prisma.paymentIntent.create({
+      data: {
+        jobId: job.id,
+        customerId: input.customerId,
+        providerUserId: input.providerId,
+        amount: depositAmount,
+        currency: 'MZN',
+        platformFeeAmount,
+        providerNetAmount,
+        status: input.paymentStatus,
+        provider: 'INTERNAL',
+        acceptedQuoteSnapshot: input.agreedPrice,
+        metadata: {
+          kind: 'deposit',
+          agreedPrice: input.agreedPrice,
+          depositPercent: 30,
+          serviceRequestId: request.id,
+          proposalId: proposal.id,
+        },
+      },
+      select: {
+        id: true,
+      },
+    });
+
+    if (input.paymentStatus === 'PAID_PARTIAL') {
+      await prisma.ledgerEntry.createMany({
+        data: [
+          {
+            jobId: job.id,
+            paymentIntentId: paymentIntent.id,
+            actorType: 'CUSTOMER',
+            entryType: 'CUSTOMER_CHARGE',
+            amount: depositAmount,
+            currency: 'MZN',
+            direction: 'DEBIT',
+            balanceBucket: 'CUSTOMER_EXTERNAL',
+            description: 'Seed customer charge',
+          },
+          {
+            jobId: job.id,
+            paymentIntentId: paymentIntent.id,
+            actorType: 'PLATFORM',
+            entryType: 'PLATFORM_FEE_RESERVED',
+            amount: platformFeeAmount,
+            currency: 'MZN',
+            direction: 'CREDIT',
+            balanceBucket: 'PLATFORM_RESERVED',
+            description: 'Seed platform fee reserved',
+          },
+          {
+            jobId: job.id,
+            paymentIntentId: paymentIntent.id,
+            actorType: 'PROVIDER',
+            entryType: 'PROVIDER_BALANCE_HELD',
+            amount: providerNetAmount,
+            currency: 'MZN',
+            direction: 'CREDIT',
+            balanceBucket: 'PROVIDER_HELD',
+            description: 'Seed provider held balance',
+          },
+        ],
+      });
+    }
+
+    return job;
+  }
+
+  const completedJobA = await createServiceRequestBackedJob({
+    customerId: users.clientA.id,
+    providerId: users.workerA.id,
+    workerProfileId: workerAProfile.id,
+    categoryId: eletricistaId,
+    title: 'Troca de disjuntor principal',
+    description: 'Disjuntor antigo com quedas frequentes de energia.',
+    location: 'Maputo - Polana',
+    agreedPrice: 4500,
+    proposalComment: 'Inclui visita técnica e substituição do disjuntor.',
+    status: JobStatus.COMPLETED,
+    scheduledFor: new Date(now - 3 * 24 * 60 * 60 * 1000),
+    acceptedAt: new Date(now - 3 * 24 * 60 * 60 * 1000 + 3 * 60 * 60 * 1000),
+    startedAt: new Date(now - 3 * 24 * 60 * 60 * 1000 + 6 * 60 * 60 * 1000),
+    completedAt: new Date(now - 2 * 24 * 60 * 60 * 1000),
+    paymentStatus: 'PAID_PARTIAL',
   });
 
-  const completedJobB = await prisma.job.create({
-    data: {
-      clientId: users.clientB.id,
-      workerProfileId: workerBProfile.id,
-      categoryId: canalizacaoId,
-      title: 'Reparar fuga na cozinha',
-      description: 'Fuga pequena no tubo de entrada da banca.',
-      budget: 3200,
-      status: JobStatus.COMPLETED,
-      scheduledFor: new Date(now - 5 * 24 * 60 * 60 * 1000),
-      completedAt: new Date(now - 4 * 24 * 60 * 60 * 1000),
-    },
-    select: { id: true, workerProfileId: true, clientId: true },
+  const completedJobB = await createServiceRequestBackedJob({
+    customerId: users.clientB.id,
+    providerId: users.workerB.id,
+    workerProfileId: workerBProfile.id,
+    categoryId: canalizacaoId,
+    title: 'Reparar fuga na cozinha',
+    description: 'Fuga pequena no tubo de entrada da banca.',
+    location: 'Matola - Machava',
+    agreedPrice: 3200,
+    proposalComment: 'Inclui reparação e teste de pressão.',
+    status: JobStatus.COMPLETED,
+    scheduledFor: new Date(now - 5 * 24 * 60 * 60 * 1000),
+    acceptedAt: new Date(now - 5 * 24 * 60 * 60 * 1000 + 4 * 60 * 60 * 1000),
+    startedAt: new Date(now - 5 * 24 * 60 * 60 * 1000 + 7 * 60 * 60 * 1000),
+    completedAt: new Date(now - 4 * 24 * 60 * 60 * 1000),
+    paymentStatus: 'PAID_PARTIAL',
   });
 
-  await prisma.job.create({
-    data: {
-      clientId: users.clientB.id,
-      workerProfileId: workerAProfile.id,
-      categoryId: pinturaId,
-      title: 'Pintura de quarto infantil',
-      description: 'Pintura completa de quarto de 12m2 com duas cores.',
-      budget: 7000,
-      status: JobStatus.IN_PROGRESS,
-      scheduledFor: new Date(now - 24 * 60 * 60 * 1000),
-    },
+  await createServiceRequestBackedJob({
+    customerId: users.clientB.id,
+    providerId: users.workerA.id,
+    workerProfileId: workerAProfile.id,
+    categoryId: pinturaId,
+    title: 'Pintura de quarto infantil',
+    description: 'Pintura completa de quarto de 12m2 com duas cores.',
+    location: 'Maputo',
+    agreedPrice: 7000,
+    proposalComment: 'Inclui tinta e preparação da parede.',
+    status: JobStatus.IN_PROGRESS,
+    scheduledFor: new Date(now - 24 * 60 * 60 * 1000),
+    acceptedAt: new Date(now - 20 * 60 * 60 * 1000),
+    startedAt: new Date(now - 18 * 60 * 60 * 1000),
+    paymentStatus: 'PAID_PARTIAL',
   });
 
-  await prisma.job.create({
-    data: {
-      clientId: users.clientA.id,
-      workerProfileId: workerAProfile.id,
-      categoryId: eletricistaId,
-      title: 'Instalar tomadas no escritorio',
-      description: 'Adicionar 3 tomadas e revisar quadro eletrico.',
-      budget: 3800,
-      status: JobStatus.REQUESTED,
-      scheduledFor: new Date(now + 2 * 24 * 60 * 60 * 1000),
-    },
+  await createServiceRequestBackedJob({
+    customerId: users.clientA.id,
+    providerId: users.workerA.id,
+    workerProfileId: workerAProfile.id,
+    categoryId: eletricistaId,
+    title: 'Instalar tomadas no escritorio',
+    description: 'Adicionar 3 tomadas e revisar quadro eletrico.',
+    location: 'Maputo Centro',
+    agreedPrice: 3800,
+    proposalComment: 'Inclui material e instalação.',
+    status: JobStatus.REQUESTED,
+    scheduledFor: new Date(now + 2 * 24 * 60 * 60 * 1000),
+    paymentStatus: 'AWAITING_PAYMENT',
   });
 
-  await prisma.job.create({
-    data: {
-      clientId: users.clientB.id,
-      workerProfileId: workerBProfile.id,
-      categoryId: canalizacaoId,
-      title: 'Substituir torneira do quintal',
-      description: 'Torneira com vazamento continuo no quintal.',
-      budget: 2100,
-      status: JobStatus.ACCEPTED,
-      scheduledFor: new Date(now + 24 * 60 * 60 * 1000),
-    },
+  await createServiceRequestBackedJob({
+    customerId: users.clientB.id,
+    providerId: users.workerB.id,
+    workerProfileId: workerBProfile.id,
+    categoryId: canalizacaoId,
+    title: 'Substituir torneira do quintal',
+    description: 'Torneira com vazamento continuo no quintal.',
+    location: 'Matola',
+    agreedPrice: 2100,
+    proposalComment: 'Troca completa da torneira com vedação nova.',
+    status: JobStatus.ACCEPTED,
+    scheduledFor: new Date(now + 24 * 60 * 60 * 1000),
+    acceptedAt: new Date(now - 4 * 60 * 60 * 1000),
+    paymentStatus: 'PAID_PARTIAL',
   });
 
-  await prisma.job.create({
-    data: {
-      clientId: users.clientA.id,
-      workerProfileId: workerBProfile.id,
-      categoryId: limpezaId,
-      title: 'Limpeza pos-obra da sala',
-      description: 'Limpeza profunda apos pequenas obras internas.',
-      budget: 2900,
-      status: JobStatus.CANCELED,
-      scheduledFor: new Date(now - 2 * 24 * 60 * 60 * 1000),
-      canceledAt: new Date(now - 30 * 60 * 1000),
-    },
+  await createServiceRequestBackedJob({
+    customerId: users.clientA.id,
+    providerId: users.workerB.id,
+    workerProfileId: workerBProfile.id,
+    categoryId: limpezaId,
+    title: 'Limpeza pos-obra da sala',
+    description: 'Limpeza profunda apos pequenas obras internas.',
+    location: 'Maputo',
+    agreedPrice: 2900,
+    proposalComment: 'Equipe com materiais de limpeza incluídos.',
+    status: JobStatus.CANCELED,
+    scheduledFor: new Date(now - 2 * 24 * 60 * 60 * 1000),
+    canceledAt: new Date(now - 30 * 60 * 1000),
+    canceledBy: users.clientA.id,
+    cancelReason: 'Mudança de plano do cliente',
+    paymentStatus: 'AWAITING_PAYMENT',
   });
 
   await prisma.review.create({

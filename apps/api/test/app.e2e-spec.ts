@@ -50,11 +50,6 @@ type WorkerProfilePayload = {
   ratingCount: number;
 };
 
-type JobPayload = {
-  id: string;
-  status: 'REQUESTED' | 'ACCEPTED' | 'IN_PROGRESS' | 'COMPLETED' | 'CANCELED';
-};
-
 type ReviewPayload = {
   id: string;
   jobId: string;
@@ -815,7 +810,7 @@ describe('Auth and Sessions (e2e)', () => {
       .expect(401);
   });
 
-  it('client -> worker -> job status -> review flow', async () => {
+  it('service request -> proposal -> payment -> execution -> review flow', async () => {
     const workerEmail = `flow_worker_${Date.now()}@tchuno.local`;
     const clientEmail = `flow_client_${Date.now()}@tchuno.local`;
     const password = 'abc12345';
@@ -860,41 +855,67 @@ describe('Auth and Sessions (e2e)', () => {
       .expect(200);
     const workerProfile = workerProfileResponse.body as WorkerProfilePayload;
 
-    const createJobResponse = await request(app.getHttpServer())
-      .post('/jobs')
+    const createRequestResponse = await request(app.getHttpServer())
+      .post('/service-requests')
       .set('Authorization', `Bearer ${clientAuth.accessToken}`)
       .send({
-        workerProfileId: workerProfile.id,
         categoryId: category.id,
         title: 'Instalar AC no quarto',
         description:
           'Preciso instalar um AC split de 12k BTU ainda esta semana.',
-        budget: 5000,
+        location: 'Maputo',
       })
       .expect(201);
-    const job = createJobResponse.body as JobPayload;
+    const createdRequest = createRequestResponse.body as { id: string };
 
-    const workerJobsResponse = await request(app.getHttpServer())
-      .get('/jobs/me/worker')
+    const proposalResponse = await request(app.getHttpServer())
+      .post(`/service-requests/${createdRequest.id}/proposals`)
       .set('Authorization', `Bearer ${workerAuth.accessToken}`)
-      .expect(200);
-    const workerJobs = workerJobsResponse.body as PaginatedResponse<JobPayload>;
-    expect(workerJobs.data.some((item) => item.id === job.id)).toBe(true);
+      .send({
+        price: 5000,
+        comment: 'Inclui instalação e testes básicos.',
+      })
+      .expect(201);
+    const proposal = proposalResponse.body as { id: string };
+
+    const selectResponse = await request(app.getHttpServer())
+      .post(`/service-requests/${createdRequest.id}/select/${proposal.id}`)
+      .set('Authorization', `Bearer ${clientAuth.accessToken}`)
+      .send({ depositPercent: 30 })
+      .expect(201);
+    const selection = selectResponse.body as {
+      job: { id: string };
+      paymentIntent: { id: string; status: string } | null;
+    };
+
+    expect(selection.paymentIntent?.status).toBe('AWAITING_PAYMENT');
 
     await request(app.getHttpServer())
-      .patch(`/jobs/${job.id}/status`)
+      .patch(`/jobs/${selection.job.id}/status`)
+      .set('Authorization', `Bearer ${workerAuth.accessToken}`)
+      .send({ status: 'ACCEPTED' })
+      .expect(409);
+
+    await request(app.getHttpServer())
+      .post(`/payments/intents/${selection.paymentIntent?.id ?? ''}/pay`)
+      .set('Authorization', `Bearer ${clientAuth.accessToken}`)
+      .send({ simulate: 'success' })
+      .expect(201);
+
+    await request(app.getHttpServer())
+      .patch(`/jobs/${selection.job.id}/status`)
       .set('Authorization', `Bearer ${workerAuth.accessToken}`)
       .send({ status: 'ACCEPTED' })
       .expect(200);
 
     await request(app.getHttpServer())
-      .patch(`/jobs/${job.id}/status`)
+      .patch(`/jobs/${selection.job.id}/status`)
       .set('Authorization', `Bearer ${workerAuth.accessToken}`)
       .send({ status: 'IN_PROGRESS' })
       .expect(200);
 
     await request(app.getHttpServer())
-      .patch(`/jobs/${job.id}/status`)
+      .patch(`/jobs/${selection.job.id}/status`)
       .set('Authorization', `Bearer ${workerAuth.accessToken}`)
       .send({ status: 'COMPLETED' })
       .expect(200);
@@ -903,13 +924,13 @@ describe('Auth and Sessions (e2e)', () => {
       .post('/reviews')
       .set('Authorization', `Bearer ${clientAuth.accessToken}`)
       .send({
-        jobId: job.id,
+        jobId: selection.job.id,
         rating: 5,
         comment: 'Servico excelente, dentro do prazo.',
       })
       .expect(201);
     const review = reviewResponse.body as ReviewPayload;
-    expect(review.jobId).toBe(job.id);
+    expect(review.jobId).toBe(selection.job.id);
     expect(review.rating).toBe(5);
 
     const workerProfilePublicResponse = await request(app.getHttpServer())
@@ -926,81 +947,77 @@ describe('Auth and Sessions (e2e)', () => {
     const workerReviews =
       workerReviewsResponse.body as PaginatedResponse<ReviewPayload>;
     expect(workerReviews.data.length).toBeGreaterThanOrEqual(1);
-    expect(workerReviews.data[0]?.jobId).toBe(job.id);
-    const createQuoteJobResponse = await request(app.getHttpServer())
-      .post('/jobs')
-      .set('Authorization', `Bearer ${clientAuth.accessToken}`)
+    expect(workerReviews.data[0]?.jobId).toBe(selection.job.id);
+  });
+
+  it('blocks deprecated direct job endpoints', async () => {
+    const base = Date.now();
+    const password = 'abc12345';
+
+    const customerRegister = await request(app.getHttpServer())
+      .post('/auth/register')
       .send({
-        workerProfileId: workerProfile.id,
-        categoryId: category.id,
-        pricingMode: 'QUOTE_REQUEST',
-        title: 'Diagnostico de fuga de agua',
-        description: 'Preciso de visita tecnica e proposta para reparacao.',
+        email: `deprecated_customer_${base}@tchuno.local`,
+        password,
+        name: 'Deprecated Customer',
       })
       .expect(201);
+    const customerAuth = customerRegister.body as AuthPayload;
 
-    const quoteJob = createQuoteJobResponse.body as JobPayload & {
-      pricingMode: 'FIXED_PRICE' | 'QUOTE_REQUEST';
-    };
-    expect(quoteJob.pricingMode).toBe('QUOTE_REQUEST');
-
-    await request(app.getHttpServer())
-      .patch(`/jobs/${quoteJob.id}/status`)
-      .set('Authorization', `Bearer ${workerAuth.accessToken}`)
-      .send({ status: 'ACCEPTED' })
-      .expect(409);
-
-    await request(app.getHttpServer())
-      .patch(`/jobs/${quoteJob.id}/status`)
-      .set('Authorization', `Bearer ${clientAuth.accessToken}`)
-      .send({ status: 'ACCEPTED' })
-      .expect(400);
-
-    const proposedQuoteResponse = await request(app.getHttpServer())
-      .patch(`/jobs/${quoteJob.id}/quote`)
-      .set('Authorization', `Bearer ${workerAuth.accessToken}`)
+    const providerRegister = await request(app.getHttpServer())
+      .post('/auth/register')
       .send({
-        quotedAmount: 4500,
-        quoteMessage: 'Inclui material e deslocacao',
+        email: `deprecated_provider_${base}@tchuno.local`,
+        password,
+        name: 'Deprecated Provider',
+      })
+      .expect(201);
+    const providerAuth = providerRegister.body as AuthPayload;
+
+    const category = await prisma.category.create({
+      data: {
+        name: `Deprecated Categoria ${base}`,
+        slug: `deprecated-categoria-${base}`,
+        description: 'Categoria para bloqueio de endpoints legados',
+        sortOrder: 91,
+      },
+      select: {
+        id: true,
+      },
+    });
+
+    await request(app.getHttpServer())
+      .put('/worker-profile/me')
+      .set('Authorization', `Bearer ${providerAuth.accessToken}`)
+      .send({
+        bio: 'Perfil para testar endpoint legado',
+        location: 'Maputo',
+        hourlyRate: 1000,
+        experienceYears: 3,
+        isAvailable: true,
+        categoryIds: [category.id],
       })
       .expect(200);
 
-    const proposedQuote = proposedQuoteResponse.body as JobPayload & {
-      quotedAmount: number | null;
-      quoteMessage: string | null;
-    };
-    expect(proposedQuote.quotedAmount).toBe(4500);
-    expect(proposedQuote.quoteMessage).toBe('Inclui material e deslocacao');
-
-    const clientJobsResponse = await request(app.getHttpServer())
-      .get('/jobs/me/client?status=REQUESTED&page=1&limit=10')
-      .set('Authorization', `Bearer ${clientAuth.accessToken}`)
-      .expect(200);
-    const clientJobs = clientJobsResponse.body as PaginatedResponse<
-      JobPayload & { quotedAmount: number | null }
-    >;
-    const quoteJobInList = clientJobs.data.find(
-      (item) => item.id === quoteJob.id,
-    );
-    expect(quoteJobInList?.quotedAmount).toBe(4500);
+    await request(app.getHttpServer())
+      .post('/jobs')
+      .set('Authorization', `Bearer ${customerAuth.accessToken}`)
+      .send({
+        workerProfileId: 'legacy-worker-id',
+        categoryId: category.id,
+        title: 'Endpoint legado',
+        description: 'Teste de bloqueio de criação direta.',
+        budget: 1000,
+      })
+      .expect(410);
 
     await request(app.getHttpServer())
-      .patch(`/jobs/${quoteJob.id}/status`)
-      .set('Authorization', `Bearer ${clientAuth.accessToken}`)
-      .send({ status: 'ACCEPTED', quotedAmount: 4500 })
-      .expect(200);
-
-    await request(app.getHttpServer())
-      .patch(`/jobs/${quoteJob.id}/status`)
-      .set('Authorization', `Bearer ${workerAuth.accessToken}`)
-      .send({ status: 'IN_PROGRESS' })
-      .expect(200);
-
-    await request(app.getHttpServer())
-      .patch(`/jobs/${quoteJob.id}/status`)
-      .set('Authorization', `Bearer ${workerAuth.accessToken}`)
-      .send({ status: 'COMPLETED' })
-      .expect(200);
+      .patch('/jobs/legacy-job-id/quote')
+      .set('Authorization', `Bearer ${providerAuth.accessToken}`)
+      .send({
+        quotedAmount: 2500,
+      })
+      .expect(410);
   });
 
   it('chaos flow: rejects invalid actions and handles multi-session revocation', async () => {
@@ -1102,7 +1119,7 @@ describe('Auth and Sessions (e2e)', () => {
       },
     })) as CategoryPayload;
 
-    const workerProfileUnavailableResponse = await request(app.getHttpServer())
+    await request(app.getHttpServer())
       .put('/worker-profile/me')
       .set('Authorization', `Bearer ${workerAuth.accessToken}`)
       .send({
@@ -1114,18 +1131,28 @@ describe('Auth and Sessions (e2e)', () => {
         categoryIds: [category.id],
       })
       .expect(200);
-    const workerProfile =
-      workerProfileUnavailableResponse.body as WorkerProfilePayload;
 
-    await request(app.getHttpServer())
-      .post('/jobs')
+    const unavailableRequestResponse = await request(app.getHttpServer())
+      .post('/service-requests')
       .set('Authorization', `Bearer ${clientTabA.accessToken}`)
       .send({
-        workerProfileId: workerProfile.id,
         categoryId: category.id,
         title: 'Serviço com worker indisponível',
-        description: 'Este job deve falhar porque o worker está indisponível.',
-        budget: 3500,
+        description:
+          'Pedido de teste para validar bloqueio de proposta com provider indisponível.',
+        location: 'Maputo',
+      })
+      .expect(201);
+    const unavailableRequest = unavailableRequestResponse.body as {
+      id: string;
+    };
+
+    await request(app.getHttpServer())
+      .post(`/service-requests/${unavailableRequest.id}/proposals`)
+      .set('Authorization', `Bearer ${workerAuth.accessToken}`)
+      .send({
+        price: 3500,
+        comment: 'Proposta deve falhar por indisponibilidade.',
       })
       .expect(409);
 
@@ -1136,28 +1163,12 @@ describe('Auth and Sessions (e2e)', () => {
       .expect(200);
 
     await request(app.getHttpServer())
-      .post('/jobs')
+      .post('/service-requests')
       .set('Authorization', `Bearer ${clientTabA.accessToken}`)
       .send({
-        workerProfileId: workerProfile.id,
         categoryId: category.id,
         title: 'ab',
         description: 'curta',
-        budget: -1,
-      })
-      .expect(400);
-
-    await request(app.getHttpServer())
-      .post('/jobs')
-      .set('Authorization', `Bearer ${clientTabA.accessToken}`)
-      .send({
-        workerProfileId: workerProfile.id,
-        categoryId: category.id,
-        title: 'Serviço agendado no passado',
-        description:
-          'Este job deve falhar porque foi agendado para uma data passada.',
-        budget: 3500,
-        scheduledFor: '2020-01-01T10:00:00.000Z',
       })
       .expect(400);
 
@@ -1165,18 +1176,38 @@ describe('Auth and Sessions (e2e)', () => {
       .get('/worker-profile?categorySlug=@@slug-invalido')
       .expect(400);
 
-    const createJobResponse = await request(app.getHttpServer())
-      .post('/jobs')
+    const createRequestResponse = await request(app.getHttpServer())
+      .post('/service-requests')
       .set('Authorization', `Bearer ${clientTabA.accessToken}`)
       .send({
-        workerProfileId: workerProfile.id,
         categoryId: category.id,
         title: 'Trocar quadro elétrico',
         description: 'Preciso trocar quadro elétrico e revisar disjuntores.',
-        budget: 6000,
+        location: 'Maputo',
       })
       .expect(201);
-    const job = createJobResponse.body as JobPayload;
+    const createdRequest = createRequestResponse.body as { id: string };
+
+    const proposalResponse = await request(app.getHttpServer())
+      .post(`/service-requests/${createdRequest.id}/proposals`)
+      .set('Authorization', `Bearer ${workerAuth.accessToken}`)
+      .send({
+        price: 6000,
+        comment: 'Inclui materiais e revisão de quadro.',
+      })
+      .expect(201);
+    const proposal = proposalResponse.body as { id: string };
+
+    const selectResponse = await request(app.getHttpServer())
+      .post(`/service-requests/${createdRequest.id}/select/${proposal.id}`)
+      .set('Authorization', `Bearer ${clientTabA.accessToken}`)
+      .send({ depositPercent: 30 })
+      .expect(201);
+    const selection = selectResponse.body as {
+      job: { id: string };
+      paymentIntent: { id: string; status: string };
+    };
+    const jobId = selection.job.id;
 
     const activeSessionsResponse = await request(app.getHttpServer())
       .get('/auth/sessions?status=active&limit=10&offset=0&sort=createdAt:asc')
@@ -1186,37 +1217,55 @@ describe('Auth and Sessions (e2e)', () => {
     expect(activeSessions.meta.total).toBeGreaterThanOrEqual(2);
 
     await request(app.getHttpServer())
-      .patch(`/jobs/${job.id}/status`)
+      .patch(`/jobs/${jobId}/status`)
       .set('Authorization', `Bearer ${clientTabA.accessToken}`)
       .send({ status: 'ACCEPTED' })
       .expect(409);
 
     await request(app.getHttpServer())
-      .patch(`/jobs/${job.id}/status`)
+      .patch(`/jobs/${jobId}/status`)
       .set('Authorization', `Bearer ${workerAuth.accessToken}`)
       .send({ status: 'COMPLETED' })
       .expect(409);
 
     await request(app.getHttpServer())
-      .patch(`/jobs/${job.id}/status`)
+      .patch(`/jobs/${jobId}/status`)
+      .set('Authorization', `Bearer ${workerAuth.accessToken}`)
+      .send({ status: 'ACCEPTED' })
+      .expect(409);
+
+    await request(app.getHttpServer())
+      .post(`/payments/intents/${selection.paymentIntent.id}/pay`)
+      .set('Authorization', `Bearer ${clientTabA.accessToken}`)
+      .send({ simulate: 'success' })
+      .expect(201);
+
+    await request(app.getHttpServer())
+      .patch(`/jobs/${jobId}/status`)
+      .set('Authorization', `Bearer ${workerAuth.accessToken}`)
+      .send({ status: 'COMPLETED' })
+      .expect(409);
+
+    await request(app.getHttpServer())
+      .patch(`/jobs/${jobId}/status`)
       .set('Authorization', `Bearer ${workerAuth.accessToken}`)
       .send({ status: 'ACCEPTED' })
       .expect(200);
 
     await request(app.getHttpServer())
-      .patch(`/jobs/${job.id}/status`)
+      .patch(`/jobs/${jobId}/status`)
       .set('Authorization', `Bearer ${workerAuth.accessToken}`)
       .send({ status: 'COMPLETED' })
       .expect(409);
 
     await request(app.getHttpServer())
-      .patch(`/jobs/${job.id}/status`)
+      .patch(`/jobs/${jobId}/status`)
       .set('Authorization', `Bearer ${workerAuth.accessToken}`)
       .send({ status: 'IN_PROGRESS' })
       .expect(200);
 
     await request(app.getHttpServer())
-      .patch(`/jobs/${job.id}/status`)
+      .patch(`/jobs/${jobId}/status`)
       .set('Authorization', `Bearer ${workerAuth.accessToken}`)
       .send({ status: 'COMPLETED' })
       .expect(200);
@@ -1225,7 +1274,7 @@ describe('Auth and Sessions (e2e)', () => {
       .post('/reviews')
       .set('Authorization', `Bearer ${clientTabA.accessToken}`)
       .send({
-        jobId: job.id,
+        jobId,
         rating: 4,
         comment: 'Concluído com qualidade.',
       })
@@ -1235,7 +1284,7 @@ describe('Auth and Sessions (e2e)', () => {
       .post('/reviews')
       .set('Authorization', `Bearer ${clientTabA.accessToken}`)
       .send({
-        jobId: job.id,
+        jobId,
         rating: 3,
         comment: 'Tentativa duplicada deve falhar.',
       })
@@ -1382,7 +1431,7 @@ describe('Auth and Sessions (e2e)', () => {
       },
     })) as { id: string };
 
-    const workerProfileResponse = await request(app.getHttpServer())
+    await request(app.getHttpServer())
       .put('/worker-profile/me')
       .set('Authorization', `Bearer ${workerAccessToken}`)
       .send({
@@ -1394,22 +1443,41 @@ describe('Auth and Sessions (e2e)', () => {
         categoryIds: [category.id],
       })
       .expect(200);
-    const workerProfile = workerProfileResponse.body as { id: string };
 
-    const createJobResponse = await request(app.getHttpServer())
-      .post('/jobs')
+    const createRequestResponse = await request(app.getHttpServer())
+      .post('/service-requests')
       .set('Authorization', `Bearer ${customerAccessToken}`)
       .send({
-        workerProfileId: workerProfile.id,
         categoryId: category.id,
-        pricingMode: 'FIXED_PRICE',
         title: 'Instalação elétrica completa',
         description:
           'Execução de instalação elétrica com materiais e teste final.',
-        budget: 10_000,
+        location: 'Maputo',
       })
       .expect(201);
-    const job = createJobResponse.body as { id: string };
+    const createdRequest = createRequestResponse.body as { id: string };
+
+    const proposalResponse = await request(app.getHttpServer())
+      .post(`/service-requests/${createdRequest.id}/proposals`)
+      .set('Authorization', `Bearer ${workerAccessToken}`)
+      .send({
+        price: 10_000,
+        comment: 'Proposta completa com materiais inclusos.',
+      })
+      .expect(201);
+    const proposal = proposalResponse.body as { id: string };
+
+    const selectResponse = await request(app.getHttpServer())
+      .post(`/service-requests/${createdRequest.id}/select/${proposal.id}`)
+      .set('Authorization', `Bearer ${customerAccessToken}`)
+      .send({ depositPercent: 30 })
+      .expect(201);
+    const selection = selectResponse.body as {
+      job: { id: string };
+      paymentIntent: { id: string; status: string } | null;
+    };
+    const job = selection.job;
+    expect(selection.paymentIntent?.status).toBe('AWAITING_PAYMENT');
 
     const createIntentResponse = await request(app.getHttpServer())
       .post('/payments/intents')
@@ -1424,6 +1492,7 @@ describe('Auth and Sessions (e2e)', () => {
       status: string;
     };
 
+    expect(intent.id).toBe(selection.paymentIntent?.id);
     expect(intent.status).toBe('AWAITING_PAYMENT');
     expect(intent.providerNetAmount).toBeGreaterThan(0);
 
@@ -1436,7 +1505,7 @@ describe('Auth and Sessions (e2e)', () => {
       .expect(201);
 
     const paidIntent = payIntentResponse.body as { status: string };
-    expect(paidIntent.status).toBe('SUCCEEDED');
+    expect(paidIntent.status).toBe('PAID_PARTIAL');
 
     await request(app.getHttpServer())
       .patch(`/jobs/${job.id}/status`)
