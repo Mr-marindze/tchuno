@@ -6,7 +6,7 @@ import {
   collectDefaultMetrics,
 } from 'prom-client';
 
-type BusinessDomain = 'auth' | 'jobs' | 'reviews' | 'tracking';
+type BusinessDomain = 'auth' | 'jobs' | 'reviews' | 'tracking' | 'payments';
 type BusinessResult = 'success' | 'failed' | 'blocked';
 type JobStatusLabel =
   | 'REQUESTED'

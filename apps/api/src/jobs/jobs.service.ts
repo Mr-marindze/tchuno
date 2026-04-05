@@ -416,11 +416,18 @@ export class JobsService {
     }
 
     if (next === 'CANCELED') {
+      const cancelReason = dto.cancelReason?.trim();
+      if (!cancelReason) {
+        throw new BadRequestException(
+          'cancelReason is required when status=CANCELED',
+        );
+      }
+
       if (!job.canceledAt) {
         data.canceledAt = new Date();
       }
       data.canceledBy = requesterId;
-      data.cancelReason = dto.cancelReason?.trim() || null;
+      data.cancelReason = cancelReason;
     }
 
     const updatedJob = await this.prisma.job.update({

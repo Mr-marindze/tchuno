@@ -9,6 +9,8 @@ const rolePermissions: Record<AppRole, Permission[]> = {
     'public.read',
     'customer.jobs.create',
     'customer.jobs.read.own',
+    'customer.payments.create',
+    'customer.payments.read.own',
     'customer.reviews.create',
     'customer.reviews.read.own',
     // MVP onboarding: allows a customer account to create its own provider profile.
@@ -20,11 +22,14 @@ const rolePermissions: Record<AppRole, Permission[]> = {
     'provider.jobs.read.own',
     'provider.jobs.quote.propose',
     'provider.jobs.status.update',
+    'provider.earnings.read.own',
     'provider.reviews.read.received',
   ],
   admin: [
     'public.read',
     'admin.ops.read',
+    'admin.payments.read',
+    'admin.payments.manage',
     'admin.categories.manage',
     'admin.roles.manage',
     'admin.users.manage',
@@ -38,6 +43,7 @@ const rolePermissions: Record<AppRole, Permission[]> = {
   support_admin: [
     'public.read',
     'admin.ops.read',
+    'admin.payments.read',
     'admin.users.manage',
     'admin.providers.manage',
     'admin.reports.read',
@@ -47,6 +53,8 @@ const rolePermissions: Record<AppRole, Permission[]> = {
   ops_admin: [
     'public.read',
     'admin.ops.read',
+    'admin.payments.read',
+    'admin.payments.manage',
     'admin.categories.manage',
     'admin.orders.manage',
     'admin.reports.read',
@@ -56,6 +64,8 @@ const rolePermissions: Record<AppRole, Permission[]> = {
   super_admin: [
     'public.read',
     'admin.ops.read',
+    'admin.payments.read',
+    'admin.payments.manage',
     'admin.categories.manage',
     'admin.roles.manage',
     'admin.users.manage',
