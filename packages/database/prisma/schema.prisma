@@ -8,35 +8,43 @@ datasource db {
 }
 
 model User {
-  id           String    @id @default(cuid())
-  email        String    @unique
-  name         String?
-  passwordHash String
-  role         UserRole  @default(USER)
-  adminSubrole AdminSubrole?
-  isActive     Boolean   @default(true)
-  createdAt    DateTime  @default(now())
-  updatedAt    DateTime  @updatedAt
-  sessions     Session[]
-  workerProfile WorkerProfile?
-  jobsAsClient Job[]      @relation("ClientJobs")
-  reviewsGiven Review[]
-  auditLogs AuditLog[]
-  reauthChallenges ReauthChallenge[]
+  id                      String            @id @default(cuid())
+  email                   String            @unique
+  name                    String?
+  passwordHash            String
+  role                    UserRole          @default(USER)
+  adminSubrole            AdminSubrole?
+  isActive                Boolean           @default(true)
+  createdAt               DateTime          @default(now())
+  updatedAt               DateTime          @updatedAt
+  sessions                Session[]
+  workerProfile           WorkerProfile?
+  jobsAsClient            Job[]             @relation("ClientJobs")
+  reviewsGiven            Review[]
+  auditLogs               AuditLog[]
+  reauthChallenges        ReauthChallenge[]
   updatedPlatformSettings PlatformSetting[] @relation("PlatformSettingUpdatedBy")
+  customerPaymentIntents  PaymentIntent[]   @relation("PaymentIntentCustomer")
+  providerPaymentIntents  PaymentIntent[]   @relation("PaymentIntentProvider")
+  createdLedgerEntries    LedgerEntry[]     @relation("LedgerEntryCreatedBy")
+  providerPayouts         Payout[]          @relation("PayoutProviderUser")
+  requestedPayouts        Payout[]          @relation("PayoutRequestedBy")
+  approvedPayouts         Payout[]          @relation("PayoutApprovedBy")
+  requestedRefunds        RefundRequest[]   @relation("RefundRequestedBy")
+  approvedRefunds         RefundRequest[]   @relation("RefundApprovedBy")
 }
 
 model Category {
-  id          String   @id @default(cuid())
-  name        String   @unique
-  slug        String   @unique
-  description String?
-  isActive    Boolean  @default(true)
-  sortOrder   Int      @default(0)
-  createdAt   DateTime @default(now())
-  updatedAt   DateTime @updatedAt
+  id             String                  @id @default(cuid())
+  name           String                  @unique
+  slug           String                  @unique
+  description    String?
+  isActive       Boolean                 @default(true)
+  sortOrder      Int                     @default(0)
+  createdAt      DateTime                @default(now())
+  updatedAt      DateTime                @updatedAt
   workerProfiles WorkerProfileCategory[]
-  jobs        Job[]
+  jobs           Job[]
 
   @@index([isActive, sortOrder])
 }
@@ -73,17 +81,17 @@ model WorkerProfileCategory {
 }
 
 model Job {
-  id              String       @id @default(cuid())
+  id              String          @id @default(cuid())
   clientId        String
   workerProfileId String
   categoryId      String
-  pricingMode     JobPricingMode @default(FIXED_PRICE)
+  pricingMode     JobPricingMode  @default(FIXED_PRICE)
   title           String
   description     String
   budget          Int?
   quotedAmount    Int?
   quoteMessage    String?
-  status          JobStatus    @default(REQUESTED)
+  status          JobStatus       @default(REQUESTED)
   acceptedAt      DateTime?
   startedAt       DateTime?
   scheduledFor    DateTime?
@@ -91,12 +99,16 @@ model Job {
   canceledAt      DateTime?
   canceledBy      String?
   cancelReason    String?
-  createdAt       DateTime     @default(now())
-  updatedAt       DateTime     @updatedAt
-  client          User         @relation("ClientJobs", fields: [clientId], references: [id], onDelete: Cascade)
-  workerProfile   WorkerProfile @relation(fields: [workerProfileId], references: [id], onDelete: Cascade)
-  category        Category     @relation(fields: [categoryId], references: [id], onDelete: Restrict)
+  createdAt       DateTime        @default(now())
+  updatedAt       DateTime        @updatedAt
+  client          User            @relation("ClientJobs", fields: [clientId], references: [id], onDelete: Cascade)
+  workerProfile   WorkerProfile   @relation(fields: [workerProfileId], references: [id], onDelete: Cascade)
+  category        Category        @relation(fields: [categoryId], references: [id], onDelete: Restrict)
   review          Review?
+  paymentIntents  PaymentIntent[]
+  ledgerEntries   LedgerEntry[]
+  payouts         Payout[]
+  refundRequests  RefundRequest[]
 
   @@index([clientId, status, createdAt])
   @@index([workerProfileId, status, createdAt])
@@ -122,28 +134,188 @@ model Review {
 }
 
 model TrackingWorkerAggregate {
-  workerProfileId String   @id
-  interactions    Int      @default(0)
-  clicks          Int      @default(0)
-  ctaClicks       Int      @default(0)
-  conversions     Int      @default(0)
+  workerProfileId String    @id
+  interactions    Int       @default(0)
+  clicks          Int       @default(0)
+  ctaClicks       Int       @default(0)
+  conversions     Int       @default(0)
   lastEventAt     DateTime?
-  createdAt       DateTime @default(now())
-  updatedAt       DateTime @updatedAt
+  createdAt       DateTime  @default(now())
+  updatedAt       DateTime  @updatedAt
 
   @@index([updatedAt])
   @@index([conversions, ctaClicks, clicks])
 }
 
 model TrackingCategoryAggregate {
-  categorySlug String   @id
-  interactions Int      @default(0)
+  categorySlug String    @id
+  interactions Int       @default(0)
   lastEventAt  DateTime?
-  createdAt    DateTime @default(now())
-  updatedAt    DateTime @updatedAt
+  createdAt    DateTime  @default(now())
+  updatedAt    DateTime  @updatedAt
 
   @@index([updatedAt])
   @@index([interactions])
+}
+
+model PaymentIntent {
+  id                    String               @id @default(cuid())
+  jobId                 String
+  customerId            String
+  providerUserId        String?
+  amount                Int
+  currency              String               @default("MZN")
+  platformFeeAmount     Int
+  providerNetAmount     Int
+  status                PaymentIntentStatus  @default(CREATED)
+  provider              PaymentProvider      @default(INTERNAL)
+  expiresAt             DateTime?
+  acceptedQuoteSnapshot Int?
+  metadata              Json?
+  createdAt             DateTime             @default(now())
+  updatedAt             DateTime             @updatedAt
+  job                   Job                  @relation(fields: [jobId], references: [id], onDelete: Cascade)
+  customer              User                 @relation("PaymentIntentCustomer", fields: [customerId], references: [id], onDelete: Cascade)
+  providerUser          User?                @relation("PaymentIntentProvider", fields: [providerUserId], references: [id], onDelete: SetNull)
+  transactions          PaymentTransaction[]
+  ledgerEntries         LedgerEntry[]
+  payouts               Payout[]
+  refundRequests        RefundRequest[]
+  events                PaymentEvent[]
+
+  @@index([jobId, createdAt])
+  @@index([customerId, createdAt])
+  @@index([providerUserId, createdAt])
+  @@index([status, createdAt])
+  @@index([provider, status])
+}
+
+model PaymentTransaction {
+  id                String            @id @default(cuid())
+  paymentIntentId   String?
+  type              TransactionType
+  status            TransactionStatus @default(PENDING)
+  provider          PaymentProvider   @default(INTERNAL)
+  providerReference String?
+  idempotencyKey    String            @unique
+  requestedAmount   Int
+  confirmedAmount   Int?
+  currency          String            @default("MZN")
+  providerPayload   Json?
+  failureReason     String?
+  processedAt       DateTime?
+  createdAt         DateTime          @default(now())
+  updatedAt         DateTime          @updatedAt
+  paymentIntent     PaymentIntent?    @relation(fields: [paymentIntentId], references: [id], onDelete: SetNull)
+  ledgerEntries     LedgerEntry[]
+  refundRequests    RefundRequest[]
+  events            PaymentEvent[]
+
+  @@unique([provider, providerReference])
+  @@index([paymentIntentId, createdAt])
+  @@index([status, createdAt])
+}
+
+model LedgerEntry {
+  id              String              @id @default(cuid())
+  jobId           String?
+  paymentIntentId String?
+  transactionId   String?
+  actorType       PaymentActorType
+  entryType       LedgerEntryType
+  amount          Int
+  currency        String              @default("MZN")
+  direction       LedgerDirection
+  balanceBucket   LedgerBalanceBucket
+  description     String?
+  metadata        Json?
+  createdByUserId String?
+  createdAt       DateTime            @default(now())
+  job             Job?                @relation(fields: [jobId], references: [id], onDelete: SetNull)
+  paymentIntent   PaymentIntent?      @relation(fields: [paymentIntentId], references: [id], onDelete: SetNull)
+  transaction     PaymentTransaction? @relation(fields: [transactionId], references: [id], onDelete: SetNull)
+  createdByUser   User?               @relation("LedgerEntryCreatedBy", fields: [createdByUserId], references: [id], onDelete: SetNull)
+
+  @@index([jobId, createdAt])
+  @@index([paymentIntentId, createdAt])
+  @@index([transactionId, createdAt])
+  @@index([balanceBucket, createdAt])
+}
+
+model Payout {
+  id                String          @id @default(cuid())
+  providerUserId    String
+  jobId             String?
+  paymentIntentId   String?
+  amount            Int
+  currency          String          @default("MZN")
+  status            PayoutStatus    @default(PENDING)
+  provider          PaymentProvider @default(INTERNAL)
+  providerReference String?
+  requestedByUserId String?
+  approvedByUserId  String?
+  processedAt       DateTime?
+  failureReason     String?
+  createdAt         DateTime        @default(now())
+  updatedAt         DateTime        @updatedAt
+  providerUser      User            @relation("PayoutProviderUser", fields: [providerUserId], references: [id], onDelete: Cascade)
+  job               Job?            @relation(fields: [jobId], references: [id], onDelete: SetNull)
+  paymentIntent     PaymentIntent?  @relation(fields: [paymentIntentId], references: [id], onDelete: SetNull)
+  requestedByUser   User?           @relation("PayoutRequestedBy", fields: [requestedByUserId], references: [id], onDelete: SetNull)
+  approvedByUser    User?           @relation("PayoutApprovedBy", fields: [approvedByUserId], references: [id], onDelete: SetNull)
+
+  @@index([providerUserId, status, createdAt])
+  @@index([status, createdAt])
+}
+
+model RefundRequest {
+  id                String              @id @default(cuid())
+  jobId             String
+  paymentIntentId   String
+  transactionId     String?
+  requestedByUserId String
+  approvedByUserId  String?
+  amount            Int
+  currency          String              @default("MZN")
+  reason            String
+  status            RefundStatus        @default(PENDING)
+  provider          PaymentProvider     @default(INTERNAL)
+  providerReference String?
+  processedAt       DateTime?
+  failureReason     String?
+  createdAt         DateTime            @default(now())
+  updatedAt         DateTime            @updatedAt
+  job               Job                 @relation(fields: [jobId], references: [id], onDelete: Cascade)
+  paymentIntent     PaymentIntent       @relation(fields: [paymentIntentId], references: [id], onDelete: Cascade)
+  transaction       PaymentTransaction? @relation(fields: [transactionId], references: [id], onDelete: SetNull)
+  requestedByUser   User                @relation("RefundRequestedBy", fields: [requestedByUserId], references: [id], onDelete: Cascade)
+  approvedByUser    User?               @relation("RefundApprovedBy", fields: [approvedByUserId], references: [id], onDelete: SetNull)
+
+  @@index([paymentIntentId, createdAt])
+  @@index([status, createdAt])
+}
+
+model PaymentEvent {
+  id                String              @id @default(cuid())
+  provider          PaymentProvider
+  eventType         String
+  externalEventId   String?
+  providerReference String?
+  paymentIntentId   String?
+  transactionId     String?
+  payload           Json
+  signatureValid    Boolean             @default(false)
+  processed         Boolean             @default(false)
+  processedAt       DateTime?
+  createdAt         DateTime            @default(now())
+  updatedAt         DateTime            @updatedAt
+  paymentIntent     PaymentIntent?      @relation(fields: [paymentIntentId], references: [id], onDelete: SetNull)
+  transaction       PaymentTransaction? @relation(fields: [transactionId], references: [id], onDelete: SetNull)
+
+  @@unique([provider, externalEventId])
+  @@index([provider, createdAt])
+  @@index([processed, createdAt])
+  @@index([providerReference])
 }
 
 enum JobStatus {
@@ -170,6 +342,93 @@ enum AdminSubrole {
   SUPER_ADMIN
 }
 
+enum PaymentProvider {
+  INTERNAL
+  MPESA
+  EMOLA
+  MKESH
+  BANK_TRANSFER
+  MANUAL
+}
+
+enum PaymentIntentStatus {
+  CREATED
+  AWAITING_PAYMENT
+  PENDING_CONFIRMATION
+  SUCCEEDED
+  FAILED
+  EXPIRED
+  CANCELED
+}
+
+enum TransactionType {
+  CHARGE
+  PAYOUT
+  REFUND
+  REVERSAL
+  ADJUSTMENT
+}
+
+enum TransactionStatus {
+  PENDING
+  PROCESSING
+  SUCCEEDED
+  FAILED
+  REVERSED
+  CANCELED
+}
+
+enum LedgerEntryType {
+  CUSTOMER_CHARGE
+  PLATFORM_FEE_RESERVED
+  PROVIDER_BALANCE_HELD
+  PROVIDER_BALANCE_RELEASED
+  PROVIDER_PAYOUT
+  CUSTOMER_REFUND
+  REVERSAL
+  ADMIN_ADJUSTMENT
+}
+
+enum PayoutStatus {
+  PENDING
+  APPROVED
+  PROCESSING
+  PAID
+  FAILED
+  CANCELED
+}
+
+enum RefundStatus {
+  PENDING
+  APPROVED
+  PROCESSING
+  SUCCEEDED
+  FAILED
+  CANCELED
+}
+
+enum PaymentActorType {
+  CUSTOMER
+  PROVIDER
+  PLATFORM
+  SYSTEM
+  ADMIN
+}
+
+enum LedgerDirection {
+  DEBIT
+  CREDIT
+}
+
+enum LedgerBalanceBucket {
+  CUSTOMER_EXTERNAL
+  PLATFORM_RESERVED
+  PLATFORM_AVAILABLE
+  PROVIDER_HELD
+  PROVIDER_AVAILABLE
+  PROVIDER_PAID_OUT
+}
+
 enum AuditStatus {
   SUCCESS
   DENIED
@@ -177,12 +436,12 @@ enum AuditStatus {
 }
 
 model Session {
-  id               String   @id @default(cuid())
+  id               String    @id @default(cuid())
   userId           String
   deviceId         String
-  refreshTokenHash String   @unique
-  createdAt        DateTime @default(now())
-  lastUsedAt       DateTime @default(now())
+  refreshTokenHash String    @unique
+  createdAt        DateTime  @default(now())
+  lastUsedAt       DateTime  @default(now())
   revokedAt        DateTime?
   ip               String?
   userAgent        String?
@@ -219,15 +478,15 @@ model AuditLog {
 }
 
 model ReauthChallenge {
-  id        String   @id @default(cuid())
-  userId    String
-  tokenHash String   @unique
-  expiresAt DateTime
+  id         String    @id @default(cuid())
+  userId     String
+  tokenHash  String    @unique
+  expiresAt  DateTime
   consumedAt DateTime?
-  purpose   String?
-  ipAddress String?
-  userAgent String?
-  createdAt DateTime @default(now())
+  purpose    String?
+  ipAddress  String?
+  userAgent  String?
+  createdAt  DateTime  @default(now())
 
   user User @relation(fields: [userId], references: [id], onDelete: Cascade)
 
