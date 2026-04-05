@@ -5,6 +5,7 @@ import { PaginatedResponse } from '@/lib/pagination';
 export type PaymentIntentStatus =
   | 'CREATED'
   | 'AWAITING_PAYMENT'
+  | 'PAID_PARTIAL'
   | 'PENDING_CONFIRMATION'
   | 'SUCCEEDED'
   | 'FAILED'
@@ -137,4 +138,28 @@ export async function getProviderEarningsSummary(
   }
 
   return (await response.json()) as ProviderEarningsSummary;
+}
+
+export async function payPaymentIntent(
+  accessToken: string,
+  paymentIntentId: string,
+  input?: {
+    idempotencyKey?: string;
+    simulate?: 'success' | 'pending' | 'failed' | 'reversed';
+  },
+): Promise<PaymentIntent> {
+  const response = await fetch(`${API_URL}/payments/intents/${paymentIntentId}/pay`, {
+    method: 'POST',
+    headers: {
+      Authorization: `Bearer ${accessToken}`,
+      'Content-Type': 'application/json',
+    },
+    body: JSON.stringify(input ?? {}),
+  });
+
+  if (!response.ok) {
+    throw new Error(await readApiError(response));
+  }
+
+  return (await response.json()) as PaymentIntent;
 }

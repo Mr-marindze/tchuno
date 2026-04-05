@@ -30,6 +30,7 @@ Introduce a safe internal payments domain before integrating real electronic-mon
 ### Customer
 
 - `POST /payments/intents`
+- `POST /payments/intents/:id/pay`
 - `GET /payments/intents/:id`
 - `GET /payments/jobs/:jobId`
 - `GET /payments/me`
@@ -59,6 +60,16 @@ Introduce a safe internal payments domain before integrating real electronic-mon
 
 - `/app/pagamentos` now lists customer payment intents.
 - `/pro/ganhos` now shows provider balances and movement history.
+
+## Request/Proposal Integration
+
+Payment intents are now also created from the request-selection flow:
+
+1. Customer creates `ServiceRequest`
+2. Providers submit `Proposal`
+3. Customer selects proposal
+4. Backend creates `Job` + deposit `PaymentIntent`
+5. Customer pays deposit using `/payments/intents/:id/pay`
 
 ## Next Integration Step
 

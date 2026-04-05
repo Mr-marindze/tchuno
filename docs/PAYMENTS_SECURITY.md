@@ -32,6 +32,10 @@
 - Webhook endpoint persists raw event payloads.
 - Manual reconciliation endpoint allows server-side status refresh.
 
+6. Contact-gating control
+- Job contact remains blocked before paid deposit.
+- Contact is unlocked only after backend-confirmed payment state.
+
 ## Minimum Ops Practices
 
 - Track failed transactions and pending intents daily.

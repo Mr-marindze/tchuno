@@ -7,6 +7,12 @@ export class JobDto {
   @ApiProperty()
   clientId!: string;
 
+  @ApiProperty({ nullable: true })
+  customerId!: string | null;
+
+  @ApiProperty({ nullable: true })
+  providerId!: string | null;
+
   @ApiProperty()
   workerProfileId!: string;
 
@@ -21,6 +27,9 @@ export class JobDto {
 
   @ApiProperty({ nullable: true })
   budget!: number | null;
+
+  @ApiProperty({ nullable: true })
+  agreedPrice!: number | null;
 
   @ApiProperty({ enum: ['FIXED_PRICE', 'QUOTE_REQUEST'] })
   pricingMode!: 'FIXED_PRICE' | 'QUOTE_REQUEST';
@@ -56,6 +65,15 @@ export class JobDto {
 
   @ApiProperty({ nullable: true })
   cancelReason!: string | null;
+
+  @ApiProperty({ nullable: true })
+  requestId!: string | null;
+
+  @ApiProperty({ nullable: true })
+  proposalId!: string | null;
+
+  @ApiProperty({ nullable: true })
+  contactUnlockedAt!: Date | null;
 
   @ApiProperty()
   createdAt!: Date;

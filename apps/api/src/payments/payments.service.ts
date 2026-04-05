@@ -29,6 +29,7 @@ import { CreatePaymentIntentDto } from './dto/create-payment-intent.dto';
 import { CreatePayoutDto } from './dto/create-payout.dto';
 import { CreateRefundRequestDto } from './dto/create-refund-request.dto';
 import { ListPaymentsQueryDto } from './dto/list-payments-query.dto';
+import { PayPaymentIntentDto } from './dto/pay-payment-intent.dto';
 import { ProcessPayoutDto } from './dto/process-payout.dto';
 import { ReconcileTransactionDto } from './dto/reconcile-transaction.dto';
 import { PaymentWebhookDto } from './dto/payment-webhook.dto';
@@ -115,13 +116,19 @@ export class PaymentsService {
       pricingMode: job.pricingMode,
       budget: job.budget,
       quotedAmount: job.quotedAmount,
+      agreedPrice: job.agreedPrice,
     });
 
     const existingIntent = await this.prisma.paymentIntent.findFirst({
       where: {
         jobId: job.id,
         status: {
-          in: ['AWAITING_PAYMENT', 'PENDING_CONFIRMATION', 'SUCCEEDED'],
+          in: [
+            'AWAITING_PAYMENT',
+            'PENDING_CONFIRMATION',
+            'PAID_PARTIAL',
+            'SUCCEEDED',
+          ],
         },
       },
       include: {
@@ -139,97 +146,29 @@ export class PaymentsService {
     const provider = dto.provider ?? PaymentProvider.INTERNAL;
     const split = this.paymentPolicyService.computeSplit(chargeAmount);
 
-    const intent = await this.prisma.$transaction(async (tx) => {
-      const createdIntent = await tx.paymentIntent.create({
-        data: {
-          jobId: job.id,
-          customerId: actorUserId,
-          providerUserId: job.workerProfile.userId,
-          amount: split.grossAmount,
-          currency: 'MZN',
-          platformFeeAmount: split.platformFeeAmount,
-          providerNetAmount: split.providerNetAmount,
-          status: 'AWAITING_PAYMENT',
-          provider,
-          expiresAt: this.paymentPolicyService.buildIntentExpiryDate(),
-          acceptedQuoteSnapshot:
-            job.pricingMode === 'QUOTE_REQUEST' ? job.quotedAmount : null,
-          metadata: {
-            pricingMode: job.pricingMode,
-          } satisfies Prisma.JsonObject,
-        },
-      });
-
-      const idempotencyKey =
-        dto.idempotencyKey?.trim() || `charge-${createdIntent.id}`;
-
-      const gateway = this.gatewayRegistry.getAdapter(provider);
-      const gatewayResult = await gateway.requestCharge({
-        idempotencyKey,
-        amount: createdIntent.amount,
-        currency: createdIntent.currency,
-        customerId: createdIntent.customerId,
-        jobId: createdIntent.jobId,
+    const intent = await this.prisma.paymentIntent.create({
+      data: {
+        jobId: job.id,
+        customerId: actorUserId,
+        providerUserId: job.providerId ?? job.workerProfile.userId,
+        amount: split.grossAmount,
+        currency: 'MZN',
+        platformFeeAmount: split.platformFeeAmount,
+        providerNetAmount: split.providerNetAmount,
+        status: 'AWAITING_PAYMENT',
+        provider,
+        expiresAt: this.paymentPolicyService.buildIntentExpiryDate(),
+        acceptedQuoteSnapshot:
+          job.pricingMode === 'QUOTE_REQUEST' ? job.quotedAmount : null,
         metadata: {
-          paymentIntentId: createdIntent.id,
+          pricingMode: job.pricingMode,
+        } satisfies Prisma.JsonObject,
+      },
+      include: {
+        transactions: {
+          orderBy: [{ createdAt: 'desc' }, { id: 'desc' }],
         },
-      });
-
-      const transactionStatus = this.mapGatewayToTransactionStatus(
-        gatewayResult.status,
-      );
-      const nextIntentStatus = this.mapGatewayToIntentStatus(
-        gatewayResult.status,
-      );
-
-      const transaction = await tx.paymentTransaction.create({
-        data: {
-          paymentIntentId: createdIntent.id,
-          type: 'CHARGE',
-          status: transactionStatus,
-          provider,
-          providerReference: gatewayResult.providerReference,
-          idempotencyKey,
-          requestedAmount: createdIntent.amount,
-          confirmedAmount:
-            transactionStatus === 'SUCCEEDED' ? createdIntent.amount : null,
-          currency: createdIntent.currency,
-          providerPayload:
-            (gatewayResult.rawPayload as Prisma.InputJsonValue | undefined) ??
-            undefined,
-          failureReason: gatewayResult.reason ?? null,
-          processedAt: gatewayResult.processedAt,
-        },
-      });
-
-      if (nextIntentStatus !== createdIntent.status) {
-        await tx.paymentIntent.update({
-          where: { id: createdIntent.id },
-          data: {
-            status: nextIntentStatus,
-          },
-        });
-      }
-
-      if (transaction.status === 'SUCCEEDED') {
-        await this.ensureChargeLedgerEntries(tx, {
-          paymentIntentId: createdIntent.id,
-          transactionId: transaction.id,
-          jobId: createdIntent.jobId,
-          amount: createdIntent.amount,
-          platformFeeAmount: createdIntent.platformFeeAmount,
-          providerNetAmount: createdIntent.providerNetAmount,
-        });
-      }
-
-      return tx.paymentIntent.findUniqueOrThrow({
-        where: { id: createdIntent.id },
-        include: {
-          transactions: {
-            orderBy: [{ createdAt: 'desc' }, { id: 'desc' }],
-          },
-        },
-      });
+      },
     });
 
     this.metricsService.recordBusinessEvent({
@@ -249,6 +188,118 @@ export class PaymentsService {
     );
 
     return intent;
+  }
+
+  async payIntent(
+    intentId: string,
+    actorUserId: string,
+    dto?: PayPaymentIntentDto,
+  ) {
+    const intent = await this.prisma.paymentIntent.findUnique({
+      where: { id: intentId },
+      include: {
+        transactions: {
+          orderBy: [{ createdAt: 'desc' }, { id: 'desc' }],
+        },
+      },
+    });
+
+    if (!intent) {
+      throw new NotFoundException('Payment intent not found');
+    }
+
+    if (intent.customerId !== actorUserId) {
+      throw new ForbiddenException('Only the customer can pay this intent');
+    }
+
+    if (intent.status === 'PAID_PARTIAL' || intent.status === 'SUCCEEDED') {
+      return intent;
+    }
+
+    if (
+      !['AWAITING_PAYMENT', 'PENDING_CONFIRMATION', 'FAILED'].includes(
+        intent.status,
+      )
+    ) {
+      throw new ConflictException(
+        'Payment intent is not payable in current state',
+      );
+    }
+
+    const idempotencyKey =
+      dto?.idempotencyKey?.trim() || `charge-${intent.id}-${Date.now()}`;
+    if (dto?.idempotencyKey) {
+      const existingTransaction =
+        await this.prisma.paymentTransaction.findUnique({
+          where: { idempotencyKey },
+        });
+
+      if (existingTransaction?.paymentIntentId === intent.id) {
+        return this.prisma.paymentIntent.findUniqueOrThrow({
+          where: { id: intent.id },
+          include: {
+            transactions: {
+              orderBy: [{ createdAt: 'desc' }, { id: 'desc' }],
+            },
+          },
+        });
+      }
+    }
+
+    const gateway = this.gatewayRegistry.getAdapter(intent.provider);
+    const gatewayResult = await gateway.requestCharge({
+      idempotencyKey,
+      amount: intent.amount,
+      currency: intent.currency,
+      customerId: intent.customerId,
+      jobId: intent.jobId,
+      metadata: {
+        paymentIntentId: intent.id,
+        ...(dto?.simulate ? { simulate: dto.simulate } : {}),
+      },
+    });
+
+    await this.prisma.$transaction(async (tx) => {
+      const transactionStatus = this.mapGatewayToTransactionStatus(
+        gatewayResult.status,
+      );
+
+      const transaction = await tx.paymentTransaction.create({
+        data: {
+          paymentIntentId: intent.id,
+          type: 'CHARGE',
+          status: transactionStatus,
+          provider: intent.provider,
+          providerReference: gatewayResult.providerReference,
+          idempotencyKey,
+          requestedAmount: intent.amount,
+          confirmedAmount:
+            transactionStatus === 'SUCCEEDED' ? intent.amount : null,
+          currency: intent.currency,
+          providerPayload:
+            (gatewayResult.rawPayload as Prisma.InputJsonValue | undefined) ??
+            undefined,
+          failureReason: gatewayResult.reason ?? null,
+          processedAt: gatewayResult.processedAt,
+        },
+      });
+
+      return this.applyGatewayStatus(tx, {
+        transaction,
+        gatewayStatus: gatewayResult.status,
+        rawPayload: gatewayResult.rawPayload ?? undefined,
+        reason: gatewayResult.reason,
+      });
+    });
+
+    return this.prisma.paymentIntent.findUniqueOrThrow({
+      where: { id: intent.id },
+      include: {
+        transactions: {
+          orderBy: [{ createdAt: 'desc' }, { id: 'desc' }],
+        },
+      },
+    });
   }
 
   async listMyCustomerIntents(
@@ -610,7 +661,9 @@ export class PaymentsService {
       }),
       this.prisma.paymentIntent.count({
         where: {
-          status: 'SUCCEEDED',
+          status: {
+            in: ['PAID_PARTIAL', 'SUCCEEDED'],
+          },
         },
       }),
       this.prisma.paymentIntent.count({
@@ -786,23 +839,23 @@ export class PaymentsService {
       throw new NotFoundException('Payment intent not found');
     }
 
-    if (intent.status !== 'SUCCEEDED') {
-      throw new ConflictException(
-        'Only succeeded payment intents can be refunded',
-      );
+    if (!['PAID_PARTIAL', 'SUCCEEDED'].includes(intent.status)) {
+      throw new ConflictException('Only paid payment intents can be refunded');
     }
 
     const successfulRefunds = await this.prisma.refundRequest.aggregate({
       where: {
         paymentIntentId: intent.id,
-        status: 'SUCCEEDED',
+        status: {
+          in: ['SUCCEEDED'],
+        },
       },
       _sum: {
         amount: true,
       },
     });
 
-    const alreadyRefunded = successfulRefunds._sum.amount ?? 0;
+    const alreadyRefunded = successfulRefunds._sum?.amount ?? 0;
     const remainingRefundable = intent.amount - alreadyRefunded;
 
     if (remainingRefundable <= 0) {
@@ -1161,7 +1214,9 @@ export class PaymentsService {
     const intent = await this.prisma.paymentIntent.findFirst({
       where: {
         jobId: job.id,
-        status: 'SUCCEEDED',
+        status: {
+          in: ['PAID_PARTIAL', 'SUCCEEDED'],
+        },
       },
       orderBy: [{ createdAt: 'desc' }, { id: 'desc' }],
     });
@@ -1245,7 +1300,12 @@ export class PaymentsService {
     pricingMode: 'FIXED_PRICE' | 'QUOTE_REQUEST';
     budget: number | null;
     quotedAmount: number | null;
+    agreedPrice: number | null;
   }): number {
+    if (input.agreedPrice && input.agreedPrice > 0) {
+      return input.agreedPrice;
+    }
+
     if (input.pricingMode === 'FIXED_PRICE') {
       if (!input.budget || input.budget <= 0) {
         throw new ConflictException(
@@ -1285,9 +1345,14 @@ export class PaymentsService {
 
   private mapGatewayToIntentStatus(
     status: GatewayOperationStatus,
+    input?: {
+      metadata?: Prisma.JsonValue | null;
+    },
   ): PaymentIntentStatus {
     if (status === 'SUCCEEDED') {
-      return 'SUCCEEDED';
+      return this.isDepositIntent(input?.metadata)
+        ? 'PAID_PARTIAL'
+        : 'SUCCEEDED';
     }
 
     if (status === 'FAILED') {
@@ -1313,6 +1378,15 @@ export class PaymentsService {
     }
 
     return 'PENDING';
+  }
+
+  private isDepositIntent(metadata?: Prisma.JsonValue | null): boolean {
+    if (!metadata || typeof metadata !== 'object' || Array.isArray(metadata)) {
+      return false;
+    }
+
+    const record = metadata as Record<string, unknown>;
+    return record.kind === 'deposit';
   }
 
   private async ensureChargeLedgerEntries(
@@ -1545,11 +1619,17 @@ export class PaymentsService {
 
       const nextIntentStatus = this.mapGatewayToIntentStatus(
         input.gatewayStatus,
+        {
+          metadata: intent.metadata,
+        },
       );
       if (
-        ['SUCCEEDED', 'FAILED', 'PENDING_CONFIRMATION'].includes(
-          nextIntentStatus,
-        ) &&
+        [
+          'PAID_PARTIAL',
+          'SUCCEEDED',
+          'FAILED',
+          'PENDING_CONFIRMATION',
+        ].includes(nextIntentStatus) &&
         intent.status !== nextIntentStatus
       ) {
         await prisma.paymentIntent.update({
@@ -1570,6 +1650,13 @@ export class PaymentsService {
           amount: intent.amount,
           platformFeeAmount: intent.platformFeeAmount,
           providerNetAmount: intent.providerNetAmount,
+        });
+
+        await prisma.job.update({
+          where: { id: intent.jobId },
+          data: {
+            contactUnlockedAt: new Date(),
+          },
         });
       }
     }

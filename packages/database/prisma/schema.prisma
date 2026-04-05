@@ -26,6 +26,10 @@ model User {
   updatedPlatformSettings PlatformSetting[] @relation("PlatformSettingUpdatedBy")
   customerPaymentIntents  PaymentIntent[]   @relation("PaymentIntentCustomer")
   providerPaymentIntents  PaymentIntent[]   @relation("PaymentIntentProvider")
+  customerServiceRequests ServiceRequest[]  @relation("CustomerServiceRequests")
+  providerProposals       Proposal[]        @relation("ProviderProposals")
+  jobsAsCustomer          Job[]             @relation("JobCustomer")
+  jobsAsProvider          Job[]             @relation("JobProvider")
   createdLedgerEntries    LedgerEntry[]     @relation("LedgerEntryCreatedBy")
   providerPayouts         Payout[]          @relation("PayoutProviderUser")
   requestedPayouts        Payout[]          @relation("PayoutRequestedBy")
@@ -35,16 +39,17 @@ model User {
 }
 
 model Category {
-  id             String                  @id @default(cuid())
-  name           String                  @unique
-  slug           String                  @unique
-  description    String?
-  isActive       Boolean                 @default(true)
-  sortOrder      Int                     @default(0)
-  createdAt      DateTime                @default(now())
-  updatedAt      DateTime                @updatedAt
-  workerProfiles WorkerProfileCategory[]
-  jobs           Job[]
+  id              String                  @id @default(cuid())
+  name            String                  @unique
+  slug            String                  @unique
+  description     String?
+  isActive        Boolean                 @default(true)
+  sortOrder       Int                     @default(0)
+  createdAt       DateTime                @default(now())
+  updatedAt       DateTime                @updatedAt
+  workerProfiles  WorkerProfileCategory[]
+  jobs            Job[]
+  serviceRequests ServiceRequest[]
 
   @@index([isActive, sortOrder])
 }
@@ -80,36 +85,89 @@ model WorkerProfileCategory {
   @@index([categoryId])
 }
 
-model Job {
-  id              String          @id @default(cuid())
-  clientId        String
-  workerProfileId String
-  categoryId      String
-  pricingMode     JobPricingMode  @default(FIXED_PRICE)
-  title           String
-  description     String
-  budget          Int?
-  quotedAmount    Int?
-  quoteMessage    String?
-  status          JobStatus       @default(REQUESTED)
-  acceptedAt      DateTime?
-  startedAt       DateTime?
-  scheduledFor    DateTime?
-  completedAt     DateTime?
-  canceledAt      DateTime?
-  canceledBy      String?
-  cancelReason    String?
-  createdAt       DateTime        @default(now())
-  updatedAt       DateTime        @updatedAt
-  client          User            @relation("ClientJobs", fields: [clientId], references: [id], onDelete: Cascade)
-  workerProfile   WorkerProfile   @relation(fields: [workerProfileId], references: [id], onDelete: Cascade)
-  category        Category        @relation(fields: [categoryId], references: [id], onDelete: Restrict)
-  review          Review?
-  paymentIntents  PaymentIntent[]
-  ledgerEntries   LedgerEntry[]
-  payouts         Payout[]
-  refundRequests  RefundRequest[]
+model ServiceRequest {
+  id                 String               @id @default(cuid())
+  customerId         String
+  categoryId         String
+  title              String
+  description        String
+  location           String?
+  status             ServiceRequestStatus @default(OPEN)
+  selectedProposalId String?              @unique
+  createdAt          DateTime             @default(now())
+  updatedAt          DateTime             @updatedAt
+  customer           User                 @relation("CustomerServiceRequests", fields: [customerId], references: [id], onDelete: Cascade)
+  category           Category             @relation(fields: [categoryId], references: [id], onDelete: Restrict)
+  proposals          Proposal[]           @relation("RequestProposals")
+  selectedProposal   Proposal?            @relation("SelectedProposal", fields: [selectedProposalId], references: [id], onDelete: SetNull)
+  job                Job?
 
+  @@index([customerId, status, createdAt])
+  @@index([categoryId, status, createdAt])
+  @@index([status, createdAt])
+}
+
+model Proposal {
+  id                 String          @id @default(cuid())
+  requestId          String
+  providerId         String
+  price              Int
+  comment            String?
+  status             ProposalStatus  @default(SUBMITTED)
+  createdAt          DateTime        @default(now())
+  updatedAt          DateTime        @updatedAt
+  request            ServiceRequest  @relation("RequestProposals", fields: [requestId], references: [id], onDelete: Cascade)
+  provider           User            @relation("ProviderProposals", fields: [providerId], references: [id], onDelete: Cascade)
+  selectedForRequest ServiceRequest? @relation("SelectedProposal")
+  job                Job?
+
+  @@unique([requestId, providerId])
+  @@index([requestId, status, createdAt])
+  @@index([providerId, status, createdAt])
+}
+
+model Job {
+  id                String          @id @default(cuid())
+  clientId          String
+  customerId        String?
+  providerId        String?
+  workerProfileId   String
+  categoryId        String
+  requestId         String?         @unique
+  proposalId        String?         @unique
+  agreedPrice       Int?
+  pricingMode       JobPricingMode  @default(FIXED_PRICE)
+  title             String
+  description       String
+  budget            Int?
+  quotedAmount      Int?
+  quoteMessage      String?
+  status            JobStatus       @default(REQUESTED)
+  acceptedAt        DateTime?
+  startedAt         DateTime?
+  scheduledFor      DateTime?
+  completedAt       DateTime?
+  canceledAt        DateTime?
+  canceledBy        String?
+  cancelReason      String?
+  contactUnlockedAt DateTime?
+  createdAt         DateTime        @default(now())
+  updatedAt         DateTime        @updatedAt
+  client            User            @relation("ClientJobs", fields: [clientId], references: [id], onDelete: Cascade)
+  customer          User?           @relation("JobCustomer", fields: [customerId], references: [id], onDelete: SetNull)
+  provider          User?           @relation("JobProvider", fields: [providerId], references: [id], onDelete: SetNull)
+  workerProfile     WorkerProfile   @relation(fields: [workerProfileId], references: [id], onDelete: Cascade)
+  category          Category        @relation(fields: [categoryId], references: [id], onDelete: Restrict)
+  request           ServiceRequest? @relation(fields: [requestId], references: [id], onDelete: SetNull)
+  proposal          Proposal?       @relation(fields: [proposalId], references: [id], onDelete: SetNull)
+  review            Review?
+  paymentIntents    PaymentIntent[]
+  ledgerEntries     LedgerEntry[]
+  payouts           Payout[]
+  refundRequests    RefundRequest[]
+
+  @@index([customerId, status, createdAt])
+  @@index([providerId, status, createdAt])
   @@index([clientId, status, createdAt])
   @@index([workerProfileId, status, createdAt])
   @@index([status, createdAt])
@@ -331,6 +389,18 @@ enum JobPricingMode {
   QUOTE_REQUEST
 }
 
+enum ServiceRequestStatus {
+  OPEN
+  CLOSED
+  EXPIRED
+}
+
+enum ProposalStatus {
+  SUBMITTED
+  SELECTED
+  REJECTED
+}
+
 enum UserRole {
   USER
   ADMIN
@@ -354,6 +424,7 @@ enum PaymentProvider {
 enum PaymentIntentStatus {
   CREATED
   AWAITING_PAYMENT
+  PAID_PARTIAL
   PENDING_CONFIRMATION
   SUCCEEDED
   FAILED

@@ -169,7 +169,22 @@ export class JobsService {
       where: { id: jobId },
       include: {
         workerProfile: {
-          select: { userId: true },
+          select: {
+            userId: true,
+            user: {
+              select: {
+                email: true,
+                name: true,
+              },
+            },
+          },
+        },
+        provider: {
+          select: {
+            id: true,
+            email: true,
+            name: true,
+          },
         },
       },
     });
@@ -178,16 +193,69 @@ export class JobsService {
       throw new NotFoundException('Job not found');
     }
 
-    if (
-      jobAccess.clientId !== requesterId &&
-      jobAccess.workerProfile.userId !== requesterId
-    ) {
+    const jobProviderId =
+      jobAccess.providerId ?? jobAccess.workerProfile.userId;
+    if (jobAccess.clientId !== requesterId && jobProviderId !== requesterId) {
       throw new ForbiddenException('You are not allowed to access this job');
     }
 
-    return this.prisma.job.findUniqueOrThrow({
-      where: { id: jobId },
+    const [job, paidIntent] = await this.prisma.$transaction([
+      this.prisma.job.findUniqueOrThrow({
+        where: { id: jobId },
+      }),
+      this.prisma.paymentIntent.findFirst({
+        where: {
+          jobId,
+          status: {
+            in: ['PAID_PARTIAL', 'SUCCEEDED'],
+          },
+        },
+        orderBy: [{ createdAt: 'desc' }, { id: 'desc' }],
+        select: {
+          id: true,
+        },
+      }),
+    ]);
+
+    const contactUnlocked = Boolean(job.contactUnlockedAt || paidIntent);
+    const providerEmail =
+      jobAccess.provider?.email ?? jobAccess.workerProfile.user.email ?? null;
+    const providerName =
+      jobAccess.provider?.name ?? jobAccess.workerProfile.user.name ?? null;
+
+    return {
+      ...job,
+      contactUnlocked,
+      providerContact: contactUnlocked
+        ? {
+            email: providerEmail,
+            name: providerName,
+          }
+        : null,
+      paymentRequired: !contactUnlocked,
+      paymentStatus: paidIntent ? 'PAID_PARTIAL' : 'AWAITING_PAYMENT',
+    };
+  }
+
+  private async assertExecutionPaymentReady(jobId: string) {
+    const intent = await this.prisma.paymentIntent.findFirst({
+      where: {
+        jobId,
+        status: {
+          in: ['PAID_PARTIAL', 'SUCCEEDED'],
+        },
+      },
+      orderBy: [{ createdAt: 'desc' }, { id: 'desc' }],
+      select: {
+        id: true,
+      },
     });
+
+    if (!intent) {
+      throw new ConflictException(
+        'Deposit payment is required before provider execution workflow',
+      );
+    }
   }
 
   async listMyClientJobs(clientId: string, query: ListJobsQueryDto) {
@@ -322,6 +390,13 @@ export class JobsService {
 
     const current = job.status;
     const next = dto.status as JobStatus;
+
+    if (
+      job.requestId &&
+      ['ACCEPTED', 'IN_PROGRESS', 'COMPLETED'].includes(next)
+    ) {
+      await this.assertExecutionPaymentReady(job.id);
+    }
 
     if (
       !this.isTransitionAllowed(

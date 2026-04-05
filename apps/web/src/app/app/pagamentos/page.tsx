@@ -10,6 +10,7 @@ import { listMyCustomerPaymentIntents, PaymentIntent } from '@/lib/payments';
 const statusLabel: Record<string, string> = {
   CREATED: 'Criado',
   AWAITING_PAYMENT: 'Aguardando pagamento',
+  PAID_PARTIAL: 'Sinal pago',
   PENDING_CONFIRMATION: 'Em confirmação',
   SUCCEEDED: 'Pago',
   FAILED: 'Falhado',

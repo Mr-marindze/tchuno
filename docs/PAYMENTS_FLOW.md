@@ -10,21 +10,28 @@
 - gross
 - platform fee
 - provider net
-4. Backend creates `PaymentIntent` and initial `PaymentTransaction` (`CHARGE`).
+4. Backend creates `PaymentIntent` in `AWAITING_PAYMENT`.
 
-## 2) Charge Status
+## 2) Pay Intent (Deposit or Charge)
+
+1. Customer calls `POST /payments/intents/:id/pay`.
+2. Gateway charge is requested using idempotency key.
+3. Transaction is recorded and intent transitions according to payment result.
+4. For deposit intents (`metadata.kind=deposit`) paid state becomes `PAID_PARTIAL`.
+
+## 3) Charge Status
 
 - Internal gateway returns one of:
 - `PENDING`
 - `SUCCEEDED`
 - `FAILED`
 - `REVERSED`
-- On success, ledger receives:
+- On paid success, ledger receives:
 - `CUSTOMER_CHARGE`
 - `PLATFORM_FEE_RESERVED`
 - `PROVIDER_BALANCE_HELD`
 
-## 3) Release Provider Funds
+## 4) Release Provider Funds
 
 Admin triggers `POST /admin/payments/release/:jobId`.
 
@@ -38,7 +45,7 @@ Ledger move:
 - debit `PROVIDER_HELD`
 - credit `PROVIDER_AVAILABLE`
 
-## 4) Payout
+## 5) Payout
 
 1. Admin creates payout request.
 2. Admin approves payout.
@@ -47,13 +54,13 @@ Ledger move:
 - debit `PROVIDER_AVAILABLE`
 - credit `PROVIDER_PAID_OUT`
 
-## 5) Refund
+## 6) Refund
 
 1. Admin creates refund for a succeeded intent.
 2. Refund transaction is created and processed.
 3. On success ledger entries debit platform/provider buckets and credit customer refund.
 
-## 6) Monitoring
+## 7) Monitoring
 
 - `/admin/payments/overview` exposes operational payment KPIs.
 - Provider summary endpoint exposes held/available/paid-out balances.

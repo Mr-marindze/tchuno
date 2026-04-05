@@ -29,6 +29,7 @@ import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
 import { AppRole } from '../auth/authorization.types';
 import { CreatePaymentIntentDto } from './dto/create-payment-intent.dto';
 import { ListPaymentsQueryDto } from './dto/list-payments-query.dto';
+import { PayPaymentIntentDto } from './dto/pay-payment-intent.dto';
 import { PaymentWebhookDto } from './dto/payment-webhook.dto';
 import { ReconcileTransactionDto } from './dto/reconcile-transaction.dto';
 import { PaymentsService } from './payments.service';
@@ -62,6 +63,25 @@ export class PaymentsController {
     @Body() dto: CreatePaymentIntentDto,
   ) {
     return this.paymentsService.createIntent(req.user.sub, dto);
+  }
+
+  @Post('intents/:id/pay')
+  @UseGuards(JwtAuthGuard, AccessPolicyGuard)
+  @ApiBearerAuth()
+  @ApiOperation({ summary: 'Pay a pending payment intent (customer)' })
+  @ApiParam({ name: 'id', type: String })
+  @ApiOkResponse({ description: 'Payment intent charge result' })
+  @ApiUnauthorizedResponse({ type: ErrorResponseDto })
+  @ApiForbiddenResponse({ type: ErrorResponseDto })
+  @ApiConflictResponse({ type: ErrorResponseDto })
+  @ApiNotFoundResponse({ type: ErrorResponseDto })
+  @RequirePermissions('customer.payments.create')
+  payIntent(
+    @Req() req: AuthenticatedRequest,
+    @Param('id') id: string,
+    @Body() dto: PayPaymentIntentDto,
+  ) {
+    return this.paymentsService.payIntent(id, req.user.sub, dto);
   }
 
   @Get('intents/:id')

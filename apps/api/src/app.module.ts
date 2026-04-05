@@ -19,6 +19,7 @@ import { ObservabilityModule } from './observability/observability.module';
 import { PaymentsModule } from './payments/payments.module';
 import { PrismaModule } from './prisma/prisma.module';
 import { ReviewsModule } from './reviews/reviews.module';
+import { ServiceRequestsModule } from './service-requests/service-requests.module';
 import { TrackingModule } from './tracking/tracking.module';
 import { WorkerProfileModule } from './worker-profile/worker-profile.module';
 
@@ -39,6 +40,7 @@ import { WorkerProfileModule } from './worker-profile/worker-profile.module';
     ObservabilityModule,
     PaymentsModule,
     ReviewsModule,
+    ServiceRequestsModule,
     TrackingModule,
     WorkerProfileModule,
   ],

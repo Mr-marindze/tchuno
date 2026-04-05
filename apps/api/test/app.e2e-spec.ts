@@ -1424,8 +1424,19 @@ describe('Auth and Sessions (e2e)', () => {
       status: string;
     };
 
-    expect(intent.status).toBe('SUCCEEDED');
+    expect(intent.status).toBe('AWAITING_PAYMENT');
     expect(intent.providerNetAmount).toBeGreaterThan(0);
+
+    const payIntentResponse = await request(app.getHttpServer())
+      .post(`/payments/intents/${intent.id}/pay`)
+      .set('Authorization', `Bearer ${customerAccessToken}`)
+      .send({
+        simulate: 'success',
+      })
+      .expect(201);
+
+    const paidIntent = payIntentResponse.body as { status: string };
+    expect(paidIntent.status).toBe('SUCCEEDED');
 
     await request(app.getHttpServer())
       .patch(`/jobs/${job.id}/status`)
@@ -1541,5 +1552,216 @@ describe('Auth and Sessions (e2e)', () => {
       balances: { paidOut: number };
     };
     expect(providerSummary.balances.paidOut).toBe(intent.providerNetAmount);
+  });
+
+  it('service request flow: proposals, selection, deposit payment and contact unlock', async () => {
+    const base = Date.now();
+    const password = 'abc12345';
+    const passwordHash = await bcrypt.hash(password, 12);
+
+    const customerUser = await prisma.user.create({
+      data: {
+        email: `sr_customer_${base}@tchuno.local`,
+        name: 'SR Customer',
+        passwordHash,
+        role: 'USER',
+        isActive: true,
+      },
+      select: {
+        id: true,
+        email: true,
+      },
+    });
+
+    const providerAUser = await prisma.user.create({
+      data: {
+        email: `sr_provider_a_${base}@tchuno.local`,
+        name: 'SR Provider A',
+        passwordHash,
+        role: 'USER',
+        isActive: true,
+      },
+      select: {
+        id: true,
+        email: true,
+      },
+    });
+
+    const providerBUser = await prisma.user.create({
+      data: {
+        email: `sr_provider_b_${base}@tchuno.local`,
+        name: 'SR Provider B',
+        passwordHash,
+        role: 'USER',
+        isActive: true,
+      },
+      select: {
+        id: true,
+        email: true,
+      },
+    });
+
+    const jwtService = app.get(JwtService);
+    const secret = process.env.JWT_ACCESS_SECRET ?? 'change-me-access';
+    const customerAccessToken = jwtService.sign(
+      { sub: customerUser.id, email: customerUser.email },
+      { secret, expiresIn: '15m' },
+    );
+    const providerAAccessToken = jwtService.sign(
+      { sub: providerAUser.id, email: providerAUser.email },
+      { secret, expiresIn: '15m' },
+    );
+    const providerBAccessToken = jwtService.sign(
+      { sub: providerBUser.id, email: providerBUser.email },
+      { secret, expiresIn: '15m' },
+    );
+
+    const category = await prisma.category.create({
+      data: {
+        name: `Service Request Categoria ${base}`,
+        slug: `service-request-categoria-${base}`,
+        description: 'Categoria de teste para fluxo de pedido aberto',
+        sortOrder: 89,
+      },
+      select: {
+        id: true,
+      },
+    });
+
+    await request(app.getHttpServer())
+      .put('/worker-profile/me')
+      .set('Authorization', `Bearer ${providerAAccessToken}`)
+      .send({
+        bio: 'Prestador A para service requests',
+        location: 'Maputo',
+        hourlyRate: 1000,
+        experienceYears: 4,
+        isAvailable: true,
+        categoryIds: [category.id],
+      })
+      .expect(200);
+
+    await request(app.getHttpServer())
+      .put('/worker-profile/me')
+      .set('Authorization', `Bearer ${providerBAccessToken}`)
+      .send({
+        bio: 'Prestador B para service requests',
+        location: 'Maputo',
+        hourlyRate: 950,
+        experienceYears: 5,
+        isAvailable: true,
+        categoryIds: [category.id],
+      })
+      .expect(200);
+
+    const createRequestResponse = await request(app.getHttpServer())
+      .post('/service-requests')
+      .set('Authorization', `Bearer ${customerAccessToken}`)
+      .send({
+        categoryId: category.id,
+        title: 'Instalação de quadro elétrico',
+        description:
+          'Preciso de instalação com orçamento detalhado e garantia.',
+        location: 'Bairro Central',
+      })
+      .expect(201);
+    const createdRequest = createRequestResponse.body as { id: string };
+
+    await request(app.getHttpServer())
+      .get('/service-requests/open')
+      .set('Authorization', `Bearer ${providerAAccessToken}`)
+      .expect(200);
+
+    const proposalAResponse = await request(app.getHttpServer())
+      .post(`/service-requests/${createdRequest.id}/proposals`)
+      .set('Authorization', `Bearer ${providerAAccessToken}`)
+      .send({
+        price: 12_000,
+        comment: 'Inclui materiais base e 2 visitas.',
+      })
+      .expect(201);
+    const proposalA = proposalAResponse.body as { id: string };
+
+    await request(app.getHttpServer())
+      .post(`/service-requests/${createdRequest.id}/proposals`)
+      .set('Authorization', `Bearer ${providerBAccessToken}`)
+      .send({
+        price: 11_500,
+        comment: 'Inclui deslocação e assistência de 7 dias.',
+      })
+      .expect(201);
+
+    const proposalsResponse = await request(app.getHttpServer())
+      .get(`/service-requests/${createdRequest.id}/proposals`)
+      .set('Authorization', `Bearer ${customerAccessToken}`)
+      .expect(200);
+    const proposals = proposalsResponse.body as Array<{ id: string }>;
+    expect(proposals).toHaveLength(2);
+
+    const selectResponse = await request(app.getHttpServer())
+      .post(`/service-requests/${createdRequest.id}/select/${proposalA.id}`)
+      .set('Authorization', `Bearer ${customerAccessToken}`)
+      .send({ depositPercent: 30 })
+      .expect(201);
+    const selection = selectResponse.body as {
+      job: { id: string };
+      paymentIntent: { id: string; status: string };
+    };
+
+    expect(selection.paymentIntent.status).toBe('AWAITING_PAYMENT');
+
+    await request(app.getHttpServer())
+      .patch(`/jobs/${selection.job.id}/status`)
+      .set('Authorization', `Bearer ${providerAAccessToken}`)
+      .send({ status: 'ACCEPTED' })
+      .expect(409);
+
+    const beforePaymentJob = await request(app.getHttpServer())
+      .get(`/jobs/${selection.job.id}`)
+      .set('Authorization', `Bearer ${customerAccessToken}`)
+      .expect(200);
+    const beforePaymentBody = beforePaymentJob.body as {
+      paymentRequired: boolean;
+      providerContact: { email: string | null } | null;
+    };
+    expect(beforePaymentBody.paymentRequired).toBe(true);
+    expect(beforePaymentBody.providerContact).toBeNull();
+
+    const payResponse = await request(app.getHttpServer())
+      .post(`/payments/intents/${selection.paymentIntent.id}/pay`)
+      .set('Authorization', `Bearer ${customerAccessToken}`)
+      .send({ simulate: 'success' })
+      .expect(201);
+    const paidIntent = payResponse.body as { status: string };
+    expect(paidIntent.status).toBe('PAID_PARTIAL');
+
+    const afterPaymentJob = await request(app.getHttpServer())
+      .get(`/jobs/${selection.job.id}`)
+      .set('Authorization', `Bearer ${customerAccessToken}`)
+      .expect(200);
+    const afterPaymentBody = afterPaymentJob.body as {
+      contactUnlocked: boolean;
+      providerContact: { email: string | null } | null;
+    };
+    expect(afterPaymentBody.contactUnlocked).toBe(true);
+    expect(afterPaymentBody.providerContact?.email).toBeTruthy();
+
+    await request(app.getHttpServer())
+      .patch(`/jobs/${selection.job.id}/status`)
+      .set('Authorization', `Bearer ${providerAAccessToken}`)
+      .send({ status: 'ACCEPTED' })
+      .expect(200);
+
+    await request(app.getHttpServer())
+      .patch(`/jobs/${selection.job.id}/status`)
+      .set('Authorization', `Bearer ${providerAAccessToken}`)
+      .send({ status: 'IN_PROGRESS' })
+      .expect(200);
+
+    await request(app.getHttpServer())
+      .patch(`/jobs/${selection.job.id}/status`)
+      .set('Authorization', `Bearer ${providerAAccessToken}`)
+      .send({ status: 'COMPLETED' })
+      .expect(200);
   });
 });
