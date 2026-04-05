@@ -2,7 +2,7 @@
 
 ## Goal
 
-Move Tchuno from direct job creation to a selection-based marketplace flow:
+Use a single selection-based marketplace flow (legacy direct job flow disabled):
 
 1. Customer opens a `ServiceRequest`
 2. Multiple providers submit `Proposal`
@@ -20,6 +20,11 @@ Move Tchuno from direct job creation to a selection-based marketplace flow:
 - `GET /service-requests/:id/proposals`
 - `POST /service-requests/:id/select/:proposalId`
 - `POST /payments/intents/:id/pay`
+
+Deprecated endpoints (blocked with `410 Gone`):
+
+- `POST /jobs`
+- `PATCH /jobs/:id/quote`
 
 ## Business Rules Implemented
 
