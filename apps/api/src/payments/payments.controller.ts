@@ -43,6 +43,10 @@ type AuthenticatedRequest = {
   };
 };
 
+type WebhookRequest = {
+  headers: Record<string, string | string[] | undefined>;
+};
+
 @ApiTags('payments')
 @Controller('payments')
 export class PaymentsController {
@@ -170,8 +174,16 @@ export class PaymentsController {
     @Param('provider', new ParseEnumPipe(PaymentProvider))
     provider: PaymentProvider,
     @Body() dto: PaymentWebhookDto,
+    @Req() req: WebhookRequest,
   ) {
-    return this.paymentsService.handleWebhook(provider, dto);
+    const signatureHeader = req.headers['x-tchuno-signature'];
+    const signature = Array.isArray(signatureHeader)
+      ? signatureHeader[0]
+      : signatureHeader;
+
+    return this.paymentsService.handleWebhook(provider, dto, {
+      signature,
+    });
   }
 
   @Post('transactions/:id/reconcile')

@@ -48,24 +48,12 @@ export function buildJobActionPlan(input: BuildJobActionPlanInput): JobActionPla
   const { actor, job, canReview } = input;
 
   if (actor === "worker") {
-    if (job.status === "REQUESTED" && job.pricingMode === "FIXED_PRICE") {
+    if (job.status === "REQUESTED") {
       return {
         primary: {
           kind: "status",
           label: "Aceitar job",
           nextStatus: "ACCEPTED",
-        },
-      };
-    }
-
-    if (job.status === "REQUESTED" && job.pricingMode === "QUOTE_REQUEST") {
-      return {
-        primary: {
-          kind: "quote",
-          label:
-            typeof job.quotedAmount === "number"
-              ? "Atualizar proposta"
-              : "Enviar proposta",
         },
       };
     }
@@ -95,34 +83,6 @@ export function buildJobActionPlan(input: BuildJobActionPlanInput): JobActionPla
         kind: "none",
         label: "Sem ação disponível neste estado",
       },
-    };
-  }
-
-  if (
-    job.status === "REQUESTED" &&
-    job.pricingMode === "QUOTE_REQUEST" &&
-    typeof job.quotedAmount === "number" &&
-    job.quotedAmount > 0
-  ) {
-    return {
-      primary: {
-        kind: "status",
-        label: "Aceitar proposta",
-        nextStatus: "ACCEPTED",
-        options: {
-          quotedAmount: job.quotedAmount,
-        },
-      },
-      ...(canClientCancel(job.status)
-        ? {
-            secondary: {
-              kind: "status",
-              label: "Cancelar job",
-              nextStatus: "CANCELED",
-              emphasis: "danger",
-            },
-          }
-        : {}),
     };
   }
 

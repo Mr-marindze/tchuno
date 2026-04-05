@@ -166,8 +166,13 @@ describe('Auth and Sessions (e2e)', () => {
 
   afterAll(async () => {
     try {
-      await app.close();
-      await prisma.$disconnect();
+      if (app) {
+        await app.close();
+      }
+
+      if (prisma) {
+        await prisma.$disconnect();
+      }
     } finally {
       const prismaAdmin = new PrismaClient({
         datasources: {
@@ -952,27 +957,46 @@ describe('Auth and Sessions (e2e)', () => {
 
   it('blocks deprecated direct job endpoints', async () => {
     const base = Date.now();
-    const password = 'abc12345';
+    const passwordHash = await bcrypt.hash('abc12345', 12);
 
-    const customerRegister = await request(app.getHttpServer())
-      .post('/auth/register')
-      .send({
+    const customerUser = await prisma.user.create({
+      data: {
         email: `deprecated_customer_${base}@tchuno.local`,
-        password,
         name: 'Deprecated Customer',
-      })
-      .expect(201);
-    const customerAuth = customerRegister.body as AuthPayload;
+        passwordHash,
+        role: 'USER',
+        isActive: true,
+      },
+      select: {
+        id: true,
+        email: true,
+      },
+    });
 
-    const providerRegister = await request(app.getHttpServer())
-      .post('/auth/register')
-      .send({
+    const providerUser = await prisma.user.create({
+      data: {
         email: `deprecated_provider_${base}@tchuno.local`,
-        password,
         name: 'Deprecated Provider',
-      })
-      .expect(201);
-    const providerAuth = providerRegister.body as AuthPayload;
+        passwordHash,
+        role: 'USER',
+        isActive: true,
+      },
+      select: {
+        id: true,
+        email: true,
+      },
+    });
+
+    const jwtService = app.get(JwtService);
+    const secret = process.env.JWT_ACCESS_SECRET ?? 'change-me-access';
+    const customerAccessToken = jwtService.sign(
+      { sub: customerUser.id, email: customerUser.email },
+      { secret, expiresIn: '15m' },
+    );
+    const providerAccessToken = jwtService.sign(
+      { sub: providerUser.id, email: providerUser.email },
+      { secret, expiresIn: '15m' },
+    );
 
     const category = await prisma.category.create({
       data: {
@@ -988,7 +1012,7 @@ describe('Auth and Sessions (e2e)', () => {
 
     await request(app.getHttpServer())
       .put('/worker-profile/me')
-      .set('Authorization', `Bearer ${providerAuth.accessToken}`)
+      .set('Authorization', `Bearer ${providerAccessToken}`)
       .send({
         bio: 'Perfil para testar endpoint legado',
         location: 'Maputo',
@@ -1001,7 +1025,7 @@ describe('Auth and Sessions (e2e)', () => {
 
     await request(app.getHttpServer())
       .post('/jobs')
-      .set('Authorization', `Bearer ${customerAuth.accessToken}`)
+      .set('Authorization', `Bearer ${customerAccessToken}`)
       .send({
         workerProfileId: 'legacy-worker-id',
         categoryId: category.id,
@@ -1013,7 +1037,7 @@ describe('Auth and Sessions (e2e)', () => {
 
     await request(app.getHttpServer())
       .patch('/jobs/legacy-job-id/quote')
-      .set('Authorization', `Bearer ${providerAuth.accessToken}`)
+      .set('Authorization', `Bearer ${providerAccessToken}`)
       .send({
         quotedAmount: 2500,
       })

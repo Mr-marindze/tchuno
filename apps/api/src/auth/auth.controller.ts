@@ -43,6 +43,13 @@ import { ReauthService } from './reauth.service';
 import { SessionClientInfo } from './types';
 import { AdminSubrole } from '@prisma/client';
 
+const registerThrottleLimitRaw = Number(
+  process.env.AUTH_REGISTER_THROTTLE_LIMIT,
+);
+const registerThrottleLimit = Number.isFinite(registerThrottleLimitRaw)
+  ? Math.max(1, Math.trunc(registerThrottleLimitRaw))
+  : 10;
+
 type AuthenticatedRequest = {
   user: {
     sub: string;
@@ -64,7 +71,7 @@ export class AuthController {
   ) {}
 
   @Post('register')
-  @Throttle({ default: { limit: 10, ttl: 60_000 } })
+  @Throttle({ default: { limit: registerThrottleLimit, ttl: 60_000 } })
   @ApiOperation({ summary: 'Register a new user' })
   @ApiCreatedResponse({ type: AuthResponseDto })
   @ApiBadRequestResponse({ type: ErrorResponseDto })

@@ -19,7 +19,7 @@
     "test:watch": "jest --watch",
     "test:cov": "yarn prisma:generate && jest --coverage",
     "test:debug": "node --inspect-brk -r tsconfig-paths/register -r ts-node/register node_modules/.bin/jest --runInBand",
-    "test:e2e": "yarn prisma:generate && jest --config ./test/jest-e2e.json"
+    "test:e2e": "THROTTLE_LIMIT=10000 AUTH_REGISTER_THROTTLE_LIMIT=10000 yarn prisma:generate && jest --config ./test/jest-e2e.json"
   },
   "dependencies": {
     "@nestjs/common": "^11.0.1",

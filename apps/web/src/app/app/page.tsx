@@ -1,10 +1,5 @@
-import { RouteGuard } from "@/components/access/route-guard";
-import { HomeDashboardView } from "@/components/dashboard/views/home-dashboard-view";
+import { redirect } from "next/navigation";
 
 export default function CustomerAppHomePage() {
-  return (
-    <RouteGuard requiredAccess="customer">
-      <HomeDashboardView />
-    </RouteGuard>
-  );
+  redirect("/app/pedidos");
 }

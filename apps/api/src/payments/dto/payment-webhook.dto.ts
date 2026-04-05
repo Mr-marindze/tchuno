@@ -1,10 +1,4 @@
-import {
-  IsBoolean,
-  IsObject,
-  IsOptional,
-  IsString,
-  MaxLength,
-} from 'class-validator';
+import { IsObject, IsOptional, IsString, MaxLength } from 'class-validator';
 
 export class PaymentWebhookDto {
   @IsOptional()
@@ -26,10 +20,6 @@ export class PaymentWebhookDto {
   @IsString()
   @MaxLength(32)
   status?: string;
-
-  @IsOptional()
-  @IsBoolean()
-  signatureValid?: boolean;
 
   @IsOptional()
   @IsObject()

@@ -23,13 +23,27 @@ import { ServiceRequestsModule } from './service-requests/service-requests.modul
 import { TrackingModule } from './tracking/tracking.module';
 import { WorkerProfileModule } from './worker-profile/worker-profile.module';
 
+const defaultThrottleTtlMs = 60_000;
+const defaultThrottleLimit = 120;
+
+const resolvedThrottleTtlMs = Number(process.env.THROTTLE_TTL_MS);
+const resolvedThrottleLimit = Number(process.env.THROTTLE_LIMIT);
+
+const throttlerTtlMs = Number.isFinite(resolvedThrottleTtlMs)
+  ? Math.max(1000, Math.trunc(resolvedThrottleTtlMs))
+  : defaultThrottleTtlMs;
+
+const throttlerLimit = Number.isFinite(resolvedThrottleLimit)
+  ? Math.max(1, Math.trunc(resolvedThrottleLimit))
+  : defaultThrottleLimit;
+
 @Module({
   imports: [
     ConfigModule.forRoot({ isGlobal: true }),
     ThrottlerModule.forRoot([
       {
-        ttl: 60_000,
-        limit: 120,
+        ttl: throttlerTtlMs,
+        limit: throttlerLimit,
       },
     ]),
     AdminOpsModule,

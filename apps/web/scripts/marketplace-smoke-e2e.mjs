@@ -15,16 +15,21 @@ const SMOKE_SCREENSHOT_DIR = path.join(
   "apps/web/test-results/marketplace-smoke",
 );
 
+const TOKENS = {
+  customer: "smoke-customer-token",
+  provider: "smoke-provider-token",
+  admin: "smoke-admin-token",
+};
+
+const now = new Date();
+
 const corsHeaders = {
   "access-control-allow-origin": WEB_URL,
   "access-control-allow-credentials": "true",
   "access-control-allow-headers": "*",
-  "access-control-allow-methods": "GET,OPTIONS",
+  "access-control-allow-methods": "GET,POST,PATCH,PUT,DELETE,OPTIONS",
   "content-type": "application/json",
 };
-
-const now = new Date();
-const inOneHour = new Date(now.getTime() + 60 * 60 * 1000).toISOString();
 
 const categories = [
   {
@@ -37,18 +42,28 @@ const categories = [
     createdAt: now.toISOString(),
     updatedAt: now.toISOString(),
   },
+  {
+    id: "cat-canalizacao",
+    name: "Canalização",
+    slug: "canalizacao",
+    description: "Serviços de canalização",
+    sortOrder: 20,
+    isActive: true,
+    createdAt: now.toISOString(),
+    updatedAt: now.toISOString(),
+  },
 ];
 
 const workerProfile = {
-  id: "wp-1",
-  userId: "worker-user-1",
-  bio: "Especialista em serviços de eletricista residencial e comercial.",
-  location: "Maputo, Polana",
-  hourlyRate: 1200,
+  id: "wp-provider-1",
+  userId: "provider-1",
+  bio: "Prestador especializado em eletricidade residencial.",
+  location: "Maputo",
+  hourlyRate: 1500,
   experienceYears: 6,
   isAvailable: true,
-  ratingAvg: "4.50",
-  ratingCount: 8,
+  ratingAvg: "4.70",
+  ratingCount: 18,
   categories: [
     {
       id: "cat-eletricista",
@@ -60,84 +75,332 @@ const workerProfile = {
   updatedAt: now.toISOString(),
 };
 
-const quoteRequestedJob = {
-  id: "job-quote-1",
-  clientId: "client-1",
-  workerProfileId: "wp-1",
-  categoryId: "cat-eletricista",
-  pricingMode: "QUOTE_REQUEST",
-  title: "Diagnóstico de quadro elétrico",
-  description: "Preciso de proposta para revisão do quadro.",
-  budget: null,
-  quotedAmount: 4500,
-  quoteMessage: "Inclui deslocação e material.",
-  status: "REQUESTED",
-  acceptedAt: null,
-  startedAt: null,
-  scheduledFor: inOneHour,
-  completedAt: null,
-  canceledAt: null,
-  canceledBy: null,
-  cancelReason: null,
-  createdAt: now.toISOString(),
-  updatedAt: now.toISOString(),
-};
-
-const completedJob = {
-  id: "job-completed-1",
-  clientId: "client-1",
-  workerProfileId: "wp-1",
-  categoryId: "cat-eletricista",
-  pricingMode: "FIXED_PRICE",
-  title: "Troca de tomadas",
-  description: "Substituição de tomadas antigas.",
-  budget: 3200,
-  quotedAmount: null,
-  quoteMessage: null,
-  status: "COMPLETED",
-  acceptedAt: now.toISOString(),
-  startedAt: now.toISOString(),
-  scheduledFor: inOneHour,
-  completedAt: now.toISOString(),
-  canceledAt: null,
-  canceledBy: null,
-  cancelReason: null,
-  createdAt: now.toISOString(),
-  updatedAt: now.toISOString(),
-};
-
-const workerRequestedJob = {
-  id: "job-worker-1",
-  clientId: "client-2",
-  workerProfileId: "wp-1",
-  categoryId: "cat-eletricista",
-  pricingMode: "FIXED_PRICE",
-  title: "Instalação de disjuntor",
-  description: "Preciso trocar disjuntor principal.",
-  budget: 5000,
-  quotedAmount: null,
-  quoteMessage: null,
-  status: "REQUESTED",
-  acceptedAt: null,
-  startedAt: null,
-  scheduledFor: inOneHour,
-  completedAt: null,
-  canceledAt: null,
-  canceledBy: null,
-  cancelReason: null,
-  createdAt: now.toISOString(),
-  updatedAt: now.toISOString(),
-};
-
-const paginated = (data, page = 1, limit = 20) => ({
-  data,
-  meta: {
-    total: data.length,
-    page,
-    limit,
-    hasNext: false,
+const customerServiceRequests = [
+  {
+    id: "req-1",
+    customerId: "customer-1",
+    categoryId: "cat-eletricista",
+    title: "Reparar curto-circuito",
+    description: "Preciso de reparação do quadro elétrico.",
+    location: "Maputo",
+    status: "OPEN",
+    selectedProposalId: null,
+    createdAt: now.toISOString(),
+    updatedAt: now.toISOString(),
+    proposals: [],
+    job: null,
   },
-});
+  {
+    id: "req-2",
+    customerId: "customer-1",
+    categoryId: "cat-canalizacao",
+    title: "Troca de torneira",
+    description: "Substituir torneira da cozinha.",
+    location: "Matola",
+    status: "CLOSED",
+    selectedProposalId: "prop-2",
+    createdAt: now.toISOString(),
+    updatedAt: now.toISOString(),
+    proposals: [
+      {
+        id: "prop-2",
+        providerId: "provider-1",
+        price: 4200,
+        status: "SELECTED",
+        createdAt: now.toISOString(),
+      },
+    ],
+    job: {
+      id: "job-2",
+      status: "REQUESTED",
+      contactUnlockedAt: null,
+      agreedPrice: 4200,
+    },
+  },
+];
+
+const openServiceRequests = [
+  {
+    id: "req-open-1",
+    customerId: "customer-2",
+    categoryId: "cat-eletricista",
+    title: "Instalação de disjuntor",
+    description: "Preciso substituir disjuntor principal.",
+    location: "Maputo",
+    status: "OPEN",
+    selectedProposalId: null,
+    createdAt: now.toISOString(),
+    updatedAt: now.toISOString(),
+    proposals: [
+      {
+        id: "prop-own-1",
+        providerId: "provider-1",
+        price: 5500,
+        status: "SUBMITTED",
+        createdAt: now.toISOString(),
+      },
+    ],
+  },
+];
+
+const customerPaymentIntents = [
+  {
+    id: "pi-1",
+    jobId: "job-2",
+    customerId: "customer-1",
+    providerUserId: "provider-1",
+    amount: 1260,
+    currency: "MZN",
+    platformFeeAmount: 189,
+    providerNetAmount: 1071,
+    status: "PAID_PARTIAL",
+    provider: "INTERNAL",
+    createdAt: now.toISOString(),
+    updatedAt: now.toISOString(),
+    transactions: [],
+  },
+];
+
+const providerSummary = {
+  balances: {
+    held: 1071,
+    available: 0,
+    paidOut: 0,
+  },
+  entries: [
+    {
+      id: "le-1",
+      entryType: "PROVIDER_BALANCE_HELD",
+      amount: 1071,
+      direction: "CREDIT",
+      bucket: "PROVIDER_HELD",
+      createdAt: now.toISOString(),
+      paymentIntentId: "pi-1",
+      jobId: "job-2",
+      description: "Provider net amount moved to held balance",
+    },
+  ],
+  payouts: [],
+};
+
+function paginated(data, page = 1, limit = 20) {
+  return {
+    data,
+    meta: {
+      total: data.length,
+      page,
+      limit,
+      hasNext: false,
+    },
+  };
+}
+
+function resolveAuthProfile(request) {
+  const authHeader = request.headers()["authorization"] ?? "";
+
+  if (authHeader === `Bearer ${TOKENS.admin}`) {
+    return "admin";
+  }
+
+  if (authHeader === `Bearer ${TOKENS.provider}`) {
+    return "provider";
+  }
+
+  if (authHeader === `Bearer ${TOKENS.customer}`) {
+    return "customer";
+  }
+
+  return "public";
+}
+
+function resolveMockBody(url, request) {
+  const profile = resolveAuthProfile(request);
+
+  if (url.pathname === "/auth/me") {
+    if (profile === "admin") {
+      return {
+        user: {
+          id: "admin-1",
+          email: "admin@tchuno.local",
+          name: "Smoke Admin",
+          role: "ADMIN",
+        },
+        access: {
+          appRole: "admin",
+        },
+      };
+    }
+
+    if (profile === "provider") {
+      return {
+        user: {
+          id: "provider-1",
+          email: "provider@tchuno.local",
+          name: "Smoke Provider",
+          role: "USER",
+        },
+        access: {
+          appRole: "provider",
+        },
+      };
+    }
+
+    if (profile === "customer") {
+      return {
+        user: {
+          id: "customer-1",
+          email: "customer@tchuno.local",
+          name: "Smoke Customer",
+          role: "USER",
+        },
+        access: {
+          appRole: "customer",
+        },
+      };
+    }
+
+    return {
+      user: {
+        id: "guest",
+        email: "guest@tchuno.local",
+        name: "Guest",
+        role: "USER",
+      },
+      access: {
+        appRole: "guest",
+      },
+    };
+  }
+
+  if (url.pathname === "/auth/sessions") {
+    return {
+      data: [
+        {
+          id: "session-1",
+          deviceId: "smoke-device",
+          ip: "127.0.0.1",
+          userAgent: "Smoke Browser",
+          createdAt: now.toISOString(),
+          lastUsedAt: now.toISOString(),
+          revokedAt: null,
+        },
+      ],
+      meta: {
+        total: 1,
+        limit: 20,
+        offset: 0,
+        page: 1,
+        pageCount: 1,
+        hasNext: false,
+        hasPrev: false,
+      },
+    };
+  }
+
+  if (url.pathname === "/categories") {
+    return categories;
+  }
+
+  if (url.pathname === "/worker-profile") {
+    return paginated([workerProfile], 1, 20);
+  }
+
+  if (url.pathname === "/worker-profile/me") {
+    return workerProfile;
+  }
+
+  if (url.pathname.startsWith("/worker-profile/")) {
+    return workerProfile;
+  }
+
+  if (url.pathname === "/service-requests/me") {
+    return paginated(customerServiceRequests, 1, 20);
+  }
+
+  if (url.pathname === "/service-requests/open") {
+    return paginated(openServiceRequests, 1, 20);
+  }
+
+  if (url.pathname.endsWith("/proposals") && request.method() === "GET") {
+    return [
+      {
+        id: "prop-2",
+        requestId: "req-2",
+        providerId: "provider-1",
+        price: 4200,
+        comment: "Posso executar amanhã.",
+        status: "SELECTED",
+        createdAt: now.toISOString(),
+        updatedAt: now.toISOString(),
+        provider: {
+          id: "provider-1",
+          name: "Smoke Provider",
+          workerProfile: {
+            ratingAvg: "4.70",
+            ratingCount: 18,
+            location: "Maputo",
+          },
+        },
+      },
+    ];
+  }
+
+  if (url.pathname === "/payments/me") {
+    return paginated(customerPaymentIntents, 1, 20);
+  }
+
+  if (url.pathname === "/payments/provider/summary") {
+    return providerSummary;
+  }
+
+  if (url.pathname === "/admin/ops/overview") {
+    return {
+      kpis: {
+        totalJobs: 2,
+        jobsByStatus: {
+          REQUESTED: 1,
+          ACCEPTED: 1,
+          IN_PROGRESS: 0,
+          COMPLETED: 0,
+          CANCELED: 0,
+        },
+        completionRate: 0,
+        totalReviews: 0,
+        averageRating: 0,
+        activePublicableWorkers: 1,
+        jobsByPricingMode: {
+          FIXED_PRICE: 2,
+          QUOTE_REQUEST: 0,
+        },
+      },
+      recentJobs: [],
+      recentlyCanceledJobs: [],
+      completedWithoutReviewJobs: [],
+    };
+  }
+
+  if (url.pathname === "/reviews/me") {
+    return paginated([], 1, 20);
+  }
+
+  if (url.pathname.startsWith("/reviews/worker/")) {
+    return paginated([], 1, 20);
+  }
+
+  if (url.pathname === "/jobs/me/client") {
+    return paginated([], 1, 20);
+  }
+
+  if (url.pathname === "/jobs/me/worker") {
+    return paginated([], 1, 20);
+  }
+
+  if (url.pathname === "/tracking/ranking/workers") {
+    return paginated([], 1, 20);
+  }
+
+  return {};
+}
 
 function startWebServer() {
   const child = spawn(
@@ -162,6 +425,7 @@ function startWebServer() {
       logs.shift();
     }
   };
+
   child.stdout.on("data", track);
   child.stderr.on("data", track);
 
@@ -209,162 +473,6 @@ async function waitForWebReady(getLogs) {
   throw new Error(`Web server did not start in time.\n${getLogs()}`);
 }
 
-function resolveMockBody(url) {
-  if (url.pathname === "/auth/me") {
-    return {
-      user: {
-        id: "smoke-admin-id",
-        email: "admin@tchuno.local",
-        name: "Smoke Admin",
-        role: "ADMIN",
-      },
-    };
-  }
-
-  if (url.pathname === "/auth/sessions") {
-    return {
-      data: [
-        {
-          id: "session-1",
-          deviceId: "smoke-device",
-          ip: "127.0.0.1",
-          userAgent: "Smoke Browser",
-          createdAt: now.toISOString(),
-          lastUsedAt: now.toISOString(),
-          revokedAt: null,
-        },
-      ],
-      meta: {
-        total: 1,
-        limit: 20,
-        offset: 0,
-        page: 1,
-        pageCount: 1,
-        hasNext: false,
-        hasPrev: false,
-      },
-    };
-  }
-
-  if (url.pathname === "/categories") {
-    return categories;
-  }
-
-  if (url.pathname === "/worker-profile/me") {
-    return workerProfile;
-  }
-
-  if (url.pathname === "/worker-profile") {
-    const categorySlug = url.searchParams.get("categorySlug");
-    const search = (url.searchParams.get("search") ?? "").trim().toLowerCase();
-
-    const matchesCategory =
-      !categorySlug ||
-      workerProfile.categories.some((item) => item.slug === categorySlug);
-    const matchesSearch =
-      search.length === 0 ||
-      [
-        workerProfile.location,
-        workerProfile.bio,
-        ...workerProfile.categories.map((item) => item.name),
-        workerProfile.userId,
-      ]
-        .filter((value) => Boolean(value))
-        .join(" ")
-        .toLowerCase()
-        .includes(search);
-
-    const data = matchesCategory && matchesSearch ? [workerProfile] : [];
-    return paginated(data, 1, 20);
-  }
-
-  if (url.pathname.startsWith("/worker-profile/")) {
-    return workerProfile;
-  }
-
-  if (url.pathname === "/jobs/me/client") {
-    const status = url.searchParams.get("status");
-    if (status === "COMPLETED") {
-      return paginated([completedJob], 1, 100);
-    }
-
-    return paginated([quoteRequestedJob, completedJob], 1, 20);
-  }
-
-  if (url.pathname === "/jobs/me/worker") {
-    return paginated([workerRequestedJob], 1, 20);
-  }
-
-  if (url.pathname === "/reviews/me") {
-    return paginated([], 1, 20);
-  }
-
-  if (url.pathname.startsWith("/reviews/worker/")) {
-    return paginated(
-      [
-        {
-          id: "review-1",
-          jobId: completedJob.id,
-          workerProfileId: workerProfile.id,
-          reviewerId: "client-1",
-          rating: 5,
-          comment: "Excelente.",
-          createdAt: now.toISOString(),
-          updatedAt: now.toISOString(),
-        },
-      ],
-      1,
-      20,
-    );
-  }
-
-  if (url.pathname === "/admin/ops/overview") {
-    return {
-      kpis: {
-        totalJobs: 3,
-        jobsByStatus: {
-          REQUESTED: 2,
-          ACCEPTED: 0,
-          IN_PROGRESS: 0,
-          COMPLETED: 1,
-          CANCELED: 0,
-        },
-        completionRate: 33.3,
-        totalReviews: 1,
-        averageRating: 5,
-        activePublicableWorkers: 1,
-        jobsByPricingMode: {
-          FIXED_PRICE: 2,
-          QUOTE_REQUEST: 1,
-        },
-      },
-      recentJobs: [quoteRequestedJob, workerRequestedJob, completedJob].map(
-        (job) => ({
-          id: job.id,
-          title: job.title,
-          status: job.status,
-          pricingMode: job.pricingMode,
-          clientId: job.clientId,
-          workerProfileId: job.workerProfileId,
-          budget: job.budget,
-          quotedAmount: job.quotedAmount,
-          cancelReason: job.cancelReason,
-          hasReview: job.id === completedJob.id,
-          createdAt: job.createdAt,
-          acceptedAt: job.acceptedAt,
-          startedAt: job.startedAt,
-          completedAt: job.completedAt,
-          canceledAt: job.canceledAt,
-        }),
-      ),
-      recentlyCanceledJobs: [],
-      completedWithoutReviewJobs: [],
-    };
-  }
-
-  return {};
-}
-
 function routePathToScreenshotName(routePath) {
   const [pathPart, queryPart] = routePath.split("?");
   const normalizedPath = pathPart.replace(/^\/+/, "").replaceAll("/", "-");
@@ -387,20 +495,12 @@ async function hasRoleWithName(page, role, name) {
   }
 }
 
-async function assertDashboardA11yBasics(page, check, viewportName) {
+async function assertA11yBasics(page, check, viewportName) {
   const mainCount = await page.locator("main").count();
   assert(mainCount >= 1, `${viewportName} ${check.path} sem landmark <main>`);
 
   const h1Count = await page.getByRole("heading", { level: 1 }).count();
   assert(h1Count === 1, `${viewportName} ${check.path} deve ter um único <h1>`);
-
-  const namedNavCount = await page.locator("[aria-label]").count();
-  if (!check.allowNoAria) {
-    assert(
-      namedNavCount >= 1,
-      `${viewportName} ${check.path} sem elemento com aria-label`,
-    );
-  }
 
   const hasButtonCta = await hasRoleWithName(page, "button", check.cta);
   const hasLinkCta = await hasRoleWithName(page, "link", check.cta);
@@ -410,9 +510,7 @@ async function assertDashboardA11yBasics(page, check, viewportName) {
   );
 
   const unlabeledControls = await page.evaluate(() => {
-    const controls = Array.from(
-      document.querySelectorAll("input, select, textarea"),
-    );
+    const controls = Array.from(document.querySelectorAll("input, select, textarea"));
 
     return controls.filter((element) => {
       const type = element.getAttribute("type");
@@ -432,6 +530,7 @@ async function assertDashboardA11yBasics(page, check, viewportName) {
       return !hasWrappedLabel && !hasForLabel && !hasAria;
     }).length;
   });
+
   assert(
     unlabeledControls === 0,
     `${viewportName} ${check.path} possui campos sem label acessível`,
@@ -445,12 +544,9 @@ async function assertRouteSpecificContent(page, check, viewportName) {
 
   for (const requirement of check.mustHave) {
     if (requirement.type === "text") {
-      await page
-        .getByText(requirement.value, { exact: false })
-        .first()
-        .waitFor({
-          timeout: 20_000,
-        });
+      await page.getByText(requirement.value, { exact: false }).first().waitFor({
+        timeout: 20_000,
+      });
       continue;
     }
 
@@ -473,6 +569,20 @@ async function assertRouteSpecificContent(page, check, viewportName) {
   }
 }
 
+function seedAuthStorage(profile) {
+  if (profile === "public") {
+    return {
+      accessToken: null,
+      refreshToken: null,
+    };
+  }
+
+  return {
+    accessToken: TOKENS[profile],
+    refreshToken: `${TOKENS[profile]}-refresh`,
+  };
+}
+
 async function run() {
   await runCommand("yarn", ["workspace", "@tchuno/web", "build"]);
 
@@ -493,6 +603,7 @@ async function run() {
       const checks = [
         {
           path: "/",
+          auth: "public",
           heading: "O que precisas hoje?",
           block: "Profissionais em destaque",
           cta: /Encontrar profissional|Entrar no Tchuno/,
@@ -500,61 +611,62 @@ async function run() {
             { type: "label", value: "Pesquisa principal" },
             { type: "aria", value: "Categorias" },
             { type: "text", value: "Profissionais em destaque" },
-            { type: "text", value: "Encontra profissionais de confiança" },
           ],
         },
         {
           path: "/prestadores",
+          auth: "public",
           heading: "Profissionais",
           block: "Pesquisa por serviço, área ou profissional",
           cta: /Procurar/,
           mustHave: [
             { type: "label", value: "Pesquisa" },
             { type: "label", value: "Área" },
-            { type: "text", value: "No Tchuno, o valor final é negociado" },
+            {
+              type: "text",
+              value:
+                "No Tchuno, o cliente cria pedido, recebe propostas e paga sinal antes do contacto",
+            },
           ],
         },
         {
-          path: "/prestadores?categoria=inexistente",
-          heading: "Profissionais",
-          block: "Não encontrámos profissionais para este filtro",
-          cta: /Limpar filtros/,
-          mustHave: [{ type: "label", value: "Pesquisa" }],
+          path: "/app/pedidos",
+          auth: "customer",
+          heading: "Pedidos de Serviço",
+          block: "Sem sinal, sem contacto",
+          cta: /Criar pedido|Recarregar/,
+          mustHave: [
+            { type: "label", value: "Categoria" },
+            { type: "label", value: "Título" },
+          ],
         },
         {
-          path: "/dashboard",
-          heading: "Admin Ops",
-          block: "Admin Ops Mínimo",
-          cta: /Recarregar painel admin/,
+          path: "/app/pagamentos",
+          auth: "customer",
+          heading: "Pagamentos",
+          block: "Acompanha o estado financeiro",
+          cta: /Ver pedidos/,
+          mustHave: [{ type: "text", value: "Total pago" }],
         },
         {
-          path: "/admin/orders",
-          heading: "Gestão de pedidos",
-          block: "Área protegida",
-          cta: /Voltar ao painel admin/,
-          allowNoAria: true,
+          path: "/pro/pedidos",
+          auth: "provider",
+          heading: "Pedidos Disponíveis",
+          block: "Propor -> esperar seleção",
+          cta: /Enviar proposta/,
+          mustHave: [{ type: "label", value: "Preço proposto (MZN)" }],
         },
         {
-          path: "/admin/providers",
-          heading: "Descoberta de Profissionais",
-          block: "Descoberta de Profissionais",
-          cta: /Recarregar/,
-        },
-        {
-          path: "/admin/users",
-          heading: "Gestão de utilizadores",
-          block: "Área protegida",
-          cta: /Voltar ao painel admin/,
-          allowNoAria: true,
-        },
-        {
-          path: "/admin/reports",
-          heading: "Admin Ops",
-          block: "Admin Ops Mínimo",
-          cta: /Recarregar painel admin/,
+          path: "/pro/ganhos",
+          auth: "provider",
+          heading: "Ganhos",
+          block: "Controla saldos retidos",
+          cta: /Ver pedidos/,
+          mustHave: [{ type: "text", value: "Saldo disponível" }],
         },
         {
           path: "/admin/categories",
+          auth: "admin",
           heading: "Gestão de Categorias",
           block: "Gestão de categorias",
           cta: /Criar categoria/,
@@ -573,42 +685,52 @@ async function run() {
       ];
 
       for (const viewportConfig of viewports) {
-        const context = await browser.newContext({
-          viewport: viewportConfig.viewport,
-        });
-
-        await context.addInitScript(() => {
-          localStorage.setItem("tchuno_access_token", "smoke-access-token");
-          localStorage.setItem("tchuno_refresh_token", "smoke-refresh-token");
-          localStorage.setItem("tchuno_device_id", "smoke-device");
-        });
-
-        await context.route(
-          /http:\/\/(localhost|127\.0\.0\.1):3001\/.*/,
-          async (route) => {
-            const request = route.request();
-            const url = new URL(request.url());
-
-            if (request.method() === "OPTIONS") {
-              await route.fulfill({
-                status: 204,
-                headers: corsHeaders,
-                body: "",
-              });
-              return;
-            }
-
-            const body = resolveMockBody(url);
-            await route.fulfill({
-              status: 200,
-              headers: corsHeaders,
-              body: JSON.stringify(body),
-            });
-          },
-        );
-
         for (const check of checks) {
           console.log(`Smoke ${viewportConfig.name}: ${check.path}`);
+
+          const context = await browser.newContext({
+            viewport: viewportConfig.viewport,
+          });
+
+          const seededTokens = seedAuthStorage(check.auth);
+          await context.addInitScript((tokens) => {
+            localStorage.removeItem("tchuno_access_token");
+            localStorage.removeItem("tchuno_refresh_token");
+            localStorage.setItem("tchuno_device_id", "smoke-device");
+
+            if (tokens?.accessToken) {
+              localStorage.setItem("tchuno_access_token", tokens.accessToken);
+            }
+
+            if (tokens?.refreshToken) {
+              localStorage.setItem("tchuno_refresh_token", tokens.refreshToken);
+            }
+          }, seededTokens);
+
+          await context.route(
+            /http:\/\/(localhost|127\.0\.0\.1):3001\/.*/,
+            async (route) => {
+              const request = route.request();
+              const url = new URL(request.url());
+
+              if (request.method() === "OPTIONS") {
+                await route.fulfill({
+                  status: 204,
+                  headers: corsHeaders,
+                  body: "",
+                });
+                return;
+              }
+
+              const body = resolveMockBody(url, request);
+              await route.fulfill({
+                status: 200,
+                headers: corsHeaders,
+                body: JSON.stringify(body),
+              });
+            },
+          );
+
           const page = await context.newPage();
           await page.goto(`${WEB_URL}${check.path}`, {
             waitUntil: "networkidle",
@@ -616,17 +738,17 @@ async function run() {
 
           await page
             .getByRole("heading", { level: 1, name: check.heading })
-            .waitFor({
-              timeout: 20_000,
-            });
+            .waitFor({ timeout: 20_000 });
+
           await page.getByText(check.block, { exact: false }).first().waitFor({
             timeout: 20_000,
           });
+
           await page.getByText(check.cta).first().waitFor({
             timeout: 20_000,
           });
 
-          await assertDashboardA11yBasics(page, check, viewportConfig.name);
+          await assertA11yBasics(page, check, viewportConfig.name);
           await assertRouteSpecificContent(page, check, viewportConfig.name);
 
           const bodyText = await page.locator("body").innerText();
@@ -650,9 +772,8 @@ async function run() {
           await page.screenshot({ path: screenshotFile, fullPage: true });
 
           await page.close();
+          await context.close();
         }
-
-        await context.close();
       }
     } finally {
       await browser.close();

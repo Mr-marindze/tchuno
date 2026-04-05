@@ -17,7 +17,7 @@ import {
   RefundStatus,
   TransactionStatus,
 } from '@prisma/client';
-import { randomUUID } from 'crypto';
+import { createHmac, timingSafeEqual } from 'crypto';
 import {
   buildPaginatedResponse,
   resolvePagination,
@@ -512,13 +512,38 @@ export class PaymentsService {
     };
   }
 
-  async handleWebhook(provider: PaymentProvider, dto: PaymentWebhookDto) {
+  async handleWebhook(
+    provider: PaymentProvider,
+    dto: PaymentWebhookDto,
+    input?: {
+      signature?: string;
+    },
+  ) {
+    const externalEventId = dto.externalEventId?.trim();
+    const signatureValid = this.verifyWebhookSignature({
+      provider,
+      dto,
+      signature: input?.signature,
+    });
+
+    if (provider !== PaymentProvider.INTERNAL) {
+      if (!externalEventId) {
+        throw new BadRequestException(
+          'externalEventId is required for external payment providers',
+        );
+      }
+
+      if (!signatureValid) {
+        throw new ForbiddenException('Invalid webhook signature');
+      }
+    }
+
     if (dto.externalEventId) {
       const existing = await this.prisma.paymentEvent.findUnique({
         where: {
           provider_externalEventId: {
             provider,
-            externalEventId: dto.externalEventId,
+            externalEventId,
           },
         },
       });
@@ -536,10 +561,10 @@ export class PaymentsService {
       data: {
         provider,
         eventType: dto.status ?? 'provider.webhook',
-        externalEventId: dto.externalEventId,
+        externalEventId,
         providerReference: dto.providerReference,
         payload: (dto.payload as Prisma.InputJsonValue | undefined) ?? {},
-        signatureValid: dto.signatureValid ?? false,
+        signatureValid,
       },
     });
 
@@ -1068,15 +1093,30 @@ export class PaymentsService {
       throw new NotFoundException('Payout not found');
     }
 
-    if (!['PENDING', 'APPROVED', 'PROCESSING'].includes(payout.status)) {
-      throw new ConflictException(
-        'Payout cannot be processed in current status',
-      );
+    if (payout.status !== 'APPROVED') {
+      throw new ConflictException('Only approved payouts can be processed');
+    }
+
+    const idempotencyKey = `payout-${payout.id}`;
+    const existingTransaction = await this.prisma.paymentTransaction.findUnique(
+      {
+        where: {
+          idempotencyKey,
+        },
+      },
+    );
+
+    if (existingTransaction) {
+      return this.prisma.payout.findUniqueOrThrow({
+        where: {
+          id: payout.id,
+        },
+      });
     }
 
     const gateway = this.gatewayRegistry.getAdapter(payout.provider);
     const gatewayResult = await gateway.requestPayout({
-      idempotencyKey: `payout-${payout.id}`,
+      idempotencyKey,
       amount: payout.amount,
       currency: payout.currency,
       providerUserId: payout.providerUserId,
@@ -1100,6 +1140,24 @@ export class PaymentsService {
         throw new NotFoundException('Payout not found');
       }
 
+      if (payoutRecord.status !== 'APPROVED') {
+        throw new ConflictException('Only approved payouts can be processed');
+      }
+
+      const duplicateTransaction = await tx.paymentTransaction.findUnique({
+        where: {
+          idempotencyKey,
+        },
+      });
+
+      if (duplicateTransaction) {
+        return tx.payout.findUniqueOrThrow({
+          where: {
+            id: payoutRecord.id,
+          },
+        });
+      }
+
       const transaction = await tx.paymentTransaction.create({
         data: {
           paymentIntentId: payoutRecord.paymentIntentId,
@@ -1108,7 +1166,7 @@ export class PaymentsService {
           provider: payoutRecord.provider,
           providerReference:
             dto?.providerReference?.trim() || gatewayResult.providerReference,
-          idempotencyKey: `payout-${payoutRecord.id}-${randomUUID()}`,
+          idempotencyKey,
           requestedAmount: payoutRecord.amount,
           confirmedAmount:
             transactionStatus === 'SUCCEEDED' ? payoutRecord.amount : null,
@@ -1352,6 +1410,69 @@ export class PaymentsService {
     }
 
     return 'PENDING_CONFIRMATION';
+  }
+
+  private verifyWebhookSignature(input: {
+    provider: PaymentProvider;
+    dto: PaymentWebhookDto;
+    signature?: string;
+  }): boolean {
+    if (input.provider === PaymentProvider.INTERNAL) {
+      return true;
+    }
+
+    const secret = this.resolveWebhookSecret(input.provider);
+    if (!secret) {
+      return false;
+    }
+
+    const provided = input.signature?.trim();
+    if (!provided) {
+      return false;
+    }
+
+    const normalizedProvided = provided.startsWith('sha256=')
+      ? provided.slice('sha256='.length)
+      : provided;
+
+    const payload = this.buildWebhookSignaturePayload(
+      input.provider,
+      input.dto,
+    );
+    const expected = createHmac('sha256', secret).update(payload).digest('hex');
+
+    const providedBuffer = Buffer.from(normalizedProvided, 'utf8');
+    const expectedBuffer = Buffer.from(expected, 'utf8');
+
+    if (providedBuffer.length !== expectedBuffer.length) {
+      return false;
+    }
+
+    return timingSafeEqual(providedBuffer, expectedBuffer);
+  }
+
+  private buildWebhookSignaturePayload(
+    provider: PaymentProvider,
+    dto: PaymentWebhookDto,
+  ): string {
+    return JSON.stringify({
+      provider,
+      externalEventId: dto.externalEventId ?? null,
+      providerReference: dto.providerReference ?? null,
+      status: dto.status ?? null,
+      payload: dto.payload ?? {},
+    });
+  }
+
+  private resolveWebhookSecret(provider: PaymentProvider): string | null {
+    const providerSpecific =
+      process.env[`PAYMENT_WEBHOOK_SECRET_${provider}`]?.trim() ?? '';
+    if (providerSpecific.length > 0) {
+      return providerSpecific;
+    }
+
+    const fallback = process.env.PAYMENT_WEBHOOK_SECRET?.trim() ?? '';
+    return fallback.length > 0 ? fallback : null;
   }
 
   private parseGatewayStatus(status: string): GatewayOperationStatus {
