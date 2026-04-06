@@ -54,10 +54,10 @@ export type WorkerComparisonItem = {
 
 export function getWorkerPriceLabel(hourlyRate: number | null): string {
   if (typeof hourlyRate !== "number") {
-    return "Valor negociado com o profissional";
+    return "Recebe propostas no pedido";
   }
 
-  return `Referência ${hourlyRate.toLocaleString("pt-MZ")} MZN/h (negociável)`;
+  return `Referência ${hourlyRate.toLocaleString("pt-MZ")} MZN/h`;
 }
 
 export function getWorkerMainCategoryLabel(worker: WorkerProfile): string {
@@ -300,26 +300,26 @@ export function getWorkerCtaCopy(input: WorkerCtaInput): WorkerCtaCopy {
   if (!input.isAvailable) {
     return {
       primaryLabel: "Ver perfil",
-      secondaryLabel: "Pedir serviço",
+      secondaryLabel: "Criar pedido",
       helperText:
-        "A agenda pode estar limitada. Vê o perfil e envia um pedido para combinar disponibilidade.",
+        "A agenda pode estar limitada. Usa o perfil como referência e cria um pedido para receber propostas.",
     };
   }
 
   if (!input.hasHourlyRate) {
     return {
-      primaryLabel: "Pedir serviço",
+      primaryLabel: "Criar pedido",
       secondaryLabel: "Ver perfil",
       helperText:
-        "Partilha o que precisas e negocia o valor diretamente na plataforma.",
+        "Partilha o que precisas no pedido e recebe propostas antes de escolher.",
     };
   }
 
   return {
-    primaryLabel: "Pedir serviço",
+    primaryLabel: "Criar pedido",
     secondaryLabel: "Ver perfil",
     helperText:
-      "O valor final é combinado entre cliente e profissional dentro do Tchuno.",
+      "O valor final e a escolha do prestador acontecem depois de criares pedido e receberes propostas.",
   };
 }
 

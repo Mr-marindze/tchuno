@@ -32,7 +32,7 @@ export default async function ProviderDetailsPage({
     return (
       <PublicPageShell
         title={publicName}
-        description="Perfil público com reputação, disponibilidade e contexto para decisão rápida."
+        description="Perfil público com reputação e contexto para te ajudar a criar um pedido com mais confiança."
       >
         <article className="panel-card provider-identity">
           <div className="provider-identity-avatar" aria-hidden="true">
@@ -69,13 +69,13 @@ export default async function ProviderDetailsPage({
               Preço de referência:{" "}
               {typeof profile.hourlyRate === "number"
                 ? `${profile.hourlyRate} MZN/h`
-                : "Valor negociado com o profissional"}
+                : "Definido por propostas no pedido"}
             </p>
             <p className="subtitle">
               Disponibilidade: {profile.isAvailable ? "Disponível" : "Agenda limitada"}
             </p>
             <p className="subtitle">
-              O valor final é acordado por propostas dentro do pedido no Tchuno.
+              O valor final e a escolha do prestador acontecem depois de criares pedido e receberes propostas.
             </p>
           </article>
         </div>
@@ -101,10 +101,10 @@ export default async function ProviderDetailsPage({
             href="/login?next=%2Fapp%2Fpedidos%23novo-pedido"
             className="primary"
           >
-            Pedir serviço
+            Criar pedido
           </Link>
           <Link href="/prestadores" className="primary primary--ghost">
-            Voltar à lista
+            Ver mais perfis
           </Link>
         </div>
       </PublicPageShell>
@@ -117,7 +117,7 @@ export default async function ProviderDetailsPage({
       >
         <div className="actions actions--inline">
           <Link href="/prestadores" className="primary">
-            Ver profissionais
+            Ver perfis
           </Link>
           <Link href="/" className="primary primary--ghost">
             Voltar ao início

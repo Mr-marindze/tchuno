@@ -127,7 +127,7 @@ export function PublicWorkersPage() {
         setWorkers(response.data);
         setStatus(
           response.data.length > 0
-            ? `${response.data.length} profissionais encontrados.`
+            ? `${response.data.length} perfis disponíveis para receber pedido.`
             : "Sem resultados para estes filtros.",
         );
       } catch (error) {
@@ -162,8 +162,8 @@ export function PublicWorkersPage() {
     [categories, categorySlug],
   );
   const searchPlaceholder = selectedCategoryName
-    ? `Pesquisar dentro de ${selectedCategoryName}`
-    : "Procurar serviço, área ou profissional";
+    ? `Filtrar perfis em ${selectedCategoryName}`
+    : "Filtra por área, zona ou nome";
   const orderedWorkers = useMemo(() => {
     return [...workers].sort((a, b) => {
       const scoreDiff =
@@ -188,7 +188,7 @@ export function PublicWorkersPage() {
     ].filter((value) => value.length > 0);
 
     if (contextTokens.length === 0) {
-      return "Profissionais disponíveis para o seu pedido";
+      return "Perfis públicos para orientar o teu pedido";
     }
 
     return `Resultados para ${contextTokens.join(" • ")}`;
@@ -228,11 +228,11 @@ export function PublicWorkersPage() {
   }
 
   function getPrimaryCtaLabel(): string {
-    return "Iniciar pedido";
+    return "Criar pedido";
   }
 
   function getGuestCtaLabel(): string {
-    return "Entrar para iniciar pedido";
+    return "Entrar para criar pedido";
   }
 
   function getTrustIndicator(worker: WorkerProfile): WorkerTrustIndicator {
@@ -343,15 +343,15 @@ export function PublicWorkersPage() {
   return (
     <PublicPageShell
       title="Profissionais"
-      description="Pesquisa por serviço, área ou profissional e decide com confiança em poucos segundos."
+      description="Usa perfis públicos como referência e cria um pedido para receber propostas dentro do fluxo oficial."
     >
       <p className="marketplace-signal-note">
-        No Tchuno, o cliente cria pedido, recebe propostas e paga sinal antes do contacto.
+        No Tchuno, os perfis públicos ajudam-te a perceber quem atua na tua zona. A escolha acontece depois de criares pedido e receberes propostas.
       </p>
 
       <form className="section-toolbar marketplace-search-toolbar" onSubmit={onSearchSubmit}>
         <label>
-          Pesquisa
+          Filtro rápido
           <input
             type="search"
             value={search}
@@ -400,7 +400,7 @@ export function PublicWorkersPage() {
 
         <div className="actions actions--inline">
           <button type="submit" className="primary">
-            Procurar
+            Atualizar perfis
           </button>
           <button
             type="button"
@@ -439,14 +439,14 @@ export function PublicWorkersPage() {
 
       {selectedCategoryName ? (
         <p className="marketplace-signal-note">
-          Pesquisa dentro desta área: <strong>{selectedCategoryName}</strong>
+          A mostrar perfis nesta área: <strong>{selectedCategoryName}</strong>
         </p>
       ) : null}
 
       <div className="marketplace-results-header">
         <h2 className="section-title">{searchContextTitle}</h2>
         <p className="section-lead">
-          Compara sinais essenciais: especialidade, localização, reputação e disponibilidade.
+          Usa estes sinais como contexto. Para avançar, cria pedido e recebe propostas alinhadas com o teu serviço.
         </p>
       </div>
 
@@ -457,7 +457,7 @@ export function PublicWorkersPage() {
       ) : workers.length === 0 ? (
         <div className="marketplace-empty-state">
           <p className="empty-state">
-            Não encontrámos profissionais para este filtro. Tenta outra área ou limpa a pesquisa.
+            Não encontrámos perfis para este filtro. Tenta outra área ou cria pedido para receber propostas mesmo sem escolher já um profissional.
           </p>
           <div className="actions actions--inline">
             <button
@@ -471,8 +471,8 @@ export function PublicWorkersPage() {
             >
               Limpar filtros
             </button>
-            <Link href="/categorias" className="primary primary--ghost">
-              Ver categorias
+            <Link href="/login?next=%2Fapp%2Fpedidos%23novo-pedido" className="primary primary--ghost">
+              Criar pedido
             </Link>
           </div>
           <div
