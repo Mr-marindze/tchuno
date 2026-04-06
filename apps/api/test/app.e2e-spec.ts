@@ -1105,6 +1105,282 @@ describe('Auth and Sessions (e2e)', () => {
     expect(openMarketItemsAfterSelect[0]?.status).toBe('REJECTED');
   });
 
+  it('enforces service request permissions across customers and providers', async () => {
+    const base = Date.now();
+    const password = 'abc12345';
+    const passwordHash = await bcrypt.hash(password, 12);
+
+    const ownerCustomer = await prisma.user.create({
+      data: {
+        email: `sr_owner_${base}@tchuno.local`,
+        name: 'SR Owner Customer',
+        passwordHash,
+        role: 'USER',
+        isActive: true,
+      },
+      select: {
+        id: true,
+        email: true,
+      },
+    });
+
+    const otherCustomer = await prisma.user.create({
+      data: {
+        email: `sr_other_customer_${base}@tchuno.local`,
+        name: 'SR Other Customer',
+        passwordHash,
+        role: 'USER',
+        isActive: true,
+      },
+      select: {
+        id: true,
+        email: true,
+      },
+    });
+
+    const invitedProvider = await prisma.user.create({
+      data: {
+        email: `sr_invited_provider_${base}@tchuno.local`,
+        name: 'SR Invited Provider',
+        passwordHash,
+        role: 'USER',
+        isActive: true,
+      },
+      select: {
+        id: true,
+        email: true,
+      },
+    });
+
+    const otherProvider = await prisma.user.create({
+      data: {
+        email: `sr_other_provider_${base}@tchuno.local`,
+        name: 'SR Other Provider',
+        passwordHash,
+        role: 'USER',
+        isActive: true,
+      },
+      select: {
+        id: true,
+        email: true,
+      },
+    });
+
+    const jwtService = app.get(JwtService);
+    const secret = process.env.JWT_ACCESS_SECRET ?? 'change-me-access';
+    const ownerCustomerAccessToken = jwtService.sign(
+      { sub: ownerCustomer.id, email: ownerCustomer.email },
+      { secret, expiresIn: '15m' },
+    );
+    const otherCustomerAccessToken = jwtService.sign(
+      { sub: otherCustomer.id, email: otherCustomer.email },
+      { secret, expiresIn: '15m' },
+    );
+    const invitedProviderAccessToken = jwtService.sign(
+      { sub: invitedProvider.id, email: invitedProvider.email },
+      { secret, expiresIn: '15m' },
+    );
+    const otherProviderAccessToken = jwtService.sign(
+      { sub: otherProvider.id, email: otherProvider.email },
+      { secret, expiresIn: '15m' },
+    );
+
+    const category = await prisma.category.create({
+      data: {
+        name: `Service Request Permissions ${base}`,
+        slug: `service-request-permissions-${base}`,
+        description: 'Categoria para validar permissões do fluxo principal',
+        sortOrder: 91,
+      },
+      select: {
+        id: true,
+      },
+    });
+
+    await request(app.getHttpServer())
+      .put('/worker-profile/me')
+      .set('Authorization', `Bearer ${invitedProviderAccessToken}`)
+      .send({
+        bio: 'Prestador convidado para teste de permissões',
+        location: 'Maputo',
+        hourlyRate: 1200,
+        experienceYears: 5,
+        isAvailable: true,
+        categoryIds: [category.id],
+      })
+      .expect(200);
+
+    await request(app.getHttpServer())
+      .put('/worker-profile/me')
+      .set('Authorization', `Bearer ${otherProviderAccessToken}`)
+      .send({
+        bio: 'Prestador alternativo para teste de permissões',
+        location: 'Maputo',
+        hourlyRate: 1150,
+        experienceYears: 4,
+        isAvailable: true,
+        categoryIds: [category.id],
+      })
+      .expect(200);
+
+    await request(app.getHttpServer())
+      .post('/service-requests')
+      .set('Authorization', `Bearer ${invitedProviderAccessToken}`)
+      .send({
+        categoryId: category.id,
+        title: 'Pedido inválido do prestador',
+        description: 'Um prestador não deve conseguir criar pedido.',
+        location: 'Maputo',
+      })
+      .expect(403);
+
+    const createRequestResponse = await request(app.getHttpServer())
+      .post('/service-requests')
+      .set('Authorization', `Bearer ${ownerCustomerAccessToken}`)
+      .send({
+        categoryId: category.id,
+        title: 'Montagem de quadro elétrico',
+        description: 'Preciso de montagem e verificação com urgência.',
+        location: 'Maputo',
+      })
+      .expect(201);
+    const createdRequest = createRequestResponse.body as { id: string };
+
+    await request(app.getHttpServer())
+      .get('/service-requests/open')
+      .set('Authorization', `Bearer ${otherCustomerAccessToken}`)
+      .expect(403);
+
+    await request(app.getHttpServer())
+      .get(`/service-requests/${createdRequest.id}`)
+      .set('Authorization', `Bearer ${otherCustomerAccessToken}`)
+      .expect(403);
+
+    await request(app.getHttpServer())
+      .get(`/service-requests/${createdRequest.id}`)
+      .set('Authorization', `Bearer ${invitedProviderAccessToken}`)
+      .expect(403);
+
+    const openRequestsResponse = await request(app.getHttpServer())
+      .get('/service-requests/open?status=OPEN')
+      .set('Authorization', `Bearer ${invitedProviderAccessToken}`)
+      .expect(200);
+    const openRequests = openRequestsResponse.body as PaginatedResponse<{
+      id: string;
+    }>;
+    expect(openRequests.data.map((item) => item.id)).toContain(
+      createdRequest.id,
+    );
+
+    await request(app.getHttpServer())
+      .post(`/service-requests/${createdRequest.id}/invitations`)
+      .set('Authorization', `Bearer ${otherCustomerAccessToken}`)
+      .send({
+        providerUserId: invitedProvider.id,
+      })
+      .expect(403);
+
+    const invitationResponse = await request(app.getHttpServer())
+      .post(`/service-requests/${createdRequest.id}/invitations`)
+      .set('Authorization', `Bearer ${ownerCustomerAccessToken}`)
+      .send({
+        providerUserId: invitedProvider.id,
+      })
+      .expect(201);
+    const invitation = invitationResponse.body as { id: string };
+
+    const ownInvitationsResponse = await request(app.getHttpServer())
+      .get('/service-requests/invitations/mine')
+      .set('Authorization', `Bearer ${invitedProviderAccessToken}`)
+      .expect(200);
+    const ownInvitations = ownInvitationsResponse.body as Array<{
+      id: string;
+      request: { id: string };
+    }>;
+    expect(ownInvitations.some((item) => item.id === invitation.id)).toBe(true);
+
+    await request(app.getHttpServer())
+      .post(`/service-requests/invitations/${invitation.id}/decline`)
+      .set('Authorization', `Bearer ${otherProviderAccessToken}`)
+      .send({})
+      .expect(403);
+
+    await request(app.getHttpServer())
+      .get(`/service-requests/${createdRequest.id}/proposals`)
+      .set('Authorization', `Bearer ${otherProviderAccessToken}`)
+      .expect(403);
+
+    const invitedProposalResponse = await request(app.getHttpServer())
+      .post(`/service-requests/${createdRequest.id}/proposals`)
+      .set('Authorization', `Bearer ${invitedProviderAccessToken}`)
+      .send({
+        price: 12_000,
+        comment: 'Proposta do prestador convidado.',
+      })
+      .expect(201);
+    const invitedProposal = invitedProposalResponse.body as { id: string };
+
+    await request(app.getHttpServer())
+      .post(`/service-requests/${createdRequest.id}/proposals`)
+      .set('Authorization', `Bearer ${otherProviderAccessToken}`)
+      .send({
+        price: 11_500,
+        comment: 'Proposta do prestador do mercado aberto.',
+      })
+      .expect(201);
+
+    const otherProviderProposalList = await request(app.getHttpServer())
+      .get(`/service-requests/${createdRequest.id}/proposals`)
+      .set('Authorization', `Bearer ${otherProviderAccessToken}`)
+      .expect(200);
+    const otherProviderProposals = otherProviderProposalList.body as Array<{
+      id: string;
+    }>;
+    expect(otherProviderProposals).toHaveLength(2);
+
+    await request(app.getHttpServer())
+      .post(
+        `/service-requests/${createdRequest.id}/select/${invitedProposal.id}`,
+      )
+      .set('Authorization', `Bearer ${otherCustomerAccessToken}`)
+      .send({ depositPercent: 30 })
+      .expect(403);
+
+    const selectResponse = await request(app.getHttpServer())
+      .post(
+        `/service-requests/${createdRequest.id}/select/${invitedProposal.id}`,
+      )
+      .set('Authorization', `Bearer ${ownerCustomerAccessToken}`)
+      .send({ depositPercent: 30 })
+      .expect(201);
+    const selection = selectResponse.body as {
+      paymentIntent: { status: string } | null;
+    };
+    expect(selection.paymentIntent?.status).toBe('AWAITING_PAYMENT');
+
+    const invitedProviderProposalList = await request(app.getHttpServer())
+      .get(`/service-requests/${createdRequest.id}/proposals`)
+      .set('Authorization', `Bearer ${invitedProviderAccessToken}`)
+      .expect(200);
+    const invitedProviderProposals = invitedProviderProposalList.body as Array<{
+      id: string;
+      status: string;
+    }>;
+    expect(
+      invitedProviderProposals.find(
+        (proposal) => proposal.id === invitedProposal.id,
+      )?.status,
+    ).toBe('SELECTED');
+
+    await request(app.getHttpServer())
+      .post(`/service-requests/${createdRequest.id}/invitations`)
+      .set('Authorization', `Bearer ${ownerCustomerAccessToken}`)
+      .send({
+        providerUserId: otherProvider.id,
+      })
+      .expect(409);
+  });
+
   it('service request -> proposal -> payment -> execution -> review flow', async () => {
     const workerEmail = `flow_worker_${Date.now()}@tchuno.local`;
     const clientEmail = `flow_client_${Date.now()}@tchuno.local`;
@@ -1243,6 +1519,208 @@ describe('Auth and Sessions (e2e)', () => {
       workerReviewsResponse.body as PaginatedResponse<ReviewPayload>;
     expect(workerReviews.data.length).toBeGreaterThanOrEqual(1);
     expect(workerReviews.data[0]?.jobId).toBe(selection.job.id);
+  });
+
+  it('enforces review permissions and duplicate protection on completed jobs', async () => {
+    const base = Date.now();
+    const password = 'abc12345';
+    const passwordHash = await bcrypt.hash(password, 12);
+
+    const customerUser = await prisma.user.create({
+      data: {
+        email: `review_customer_${base}@tchuno.local`,
+        name: 'Review Customer',
+        passwordHash,
+        role: 'USER',
+        isActive: true,
+      },
+      select: {
+        id: true,
+        email: true,
+      },
+    });
+
+    const otherCustomerUser = await prisma.user.create({
+      data: {
+        email: `review_other_customer_${base}@tchuno.local`,
+        name: 'Review Other Customer',
+        passwordHash,
+        role: 'USER',
+        isActive: true,
+      },
+      select: {
+        id: true,
+        email: true,
+      },
+    });
+
+    const providerUser = await prisma.user.create({
+      data: {
+        email: `review_provider_${base}@tchuno.local`,
+        name: 'Review Provider',
+        passwordHash,
+        role: 'USER',
+        isActive: true,
+      },
+      select: {
+        id: true,
+        email: true,
+      },
+    });
+
+    const jwtService = app.get(JwtService);
+    const secret = process.env.JWT_ACCESS_SECRET ?? 'change-me-access';
+    const customerAccessToken = jwtService.sign(
+      { sub: customerUser.id, email: customerUser.email },
+      { secret, expiresIn: '15m' },
+    );
+    const otherCustomerAccessToken = jwtService.sign(
+      { sub: otherCustomerUser.id, email: otherCustomerUser.email },
+      { secret, expiresIn: '15m' },
+    );
+    const providerAccessToken = jwtService.sign(
+      { sub: providerUser.id, email: providerUser.email },
+      { secret, expiresIn: '15m' },
+    );
+
+    const category = await prisma.category.create({
+      data: {
+        name: `Review Permissions Categoria ${base}`,
+        slug: `review-permissions-categoria-${base}`,
+        description: 'Categoria para validar reviews e permissões',
+        sortOrder: 92,
+      },
+      select: {
+        id: true,
+      },
+    });
+
+    const workerProfileResponse = await request(app.getHttpServer())
+      .put('/worker-profile/me')
+      .set('Authorization', `Bearer ${providerAccessToken}`)
+      .send({
+        bio: 'Prestador para validar reviews',
+        location: 'Maputo',
+        hourlyRate: 1000,
+        experienceYears: 6,
+        isAvailable: true,
+        categoryIds: [category.id],
+      })
+      .expect(200);
+    const workerProfile = workerProfileResponse.body as WorkerProfilePayload;
+
+    const createRequestResponse = await request(app.getHttpServer())
+      .post('/service-requests')
+      .set('Authorization', `Bearer ${customerAccessToken}`)
+      .send({
+        categoryId: category.id,
+        title: 'Pintura de sala',
+        description: 'Preciso concluir a pintura ainda esta semana.',
+        location: 'Maputo',
+      })
+      .expect(201);
+    const createdRequest = createRequestResponse.body as { id: string };
+
+    const proposalResponse = await request(app.getHttpServer())
+      .post(`/service-requests/${createdRequest.id}/proposals`)
+      .set('Authorization', `Bearer ${providerAccessToken}`)
+      .send({
+        price: 9_000,
+        comment: 'Inclui preparação e acabamento final.',
+      })
+      .expect(201);
+    const proposal = proposalResponse.body as { id: string };
+
+    const selectResponse = await request(app.getHttpServer())
+      .post(`/service-requests/${createdRequest.id}/select/${proposal.id}`)
+      .set('Authorization', `Bearer ${customerAccessToken}`)
+      .send({ depositPercent: 30 })
+      .expect(201);
+    const selection = selectResponse.body as {
+      job: { id: string };
+      paymentIntent: { id: string } | null;
+    };
+
+    await request(app.getHttpServer())
+      .post(`/payments/intents/${selection.paymentIntent?.id ?? ''}/pay`)
+      .set('Authorization', `Bearer ${customerAccessToken}`)
+      .send({ simulate: 'success' })
+      .expect(201);
+
+    await request(app.getHttpServer())
+      .patch(`/jobs/${selection.job.id}/status`)
+      .set('Authorization', `Bearer ${providerAccessToken}`)
+      .send({ status: 'ACCEPTED' })
+      .expect(200);
+
+    await request(app.getHttpServer())
+      .patch(`/jobs/${selection.job.id}/status`)
+      .set('Authorization', `Bearer ${providerAccessToken}`)
+      .send({ status: 'IN_PROGRESS' })
+      .expect(200);
+
+    await request(app.getHttpServer())
+      .patch(`/jobs/${selection.job.id}/status`)
+      .set('Authorization', `Bearer ${providerAccessToken}`)
+      .send({ status: 'COMPLETED' })
+      .expect(200);
+
+    await request(app.getHttpServer())
+      .get('/reviews/me')
+      .set('Authorization', `Bearer ${providerAccessToken}`)
+      .expect(403);
+
+    await request(app.getHttpServer())
+      .post('/reviews')
+      .set('Authorization', `Bearer ${providerAccessToken}`)
+      .send({
+        jobId: selection.job.id,
+        rating: 5,
+        comment: 'Prestador não pode autoavaliar.',
+      })
+      .expect(403);
+
+    await request(app.getHttpServer())
+      .post('/reviews')
+      .set('Authorization', `Bearer ${otherCustomerAccessToken}`)
+      .send({
+        jobId: selection.job.id,
+        rating: 4,
+        comment: 'Outro cliente não pode avaliar este job.',
+      })
+      .expect(403);
+
+    const reviewResponse = await request(app.getHttpServer())
+      .post('/reviews')
+      .set('Authorization', `Bearer ${customerAccessToken}`)
+      .send({
+        jobId: selection.job.id,
+        rating: 5,
+        comment: 'Serviço concluído com qualidade.',
+      })
+      .expect(201);
+    const review = reviewResponse.body as ReviewPayload;
+    expect(review.workerProfileId).toBe(workerProfile.id);
+
+    await request(app.getHttpServer())
+      .post('/reviews')
+      .set('Authorization', `Bearer ${customerAccessToken}`)
+      .send({
+        jobId: selection.job.id,
+        rating: 5,
+        comment: 'Segunda review não deve ser aceite.',
+      })
+      .expect(409);
+
+    const myReviewsResponse = await request(app.getHttpServer())
+      .get('/reviews/me')
+      .set('Authorization', `Bearer ${customerAccessToken}`)
+      .expect(200);
+    const myReviews =
+      myReviewsResponse.body as PaginatedResponse<ReviewPayload>;
+    expect(myReviews.data.some((item) => item.jobId === selection.job.id)).toBe(
+      true,
+    );
   });
 
   it('blocks deprecated direct job endpoints', async () => {
@@ -2292,6 +2770,14 @@ describe('Auth and Sessions (e2e)', () => {
       .send({
         price: 7_500,
         comment: 'Ainda consigo responder hoje.',
+      })
+      .expect(409);
+
+    await request(app.getHttpServer())
+      .post(`/service-requests/${createdRequest.id}/invitations`)
+      .set('Authorization', `Bearer ${customerAccessToken}`)
+      .send({
+        providerUserId: providerUser.id,
       })
       .expect(409);
 
