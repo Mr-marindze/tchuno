@@ -26,6 +26,7 @@ import { ErrorResponseDto } from '../auth/dto/error-response.dto';
 import { AccessPolicyGuard } from '../auth/guards/access-policy.guard';
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
 import { CreateServiceRequestDto } from './dto/create-service-request.dto';
+import { CreateRequestInvitationDto } from './dto/create-request-invitation.dto';
 import { ListServiceRequestsQueryDto } from './dto/list-service-requests-query.dto';
 import { SelectProposalDto } from './dto/select-proposal.dto';
 import { SubmitProposalDto } from './dto/submit-proposal.dto';
@@ -87,6 +88,68 @@ export class ServiceRequestsController {
     @Query() query: ListServiceRequestsQueryDto,
   ) {
     return this.serviceRequestsService.listOpenForProvider(req.user.sub, query);
+  }
+
+  @Get('invitations/mine')
+  @ApiOperation({ summary: 'List request invitations for current provider' })
+  @ApiOkResponse({
+    description: 'List invitations received by current provider',
+  })
+  @ApiUnauthorizedResponse({ type: ErrorResponseDto })
+  @ApiForbiddenResponse({ type: ErrorResponseDto })
+  @RequirePermissions('provider.requests.read.invites')
+  listMineInvitations(@Req() req: AuthenticatedRequest) {
+    return this.serviceRequestsService.listMineInvitations(req.user.sub);
+  }
+
+  @Post('invitations/:invitationId/decline')
+  @ApiOperation({ summary: 'Decline one request invitation (provider)' })
+  @ApiParam({ name: 'invitationId', type: String })
+  @ApiOkResponse({ description: 'Invitation declined' })
+  @ApiUnauthorizedResponse({ type: ErrorResponseDto })
+  @ApiForbiddenResponse({ type: ErrorResponseDto })
+  @ApiConflictResponse({ type: ErrorResponseDto })
+  @ApiNotFoundResponse({ type: ErrorResponseDto })
+  @RequirePermissions('provider.requests.decline.invite')
+  declineInvitation(
+    @Req() req: AuthenticatedRequest,
+    @Param('invitationId') invitationId: string,
+  ) {
+    return this.serviceRequestsService.declineInvitation(
+      invitationId,
+      req.user.sub,
+    );
+  }
+
+  @Get(':id/invitations')
+  @ApiOperation({ summary: 'List invitations for one own service request' })
+  @ApiParam({ name: 'id', type: String })
+  @ApiOkResponse({ description: 'List invitations with provider snapshots' })
+  @ApiUnauthorizedResponse({ type: ErrorResponseDto })
+  @ApiForbiddenResponse({ type: ErrorResponseDto })
+  @ApiNotFoundResponse({ type: ErrorResponseDto })
+  @RequirePermissions('customer.requests.read.own')
+  listInvitations(@Req() req: AuthenticatedRequest, @Param('id') id: string) {
+    return this.serviceRequestsService.listRequestInvitations(id, req.user.sub);
+  }
+
+  @Post(':id/invitations')
+  @ApiOperation({
+    summary: 'Invite one provider to submit proposal on request',
+  })
+  @ApiParam({ name: 'id', type: String })
+  @ApiOkResponse({ description: 'Invitation created' })
+  @ApiUnauthorizedResponse({ type: ErrorResponseDto })
+  @ApiForbiddenResponse({ type: ErrorResponseDto })
+  @ApiConflictResponse({ type: ErrorResponseDto })
+  @ApiNotFoundResponse({ type: ErrorResponseDto })
+  @RequirePermissions('customer.requests.invite')
+  createInvitation(
+    @Req() req: AuthenticatedRequest,
+    @Param('id') id: string,
+    @Body() dto: CreateRequestInvitationDto,
+  ) {
+    return this.serviceRequestsService.createInvitation(id, req.user.sub, dto);
   }
 
   @Get(':id')

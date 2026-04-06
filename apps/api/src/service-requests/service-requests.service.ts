@@ -5,7 +5,12 @@ import {
   Injectable,
   NotFoundException,
 } from '@nestjs/common';
-import { PaymentProvider, Prisma, ServiceRequestStatus } from '@prisma/client';
+import {
+  PaymentProvider,
+  Prisma,
+  RequestInvitationStatus,
+  ServiceRequestStatus,
+} from '@prisma/client';
 import {
   buildPaginatedResponse,
   resolvePagination,
@@ -13,6 +18,7 @@ import {
 import { AppRole } from '../auth/authorization.types';
 import { MetricsService } from '../observability/metrics.service';
 import { PrismaService } from '../prisma/prisma.service';
+import { CreateRequestInvitationDto } from './dto/create-request-invitation.dto';
 import { CreateServiceRequestDto } from './dto/create-service-request.dto';
 import { ListServiceRequestsQueryDto } from './dto/list-service-requests-query.dto';
 import { SelectProposalDto } from './dto/select-proposal.dto';
@@ -29,6 +35,24 @@ const adminRoles = new Set<AppRole>([
   'ops_admin',
   'super_admin',
 ]);
+
+const invitationProviderUserSelect = {
+  id: true,
+  name: true,
+  workerProfile: {
+    select: {
+      ratingAvg: true,
+      ratingCount: true,
+      location: true,
+    },
+  },
+} satisfies Prisma.UserSelect;
+
+const requestInvitationInclude = {
+  providerUser: {
+    select: invitationProviderUserSelect,
+  },
+} satisfies Prisma.RequestInvitationInclude;
 
 @Injectable()
 export class ServiceRequestsService {
@@ -240,6 +264,10 @@ export class ServiceRequestsService {
           },
           orderBy: [{ createdAt: 'asc' }, { id: 'asc' }],
         },
+        invitations: {
+          include: requestInvitationInclude,
+          orderBy: [{ createdAt: 'desc' }, { id: 'desc' }],
+        },
         job: {
           select: {
             id: true,
@@ -274,6 +302,263 @@ export class ServiceRequestsService {
     }
 
     return request;
+  }
+
+  async listRequestInvitations(requestId: string, actorUserId: string) {
+    const request = await this.prisma.serviceRequest.findUnique({
+      where: { id: requestId },
+      select: {
+        id: true,
+        customerId: true,
+        status: true,
+      },
+    });
+
+    if (!request) {
+      throw new NotFoundException('Service request not found');
+    }
+
+    if (request.customerId !== actorUserId) {
+      throw new ForbiddenException('Only request owner can read invitations');
+    }
+
+    await this.expirePendingInvitationsForRequest(request.id, request.status);
+
+    return this.prisma.requestInvitation.findMany({
+      where: {
+        requestId,
+      },
+      include: requestInvitationInclude,
+      orderBy: [{ createdAt: 'desc' }, { id: 'desc' }],
+    });
+  }
+
+  async createInvitation(
+    requestId: string,
+    actorUserId: string,
+    dto: CreateRequestInvitationDto,
+  ) {
+    if (dto.providerUserId === actorUserId) {
+      throw new ConflictException(
+        'You cannot invite yourself to your own service request',
+      );
+    }
+
+    const [request, providerProfile, existingProposal, existingInvitation] =
+      await this.prisma.$transaction([
+        this.prisma.serviceRequest.findUnique({
+          where: { id: requestId },
+          select: {
+            id: true,
+            customerId: true,
+            status: true,
+            selectedProposalId: true,
+          },
+        }),
+        this.prisma.workerProfile.findUnique({
+          where: { userId: dto.providerUserId },
+          select: {
+            id: true,
+            isAvailable: true,
+          },
+        }),
+        this.prisma.proposal.findUnique({
+          where: {
+            requestId_providerId: {
+              requestId,
+              providerId: dto.providerUserId,
+            },
+          },
+          select: {
+            id: true,
+          },
+        }),
+        this.prisma.requestInvitation.findUnique({
+          where: {
+            requestId_providerUserId: {
+              requestId,
+              providerUserId: dto.providerUserId,
+            },
+          },
+          select: {
+            id: true,
+            status: true,
+          },
+        }),
+      ]);
+
+    if (!request) {
+      throw new NotFoundException('Service request not found');
+    }
+
+    if (request.customerId !== actorUserId) {
+      throw new ForbiddenException(
+        'Only request owner can invite providers to this request',
+      );
+    }
+
+    if (request.status !== 'OPEN' || request.selectedProposalId) {
+      throw new ConflictException(
+        'Service request is no longer open for invitations',
+      );
+    }
+
+    if (!providerProfile) {
+      throw new NotFoundException('Worker profile not found');
+    }
+
+    if (!providerProfile.isAvailable) {
+      throw new ConflictException(
+        'Only available providers can be invited to send proposals',
+      );
+    }
+
+    if (existingProposal) {
+      throw new ConflictException(
+        'This provider already submitted a proposal for the request',
+      );
+    }
+
+    if (existingInvitation) {
+      throw new ConflictException(
+        this.describeDuplicateInvitationStatus(existingInvitation.status),
+      );
+    }
+
+    const invitation = await this.prisma.requestInvitation.create({
+      data: {
+        requestId,
+        providerUserId: dto.providerUserId,
+        status: 'SENT',
+      },
+      include: requestInvitationInclude,
+    });
+
+    this.metricsService.recordBusinessEvent({
+      domain: 'jobs',
+      event: 'service_request_invitation_created',
+      result: 'success',
+    });
+
+    return invitation;
+  }
+
+  async listMineInvitations(actorUserId: string) {
+    await this.expirePendingInvitationsForProvider(actorUserId);
+
+    return this.prisma.requestInvitation.findMany({
+      where: {
+        providerUserId: actorUserId,
+      },
+      include: {
+        request: {
+          select: {
+            id: true,
+            customerId: true,
+            categoryId: true,
+            title: true,
+            description: true,
+            location: true,
+            status: true,
+            selectedProposalId: true,
+            createdAt: true,
+            updatedAt: true,
+            category: {
+              select: {
+                id: true,
+                name: true,
+                slug: true,
+              },
+            },
+            proposals: {
+              where: {
+                providerId: actorUserId,
+              },
+              select: {
+                id: true,
+                providerId: true,
+                price: true,
+                status: true,
+                comment: true,
+                createdAt: true,
+                updatedAt: true,
+              },
+              orderBy: [{ createdAt: 'desc' }, { id: 'desc' }],
+              take: 1,
+            },
+          },
+        },
+      },
+      orderBy: [{ createdAt: 'desc' }, { id: 'desc' }],
+    });
+  }
+
+  async declineInvitation(invitationId: string, actorUserId: string) {
+    const invitation = await this.prisma.requestInvitation.findUnique({
+      where: { id: invitationId },
+      include: {
+        request: {
+          select: {
+            id: true,
+            status: true,
+            selectedProposalId: true,
+          },
+        },
+      },
+    });
+
+    if (!invitation) {
+      throw new NotFoundException('Request invitation not found');
+    }
+
+    if (invitation.providerUserId !== actorUserId) {
+      throw new ForbiddenException('Only invited provider can decline invite');
+    }
+
+    if (invitation.status === 'ACCEPTED') {
+      throw new ConflictException(
+        'Invitation already accepted through submitted proposal',
+      );
+    }
+
+    if (invitation.status === 'DECLINED') {
+      return invitation;
+    }
+
+    if (
+      invitation.status === 'EXPIRED' ||
+      invitation.request.status !== 'OPEN' ||
+      invitation.request.selectedProposalId
+    ) {
+      if (invitation.status === 'EXPIRED') {
+        return invitation;
+      }
+
+      return this.prisma.requestInvitation.update({
+        where: { id: invitation.id },
+        data: {
+          status: 'EXPIRED',
+          respondedAt: invitation.respondedAt ?? new Date(),
+          expiresAt: invitation.expiresAt ?? new Date(),
+        },
+      });
+    }
+
+    const declinedInvitation = await this.prisma.requestInvitation.update({
+      where: { id: invitation.id },
+      data: {
+        status: 'DECLINED',
+        respondedAt: new Date(),
+      },
+    });
+
+    this.metricsService.recordBusinessEvent({
+      domain: 'jobs',
+      event: 'service_request_invitation_declined',
+      result: 'success',
+    });
+
+    return declinedInvitation;
   }
 
   async submitProposal(
@@ -340,26 +625,28 @@ export class ServiceRequestsService {
       },
     });
 
-    if (existing) {
-      return this.prisma.proposal.update({
-        where: { id: existing.id },
-        data: {
-          price,
-          comment: dto.comment?.trim() || null,
-          status: 'SUBMITTED',
-        },
-      });
-    }
+    const proposal = existing
+      ? await this.prisma.proposal.update({
+          where: { id: existing.id },
+          data: {
+            price,
+            comment: dto.comment?.trim() || null,
+            status: 'SUBMITTED',
+          },
+        })
+      : await this.prisma.proposal.create({
+          data: {
+            requestId,
+            providerId: actorUserId,
+            price,
+            comment: dto.comment?.trim() || null,
+            status: 'SUBMITTED',
+          },
+        });
 
-    return this.prisma.proposal.create({
-      data: {
-        requestId,
-        providerId: actorUserId,
-        price,
-        comment: dto.comment?.trim() || null,
-        status: 'SUBMITTED',
-      },
-    });
+    await this.markInvitationAccepted(requestId, actorUserId);
+
+    return proposal;
   }
 
   async listRequestProposals(requestId: string, actor: Actor) {
@@ -518,6 +805,18 @@ export class ServiceRequestsService {
       });
 
       if (existingJob) {
+        await tx.requestInvitation.updateMany({
+          where: {
+            requestId: request.id,
+            status: 'SENT',
+          },
+          data: {
+            status: 'EXPIRED',
+            respondedAt: new Date(),
+            expiresAt: new Date(),
+          },
+        });
+
         return {
           request,
           selectedProposalId: proposal.id,
@@ -551,6 +850,18 @@ export class ServiceRequestsService {
         data: {
           status: 'CLOSED',
           selectedProposalId: proposal.id,
+        },
+      });
+
+      await tx.requestInvitation.updateMany({
+        where: {
+          requestId: request.id,
+          status: 'SENT',
+        },
+        data: {
+          status: 'EXPIRED',
+          respondedAt: new Date(),
+          expiresAt: new Date(),
         },
       });
 
@@ -612,6 +923,120 @@ export class ServiceRequestsService {
     });
 
     return result;
+  }
+
+  private async expirePendingInvitationsForRequest(
+    requestId: string,
+    requestStatus?: ServiceRequestStatus,
+  ) {
+    if (requestStatus === 'OPEN') {
+      return;
+    }
+
+    const staleInvitations = await this.prisma.requestInvitation.findMany({
+      where: {
+        requestId,
+        status: 'SENT',
+      },
+      select: {
+        id: true,
+      },
+    });
+
+    if (staleInvitations.length === 0) {
+      return;
+    }
+
+    await this.prisma.requestInvitation.updateMany({
+      where: {
+        id: {
+          in: staleInvitations.map((invitation) => invitation.id),
+        },
+      },
+      data: {
+        status: 'EXPIRED',
+        respondedAt: new Date(),
+        expiresAt: new Date(),
+      },
+    });
+  }
+
+  private async expirePendingInvitationsForProvider(actorUserId: string) {
+    const staleInvitations = await this.prisma.requestInvitation.findMany({
+      where: {
+        providerUserId: actorUserId,
+        status: 'SENT',
+        request: {
+          status: {
+            not: 'OPEN',
+          },
+        },
+      },
+      select: {
+        id: true,
+      },
+    });
+
+    if (staleInvitations.length === 0) {
+      return;
+    }
+
+    await this.prisma.requestInvitation.updateMany({
+      where: {
+        id: {
+          in: staleInvitations.map((invitation) => invitation.id),
+        },
+      },
+      data: {
+        status: 'EXPIRED',
+        respondedAt: new Date(),
+        expiresAt: new Date(),
+      },
+    });
+  }
+
+  private async markInvitationAccepted(
+    requestId: string,
+    providerUserId: string,
+  ) {
+    const result = await this.prisma.requestInvitation.updateMany({
+      where: {
+        requestId,
+        providerUserId,
+        status: {
+          in: ['SENT', 'DECLINED', 'EXPIRED'],
+        },
+      },
+      data: {
+        status: 'ACCEPTED',
+        respondedAt: new Date(),
+        expiresAt: null,
+      },
+    });
+
+    if (result.count > 0) {
+      this.metricsService.recordBusinessEvent({
+        domain: 'jobs',
+        event: 'service_request_invitation_accepted',
+        result: 'success',
+      });
+    }
+  }
+
+  private describeDuplicateInvitationStatus(status: RequestInvitationStatus) {
+    if (status === 'ACCEPTED') {
+      return 'This provider already accepted the invitation through a proposal';
+    }
+
+    if (status === 'DECLINED') {
+      return 'This provider already declined the invitation';
+    }
+
+    if (status === 'EXPIRED') {
+      return 'This invitation already expired for the provider';
+    }
+
+    return 'This provider was already invited to the request';
   }
 
   private computeDepositSplit(price: number, depositPercent?: number) {

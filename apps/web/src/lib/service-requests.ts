@@ -4,6 +4,68 @@ import { PaginatedResponse } from '@/lib/pagination';
 
 export type ServiceRequestStatus = 'OPEN' | 'CLOSED' | 'EXPIRED';
 export type ProposalStatus = 'SUBMITTED' | 'SELECTED' | 'REJECTED';
+export type RequestInvitationStatus =
+  | 'SENT'
+  | 'ACCEPTED'
+  | 'DECLINED'
+  | 'EXPIRED';
+
+export type RequestInvitation = {
+  id: string;
+  requestId: string;
+  providerUserId: string;
+  status: RequestInvitationStatus;
+  respondedAt: string | null;
+  expiresAt: string | null;
+  createdAt: string;
+  updatedAt: string;
+  providerUser?: {
+    id: string;
+    name: string | null;
+    workerProfile: {
+      ratingAvg: string;
+      ratingCount: number;
+      location: string | null;
+    } | null;
+  };
+};
+
+export type ProviderRequestInvitation = {
+  id: string;
+  requestId: string;
+  providerUserId: string;
+  status: RequestInvitationStatus;
+  respondedAt: string | null;
+  expiresAt: string | null;
+  createdAt: string;
+  updatedAt: string;
+  request: {
+    id: string;
+    customerId: string;
+    categoryId: string;
+    title: string;
+    description: string;
+    location: string | null;
+    status: ServiceRequestStatus;
+    selectedProposalId: string | null;
+    createdAt: string;
+    updatedAt: string;
+    category?: {
+      id: string;
+      name: string;
+      slug: string;
+    };
+    proposals?: Array<{
+      id: string;
+      providerId: string;
+      price: number;
+      status: ProposalStatus;
+      comment?: string | null;
+      createdAt: string;
+      updatedAt?: string;
+    }>;
+  };
+};
 
 export type ServiceRequest = {
   id: string;
@@ -39,6 +101,7 @@ export type ServiceRequest = {
       } | null;
     };
   }>;
+  invitations?: RequestInvitation[];
   job?: {
     id: string;
     status: string;
@@ -88,6 +151,10 @@ export type CreateServiceRequestInput = {
 export type SubmitProposalInput = {
   price: number;
   comment?: string;
+};
+
+export type CreateRequestInvitationInput = {
+  providerUserId: string;
 };
 
 export type ListServiceRequestsQuery = {
@@ -285,4 +352,85 @@ export async function selectProposal(
     } | null;
     idempotent: boolean;
   };
+}
+
+export async function createRequestInvitation(
+  accessToken: string,
+  requestId: string,
+  input: CreateRequestInvitationInput,
+): Promise<RequestInvitation> {
+  const response = await fetch(
+    `${API_URL}/service-requests/${requestId}/invitations`,
+    {
+      method: 'POST',
+      headers: {
+        Authorization: `Bearer ${accessToken}`,
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify(input),
+    },
+  );
+
+  if (!response.ok) {
+    throw new Error(await readApiError(response));
+  }
+
+  return (await response.json()) as RequestInvitation;
+}
+
+export async function listRequestInvitations(
+  accessToken: string,
+  requestId: string,
+): Promise<RequestInvitation[]> {
+  const response = await fetch(
+    `${API_URL}/service-requests/${requestId}/invitations`,
+    {
+      headers: {
+        Authorization: `Bearer ${accessToken}`,
+      },
+    },
+  );
+
+  if (!response.ok) {
+    throw new Error(await readApiError(response));
+  }
+
+  return (await response.json()) as RequestInvitation[];
+}
+
+export async function listMyRequestInvitations(
+  accessToken: string,
+): Promise<ProviderRequestInvitation[]> {
+  const response = await fetch(`${API_URL}/service-requests/invitations/mine`, {
+    headers: {
+      Authorization: `Bearer ${accessToken}`,
+    },
+  });
+
+  if (!response.ok) {
+    throw new Error(await readApiError(response));
+  }
+
+  return (await response.json()) as ProviderRequestInvitation[];
+}
+
+export async function declineRequestInvitation(
+  accessToken: string,
+  invitationId: string,
+): Promise<RequestInvitation> {
+  const response = await fetch(
+    `${API_URL}/service-requests/invitations/${invitationId}/decline`,
+    {
+      method: 'POST',
+      headers: {
+        Authorization: `Bearer ${accessToken}`,
+      },
+    },
+  );
+
+  if (!response.ok) {
+    throw new Error(await readApiError(response));
+  }
+
+  return (await response.json()) as RequestInvitation;
 }

@@ -13,6 +13,7 @@ import {
   payPaymentIntent,
 } from '@/lib/payments';
 import {
+  createRequestInvitation,
   getServiceRequestById,
   selectProposal,
   ServiceRequest,
@@ -46,7 +47,12 @@ const paymentStatusLabel: Record<string, string> = {
   CANCELED: 'Cancelado',
 };
 
-const inviteStorageKey = 'tchuno_request_worker_invites_v1';
+const invitationStatusLabel: Record<string, string> = {
+  SENT: 'Convite enviado',
+  ACCEPTED: 'Aceite',
+  DECLINED: 'Recusado',
+  EXPIRED: 'Expirado',
+};
 
 function formatCurrencyMzn(value: number): string {
   return new Intl.NumberFormat('pt-PT', {
@@ -119,40 +125,20 @@ function resolveFlowVisualState(
   };
 }
 
-function readInvitedWorkerIds(requestId: string): string[] {
-  if (typeof window === 'undefined') {
-    return [];
+function getInvitationBadgeClass(status: string) {
+  if (status === 'ACCEPTED') {
+    return 'bg-emerald-100 text-emerald-700';
   }
 
-  try {
-    const rawValue = window.localStorage.getItem(inviteStorageKey);
-    if (!rawValue) {
-      return [];
-    }
-
-    const parsed = JSON.parse(rawValue) as Record<string, string[]>;
-    return Array.isArray(parsed[requestId]) ? parsed[requestId] : [];
-  } catch {
-    return [];
-  }
-}
-
-function writeInvitedWorkerIds(requestId: string, workerIds: string[]): void {
-  if (typeof window === 'undefined') {
-    return;
+  if (status === 'DECLINED') {
+    return 'bg-rose-100 text-rose-700';
   }
 
-  try {
-    const rawValue = window.localStorage.getItem(inviteStorageKey);
-    const currentValue = rawValue
-      ? (JSON.parse(rawValue) as Record<string, string[]>)
-      : {};
-
-    currentValue[requestId] = workerIds;
-    window.localStorage.setItem(inviteStorageKey, JSON.stringify(currentValue));
-  } catch {
-    // Keep UI operational even when localStorage is unavailable.
+  if (status === 'EXPIRED') {
+    return 'bg-slate-200 text-slate-700';
   }
+
+  return 'bg-blue-100 text-blue-700';
 }
 
 async function loadCandidateWorkersForRequest(request: ServiceRequest): Promise<{
@@ -204,8 +190,8 @@ export default function OrderDetailsPage() {
   const [recommendationStatus, setRecommendationStatus] = useState(
     'A preparar profissionais próximos...',
   );
-  const [invitedWorkerIds, setInvitedWorkerIds] = useState<string[]>([]);
   const [inviteFeedback, setInviteFeedback] = useState('');
+  const [invitingWorkerId, setInvitingWorkerId] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
   const [runningAction, setRunningAction] = useState(false);
   const [status, setStatus] = useState('A carregar detalhes do pedido...');
@@ -280,7 +266,6 @@ export default function OrderDetailsPage() {
   }, [requestId]);
 
   useEffect(() => {
-    setInvitedWorkerIds(readInvitedWorkerIds(requestId));
     setInviteFeedback('');
   }, [requestId]);
 
@@ -311,6 +296,16 @@ export default function OrderDetailsPage() {
   const flowState = resolveFlowVisualState(request, financial);
   const canInviteWorkers =
     request?.status === 'OPEN' && !request.selectedProposalId;
+  const invitationByProviderUserId = useMemo(
+    () =>
+      new Map(
+        (request?.invitations ?? []).map((invitation) => [
+          invitation.providerUserId,
+          invitation,
+        ]),
+      ),
+    [request?.invitations],
+  );
   const primaryActionCopy = useMemo(() => {
     if (!request) {
       return null;
@@ -422,17 +417,26 @@ export default function OrderDetailsPage() {
     };
   }, [canInviteWorkers, request]);
 
-  function handleInviteWorker(workerId: string, workerName: string) {
-    setInvitedWorkerIds((current) => {
-      if (current.includes(workerId)) {
-        return current;
-      }
+  async function handleInviteWorker(workerId: string, workerName: string) {
+    if (!accessToken || !request) {
+      setStatus('Sessão inválida. Faz login novamente.');
+      return;
+    }
 
-      const nextWorkerIds = [...current, workerId];
-      writeInvitedWorkerIds(requestId, nextWorkerIds);
-      return nextWorkerIds;
-    });
-    setInviteFeedback(`${workerName} ficou priorizado para convite neste pedido.`);
+    setInvitingWorkerId(workerId);
+    setInviteFeedback('');
+
+    try {
+      await createRequestInvitation(accessToken, request.id, {
+        providerUserId: workerId,
+      });
+      await loadDetails(accessToken);
+      setInviteFeedback(`${workerName} foi convidado para enviar proposta.`);
+    } catch (error) {
+      setStatus(humanizeUnknownError(error, 'Falha ao enviar convite.'));
+    } finally {
+      setInvitingWorkerId(null);
+    }
   }
 
   async function handleSelectProposal(proposalId: string) {
@@ -603,6 +607,61 @@ export default function OrderDetailsPage() {
                 direto nem cria contratação fora do fluxo oficial.
               </div>
 
+              {request.invitations && request.invitations.length > 0 ? (
+                <div className='mt-4 space-y-3'>
+                  <p className='text-sm font-semibold text-slate-900'>
+                    Convites enviados
+                  </p>
+                  <div className='grid gap-3 xl:grid-cols-2'>
+                    {request.invitations.map((invitation) => {
+                      const providerName =
+                        invitation.providerUser?.name ??
+                        `Prestador ${invitation.providerUserId.slice(0, 8)}`;
+                      const providerRating = invitation.providerUser?.workerProfile
+                        ? `${formatRatingValue(
+                            invitation.providerUser.workerProfile.ratingAvg,
+                          )} (${invitation.providerUser.workerProfile.ratingCount})`
+                        : 'Novo';
+
+                      return (
+                        <article
+                          key={invitation.id}
+                          className='rounded-2xl border border-slate-200 bg-slate-50 p-4'
+                        >
+                          <div className='flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between'>
+                            <div>
+                              <p className='text-sm font-semibold text-slate-900'>
+                                {providerName}
+                              </p>
+                              <p className='mt-1 text-sm text-slate-600'>
+                                Rating {providerRating}
+                              </p>
+                            </div>
+
+                            <span
+                              className={`rounded-full px-2.5 py-1 text-xs font-semibold ${getInvitationBadgeClass(invitation.status)}`}
+                            >
+                              {invitationStatusLabel[invitation.status] ??
+                                invitation.status}
+                            </span>
+                          </div>
+
+                          <p className='mt-3 text-xs text-slate-500'>
+                            {invitation.respondedAt
+                              ? `Atualizado em ${new Date(
+                                  invitation.respondedAt,
+                                ).toLocaleString('pt-PT')}`
+                              : `Enviado em ${new Date(
+                                  invitation.createdAt,
+                                ).toLocaleString('pt-PT')}`}
+                          </p>
+                        </article>
+                      );
+                    })}
+                  </div>
+                </div>
+              ) : null}
+
               {request.proposals && request.proposals.length > 0 ? (
                 <p className='mt-3 text-xs text-slate-500'>
                   Perfis que já enviaram proposta ficam fora desta lista para
@@ -633,7 +692,16 @@ export default function OrderDetailsPage() {
                         worker.ratingCount > 0
                           ? `⭐ ${formatRatingValue(worker.ratingAvg)} (${worker.ratingCount})`
                           : '⭐ Novo';
-                      const isInvited = invitedWorkerIds.includes(worker.userId);
+                      const existingInvitation = invitationByProviderUserId.get(
+                        worker.userId,
+                      );
+                      const isInviting = invitingWorkerId === worker.userId;
+                      const inviteLabel = existingInvitation
+                        ? invitationStatusLabel[existingInvitation.status] ??
+                          existingInvitation.status
+                        : isInviting
+                          ? 'A enviar...'
+                          : 'Convidar para proposta';
 
                       return (
                         <article
@@ -689,14 +757,12 @@ export default function OrderDetailsPage() {
                           <button
                             type='button'
                             className='mt-4 inline-flex items-center rounded-lg bg-blue-600 px-4 py-2 text-sm font-semibold text-white hover:bg-blue-700 disabled:cursor-not-allowed disabled:opacity-60'
-                            onClick={() =>
-                              handleInviteWorker(worker.userId, displayName)
-                            }
-                            disabled={isInvited}
+                            onClick={() => {
+                              void handleInviteWorker(worker.userId, displayName);
+                            }}
+                            disabled={Boolean(existingInvitation) || isInviting}
                           >
-                            {isInvited
-                              ? 'Convite preparado'
-                              : 'Convidar para proposta'}
+                            {inviteLabel}
                           </button>
                         </article>
                       );

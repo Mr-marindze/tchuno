@@ -8,34 +8,35 @@ datasource db {
 }
 
 model User {
-  id                      String            @id @default(cuid())
-  email                   String            @unique
+  id                      String              @id @default(cuid())
+  email                   String              @unique
   name                    String?
   passwordHash            String
-  role                    UserRole          @default(USER)
+  role                    UserRole            @default(USER)
   adminSubrole            AdminSubrole?
-  isActive                Boolean           @default(true)
-  createdAt               DateTime          @default(now())
-  updatedAt               DateTime          @updatedAt
+  isActive                Boolean             @default(true)
+  createdAt               DateTime            @default(now())
+  updatedAt               DateTime            @updatedAt
   sessions                Session[]
   workerProfile           WorkerProfile?
-  jobsAsClient            Job[]             @relation("ClientJobs")
+  jobsAsClient            Job[]               @relation("ClientJobs")
   reviewsGiven            Review[]
   auditLogs               AuditLog[]
   reauthChallenges        ReauthChallenge[]
-  updatedPlatformSettings PlatformSetting[] @relation("PlatformSettingUpdatedBy")
-  customerPaymentIntents  PaymentIntent[]   @relation("PaymentIntentCustomer")
-  providerPaymentIntents  PaymentIntent[]   @relation("PaymentIntentProvider")
-  customerServiceRequests ServiceRequest[]  @relation("CustomerServiceRequests")
-  providerProposals       Proposal[]        @relation("ProviderProposals")
-  jobsAsCustomer          Job[]             @relation("JobCustomer")
-  jobsAsProvider          Job[]             @relation("JobProvider")
-  createdLedgerEntries    LedgerEntry[]     @relation("LedgerEntryCreatedBy")
-  providerPayouts         Payout[]          @relation("PayoutProviderUser")
-  requestedPayouts        Payout[]          @relation("PayoutRequestedBy")
-  approvedPayouts         Payout[]          @relation("PayoutApprovedBy")
-  requestedRefunds        RefundRequest[]   @relation("RefundRequestedBy")
-  approvedRefunds         RefundRequest[]   @relation("RefundApprovedBy")
+  updatedPlatformSettings PlatformSetting[]   @relation("PlatformSettingUpdatedBy")
+  customerPaymentIntents  PaymentIntent[]     @relation("PaymentIntentCustomer")
+  providerPaymentIntents  PaymentIntent[]     @relation("PaymentIntentProvider")
+  customerServiceRequests ServiceRequest[]    @relation("CustomerServiceRequests")
+  providerProposals       Proposal[]          @relation("ProviderProposals")
+  requestInvitations      RequestInvitation[] @relation("RequestInvitationProvider")
+  jobsAsCustomer          Job[]               @relation("JobCustomer")
+  jobsAsProvider          Job[]               @relation("JobProvider")
+  createdLedgerEntries    LedgerEntry[]       @relation("LedgerEntryCreatedBy")
+  providerPayouts         Payout[]            @relation("PayoutProviderUser")
+  requestedPayouts        Payout[]            @relation("PayoutRequestedBy")
+  approvedPayouts         Payout[]            @relation("PayoutApprovedBy")
+  requestedRefunds        RefundRequest[]     @relation("RefundRequestedBy")
+  approvedRefunds         RefundRequest[]     @relation("RefundApprovedBy")
 }
 
 model Category {
@@ -99,12 +100,30 @@ model ServiceRequest {
   customer           User                 @relation("CustomerServiceRequests", fields: [customerId], references: [id], onDelete: Cascade)
   category           Category             @relation(fields: [categoryId], references: [id], onDelete: Restrict)
   proposals          Proposal[]           @relation("RequestProposals")
+  invitations        RequestInvitation[]
   selectedProposal   Proposal?            @relation("SelectedProposal", fields: [selectedProposalId], references: [id], onDelete: SetNull)
   job                Job?
 
   @@index([customerId, status, createdAt])
   @@index([categoryId, status, createdAt])
   @@index([status, createdAt])
+}
+
+model RequestInvitation {
+  id             String                  @id @default(cuid())
+  requestId      String
+  providerUserId String
+  status         RequestInvitationStatus @default(SENT)
+  respondedAt    DateTime?
+  expiresAt      DateTime?
+  createdAt      DateTime                @default(now())
+  updatedAt      DateTime                @updatedAt
+  request        ServiceRequest          @relation(fields: [requestId], references: [id], onDelete: Cascade)
+  providerUser   User                    @relation("RequestInvitationProvider", fields: [providerUserId], references: [id], onDelete: Cascade)
+
+  @@unique([requestId, providerUserId])
+  @@index([requestId, status, createdAt])
+  @@index([providerUserId, status, createdAt])
 }
 
 model Proposal {
@@ -399,6 +418,13 @@ enum ProposalStatus {
   SUBMITTED
   SELECTED
   REJECTED
+}
+
+enum RequestInvitationStatus {
+  SENT
+  ACCEPTED
+  DECLINED
+  EXPIRED
 }
 
 enum UserRole {
