@@ -2,65 +2,50 @@
 
 import Link from "next/link";
 import { useRouter } from "next/navigation";
-import { FormEvent, useEffect, useMemo, useRef, useState } from "react";
-import {
-  formatRatingValue,
-  formatStars,
-} from "@/components/dashboard/dashboard-formatters";
+import { useMemo, useState } from "react";
 import { useMarketplaceDiscovery } from "@/components/marketplace/use-marketplace-discovery";
-import { MarketplaceWorkerCard } from "@/components/marketplace/marketplace-worker-card";
-import {
-  buildWorkerRankingContext,
-  getWorkerCtaCopy,
-  getWorkerDecisionBadges,
-  getWorkerMainCategoryLabel,
-  getWorkerPriceLabel,
-} from "@/components/marketplace/marketplace-worker-presenter";
 import { buildAuthRoute, saveAuthIntent } from "@/lib/access-control";
 import { trackEvent } from "@/lib/tracking";
-import { resolveWorkerDisplayName } from "@/lib/worker-profile";
 import styles from "./page.module.css";
 
-type QuickAreaChip = {
-  label: string;
-  categorySlug: string;
-};
+const heroExamples = [
+  "Canalização",
+  "Eletricista",
+  "Reparações",
+  "Construção",
+];
 
-type JourneyFlow = {
-  key: "client" | "provider";
-  audience: string;
-  title: string;
-  steps: string[];
-  ctaLabel: string;
-  ctaHref: string;
-};
-
-const journeyFlows: JourneyFlow[] = [
+const flowSteps = [
   {
-    key: "client",
-    audience: "Para clientes",
-    title: "Resolve o teu problema rapidamente",
-    steps: [
-      "Cria o teu pedido de serviço",
-      "Recebe propostas de profissionais reais",
-      "Seleciona, paga sinal e acompanha a execução",
-    ],
-    ctaLabel: "Encontrar profissional",
-    ctaHref: "#discover",
+    title: "Cria o teu pedido",
+    description: "Explica o que precisas, onde e quando queres resolver.",
   },
   {
-    key: "provider",
-    audience: "Para profissionais",
-    title: "Ganha dinheiro com as tuas competências",
-    steps: [
-      "Cria o teu perfil em minutos",
-      "Recebe pedidos na tua área",
-      "Define o teu valor e começa a trabalhar",
-    ],
-    ctaLabel: "Quero trabalhar no Tchuno",
-    ctaHref: "/registo?next=%2Fapp%2Fperfil",
+    title: "Recebe propostas de profissionais reais",
+    description: "Compara opções reais com mais contexto e confiança.",
+  },
+  {
+    title: "Escolhe, paga sinal e acompanha a execução",
+    description: "O contacto desbloqueia após sinal e o trabalho avança.",
   },
 ];
+
+const preferredAreaLabels = [
+  "Canalização",
+  "Eletricista",
+  "Reparações Domésticas",
+  "Construção",
+  "Pintura",
+  "Carpintaria",
+];
+
+function normalizeLabel(value: string): string {
+  return value
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .toLowerCase()
+    .trim();
+}
 
 export default function Home() {
   const router = useRouter();
@@ -73,612 +58,215 @@ export default function Home() {
     const refreshToken = localStorage.getItem("tchuno_refresh_token");
     return Boolean(accessToken || refreshToken);
   });
-  const {
-    discoveryLoading,
-    discoverySearch,
-    discoveryCategory,
-    marketCategories,
-    visibleCategories,
-    visibleWorkers,
-    trustSummary,
-    onDiscoverySearchChange,
-    onToggleDiscoveryCategory,
-    onResetDiscoveryFilters,
-  } = useMarketplaceDiscovery();
-
-  const workerRanking = useMemo(
-    () => buildWorkerRankingContext(visibleWorkers),
-    [visibleWorkers],
-  );
-  const featuredPreviewWorkers = useMemo(
-    () => visibleWorkers.slice(0, 6),
-    [visibleWorkers],
-  );
-  const quickAreaChips = useMemo<QuickAreaChip[]>(
-    () =>
-      marketCategories.slice(0, 4).map((category) => ({
-        label: category.name,
-        categorySlug: category.slug,
-      })),
-    [marketCategories],
-  );
-  const trustReviewCount = useMemo(
-    () =>
-      featuredPreviewWorkers.reduce(
-        (total, worker) => total + (worker.ratingCount || 0),
-        0,
-      ),
-    [featuredPreviewWorkers],
-  );
-  const trustCountValue =
-    trustSummary.totalCount >= 5 ? String(trustSummary.totalCount) : "A crescer";
-  const trustCountNote =
-    trustSummary.totalCount >= 5
-      ? "Profissionais disponíveis em várias áreas"
-      : "Catálogo em expansão.";
-  const trustRatingValue =
-    trustReviewCount >= 5 ? `${trustSummary.avgRating}/5` : "Em atualização";
-  const trustRatingNote =
-    trustReviewCount >= 5
-      ? `Com base em ${trustReviewCount} avaliações públicas`
-      : "A recolher mais avaliações.";
-  const trustResponseEta = useMemo(() => {
-    const highConfidence = featuredPreviewWorkers.some(
-      (worker) =>
-        worker.isAvailable &&
-        (worker.ratingCount >= 10 || worker.experienceYears >= 8),
+  const loginHref = buildAuthRoute({
+    mode: "login",
+    nextPath: "/app/pedidos",
+  });
+  const registerHref = buildAuthRoute({
+    mode: "register",
+    nextPath: "/app/pedidos",
+  });
+  const { discoveryLoading, marketCategories, trustSummary } =
+    useMarketplaceDiscovery();
+  const featuredAreas = useMemo(() => {
+    const namesBySlug = new Map(
+      marketCategories.map((category) => [
+        normalizeLabel(category.name),
+        category.name,
+      ]),
     );
-    if (highConfidence) {
-      return "~10 min";
-    }
-
-    const mediumConfidence = featuredPreviewWorkers.some(
-      (worker) =>
-        worker.isAvailable &&
-        (worker.ratingCount >= 4 || worker.experienceYears >= 4),
+    const areas = preferredAreaLabels.map(
+      (label) => namesBySlug.get(normalizeLabel(label)) ?? label,
     );
-    if (mediumConfidence) {
-      return "~30 min";
-    }
 
-    return "Até 1h";
-  }, [featuredPreviewWorkers]);
-  const workerHeuristicSnapshot = useMemo(
-    () =>
-      featuredPreviewWorkers.map((worker) => {
-        const hasHourlyRate = typeof worker.hourlyRate === "number";
-        const ctaCopy = getWorkerCtaCopy({
-          isAvailable: worker.isAvailable,
-          hasHourlyRate,
-        });
+    return Array.from(new Set(areas)).slice(0, 6);
+  }, [marketCategories]);
+  const averageRating =
+    Number(trustSummary.avgRating) > 0
+      ? `${trustSummary.avgRating}/5`
+      : "Sem avaliações";
 
-        return {
-          workerId: worker.id,
-          ctaPrimaryLabel: ctaCopy.primaryLabel,
-          relevanceLabel:
-            workerRanking.rankingLabelById[worker.id] ?? "Relevante nesta lista",
-          highlighted: workerRanking.strongHighlightById[worker.id] ?? false,
-          ratingRank: workerRanking.ratingRankById[worker.id] ?? null,
-          priceRank: workerRanking.priceRankById[worker.id] ?? null,
-          relevanceRank: workerRanking.relevanceRankById[worker.id] ?? null,
-          relevanceScore: workerRanking.relevanceScoreById[worker.id] ?? 0,
-        };
-      }),
-    [featuredPreviewWorkers, workerRanking],
-  );
-
-  const rankingSignature = useMemo(
-    () =>
-      workerHeuristicSnapshot
-        .map(
-          (item) =>
-            `${item.workerId}:${item.ratingRank ?? "-"}:${item.priceRank ?? "-"}:${item.relevanceRank ?? "-"}:${item.relevanceScore.toFixed(3)}`,
-        )
-        .join("|"),
-    [workerHeuristicSnapshot],
-  );
-
-  const highlightSignature = useMemo(
-    () =>
-      workerHeuristicSnapshot
-        .map(
-          (item) =>
-            `${item.workerId}:${item.highlighted ? "1" : "0"}:${item.relevanceLabel ?? "-"}`,
-        )
-        .join("|"),
-    [workerHeuristicSnapshot],
-  );
-
-  const ctaSignature = useMemo(
-    () =>
-      workerHeuristicSnapshot
-        .map((item) => `${item.workerId}:${item.ctaPrimaryLabel}`)
-        .join("|"),
-    [workerHeuristicSnapshot],
-  );
-
-  const lastRankingSignatureRef = useRef<string | null>(null);
-  const lastHighlightSignatureRef = useRef<string | null>(null);
-  const lastCtaSignatureRef = useRef<string | null>(null);
-
-  useEffect(() => {
-    if (rankingSignature.length === 0) {
-      return;
-    }
-
-    if (lastRankingSignatureRef.current === rankingSignature) {
-      return;
-    }
-
-    trackEvent("marketplace.heuristic.ranking.apply", {
-      source: "landing.featured_workers",
-      view: "landing",
-      workerCount: workerHeuristicSnapshot.length,
-      workersWithRatingRank: workerHeuristicSnapshot.filter(
-        (item) => typeof item.ratingRank === "number",
-      ).length,
-      workersWithPriceRank: workerHeuristicSnapshot.filter(
-        (item) => typeof item.priceRank === "number",
-      ).length,
-      topWorkers: workerRanking.topWorkersDebug,
-    });
-
-    lastRankingSignatureRef.current = rankingSignature;
-  }, [rankingSignature, workerHeuristicSnapshot, workerRanking.topWorkersDebug]);
-
-  useEffect(() => {
-    if (highlightSignature.length === 0) {
-      return;
-    }
-
-    if (lastHighlightSignatureRef.current === highlightSignature) {
-      return;
-    }
-
-    trackEvent("marketplace.heuristic.highlight.apply", {
-      source: "landing.featured_workers",
-      view: "landing",
-      workerCount: workerHeuristicSnapshot.length,
-      highlightedCount: workerHeuristicSnapshot.filter((item) => item.highlighted)
-        .length,
-      labels: Array.from(
-        new Set(
-          workerHeuristicSnapshot
-            .map((item) => item.relevanceLabel)
-            .filter((value): value is string => Boolean(value)),
-        ),
-      ),
-    });
-
-    lastHighlightSignatureRef.current = highlightSignature;
-  }, [highlightSignature, workerHeuristicSnapshot]);
-
-  useEffect(() => {
-    if (ctaSignature.length === 0) {
-      return;
-    }
-
-    if (lastCtaSignatureRef.current === ctaSignature) {
-      return;
-    }
-
-    trackEvent("marketplace.heuristic.cta.apply", {
-      source: "landing.featured_workers",
-      view: "landing",
-      workerCount: workerHeuristicSnapshot.length,
-      labels: Array.from(
-        new Set(workerHeuristicSnapshot.map((item) => item.ctaPrimaryLabel)),
-      ),
-    });
-
-    lastCtaSignatureRef.current = ctaSignature;
-  }, [ctaSignature, workerHeuristicSnapshot]);
-
-  function redirectToLoginWithIntent(input: {
-    nextPath: string;
+  function goToCreateRequest(input?: {
     selectedService?: string;
     selectedProviderId?: string;
-    sourcePath?: string;
   }): void {
-    saveAuthIntent({
-      nextPath: input.nextPath,
-      sourcePath: input.sourcePath ?? "/",
-      selectedService: input.selectedService,
-      selectedProviderId: input.selectedProviderId,
-    });
+    const nextPath = "/app/pedidos#novo-pedido";
 
-    router.push(
-      buildAuthRoute({
-        mode: "login",
-        nextPath: input.nextPath,
-      }),
-    );
-  }
+    if (!hasSession) {
+      saveAuthIntent({
+        nextPath,
+        sourcePath: "/",
+        selectedService: input?.selectedService,
+        selectedProviderId: input?.selectedProviderId,
+      });
 
-  function scrollToDiscoverResults() {
-    if (typeof document === "undefined") {
+      router.push(
+        buildAuthRoute({
+          mode: "login",
+          nextPath,
+        }),
+      );
       return;
     }
 
-    document
-      .getElementById("discover")
-      ?.scrollIntoView({ behavior: "smooth", block: "start" });
+    router.push(nextPath);
   }
 
-  function onSubmitHeroSearch(event: FormEvent<HTMLFormElement>) {
-    event.preventDefault();
-    scrollToDiscoverResults();
-
+  function handleHeroCreateRequest(): void {
     trackEvent("marketplace.cta.click", {
       source: "landing.hero",
       view: "landing",
-      label: "Encontrar profissional",
+      label: "Criar pedido",
       ctaType: "primary",
       sessionState: hasSession ? "authenticated" : "guest",
+      pricingContext: "quote-first",
     });
+
+    goToCreateRequest();
   }
 
-  function onQuickAreaClick(chip: QuickAreaChip) {
-    if (discoverySearch.trim().length > 0) {
-      onDiscoverySearchChange("");
-    }
+  function handleFinalCreateRequest(): void {
+    trackEvent("marketplace.cta.click", {
+      source: "landing.final_cta",
+      view: "landing",
+      label: "Criar pedido",
+      ctaType: "primary",
+      sessionState: hasSession ? "authenticated" : "guest",
+      pricingContext: "quote-first",
+    });
 
-    onToggleDiscoveryCategory(chip.categorySlug);
-
-    scrollToDiscoverResults();
+    goToCreateRequest();
   }
 
   return (
-    <main className={`shell marketplace-shell ${styles.marketplaceHome}`}>
-      <section className={`card card--wide ${styles.landingSurface}`}>
-        <header className={styles.landingHero} aria-label="Hero da landing">
-          <p className={`kicker ${styles.heroKicker}`}>Tchuno • Marketplace</p>
-          <h1 className={styles.heroTitle}>O que precisas hoje?</h1>
-          <p className={`subtitle ${styles.heroSubtitle}`}>
-            Encontra profissionais de confiança perto de ti.
-          </p>
+    <main className={`shell marketplace-shell ${styles.homePage}`}>
+      <section className={`card card--wide ${styles.homeSurface}`}>
+        <header className={styles.topBar} aria-label="Navegação principal">
+          <Link href="/" className={styles.brandLink}>
+            <span className={styles.brandMark}>Tchuno</span>
+          </Link>
 
-          <form className={styles.landingSearch} onSubmit={onSubmitHeroSearch}>
-            <label
-              htmlFor="landing-search-input"
-              className={styles.srOnly}
-            >
-              Pesquisa principal
-            </label>
-            <div className={styles.landingSearchRow}>
-              <input
-                id="landing-search-input"
-                type="search"
-                value={discoverySearch}
-                onChange={(event) => onDiscoverySearchChange(event.target.value)}
-                placeholder="Procurar professor, eletricista, designer..."
-                className={styles.landingSearchInput}
-              />
-              <button type="submit" className={`primary ${styles.searchSubmit}`}>
-                Encontrar profissional
-              </button>
-            </div>
-          </form>
-
-          <div className={styles.heroPrimaryActions}>
-            <Link href="/registo?next=%2Fapp%2Fperfil" className="primary primary--ghost">
-              Quero trabalhar no Tchuno
+          <div className={styles.topActions}>
+            <Link href={loginHref} className={styles.topActionLink}>
+              Entrar
+            </Link>
+            <Link href={registerHref} className="primary primary--ghost">
+              Criar conta
             </Link>
           </div>
-
-          <div className={styles.landingChipRow} aria-label="Categorias rápidas">
-            {quickAreaChips.map((chip) => (
-              <button
-                key={chip.label}
-                type="button"
-                className="marketplace-chip"
-                onClick={() => onQuickAreaClick(chip)}
-              >
-                {chip.label}
-              </button>
-            ))}
-          </div>
-
-          <p className={styles.heroPolicy}>
-            O valor é acordado por propostas no pedido e o contacto desbloqueia após sinal.
-          </p>
         </header>
 
-        <section className={styles.landingTrust} aria-label="Sinais de confiança">
-          <div className={styles.marketplaceSectionHeader}>
-            <h2 className="section-title">Confiança para decidir rápido</h2>
-          </div>
-          <div className={`overview-grid ${styles.landingTrustGrid}`}>
-            <article className="metric-card">
-              <p className="metric-label">Profissionais disponíveis</p>
-              <p className="metric-value">{trustCountValue}</p>
-              <p className="metric-note">{trustCountNote}</p>
-            </article>
-            <article className="metric-card">
-              <p className="metric-label">Avaliação média</p>
-              <p className="metric-value">{trustRatingValue}</p>
-              <p className="metric-note">{trustRatingNote}</p>
-            </article>
-            <article className="metric-card">
-              <p className="metric-label">Resposta média estimada</p>
-              <p className="metric-value">{trustResponseEta}</p>
-              <p className="metric-note">Estimativa baseada no histórico</p>
-            </article>
-          </div>
-        </section>
-
-        <section className="marketplace-section" id="discover">
-          <div className={styles.marketplaceSectionHeader}>
-            <h2 className="section-title">Profissionais em destaque</h2>
-            <p className="section-lead">
-              Perfis com melhor equilíbrio entre reputação e disponibilidade.
+        <header className={styles.hero} aria-label="Apresentação do Tchuno">
+          <div className={styles.heroContent}>
+            <h1 className={styles.heroTitle}>O que precisas resolver hoje?</h1>
+            <p className={styles.heroSubtitle}>
+              Recebe propostas de profissionais perto de ti e escolhe com
+              confiança.
             </p>
-          </div>
-
-          <div className={`actions actions--inline ${styles.landingResultActions}`}>
-            <Link href="/prestadores" className="primary primary--ghost">
-              Ver catálogo completo
-            </Link>
-          </div>
-
-          <div className="dashboard-nav marketplace-chip-grid" aria-label="Categorias">
-            {visibleCategories.length === 0 ? (
-              <div className="marketplace-empty-state">
-                <p className="empty-state">
-                  Sem categorias para esta pesquisa. Tenta um termo mais amplo.
-                </p>
-              </div>
-            ) : (
-              visibleCategories.slice(0, 6).map((category) => (
-                <button
-                  key={category.id}
-                  type="button"
-                  className={`marketplace-chip${
-                    discoveryCategory === category.slug ? " is-active" : ""
-                  }`}
-                  onClick={() => onToggleDiscoveryCategory(category.slug)}
-                >
-                  {category.name}
-                </button>
-              ))
-            )}
-            {visibleCategories.length > 6 ? (
-              <Link href="/categorias" className="marketplace-inline-link">
-                Ver todas as áreas
-              </Link>
-            ) : null}
-          </div>
-
-          <p className={styles.discoveryPolicy}>
-            Valor combinado diretamente entre cliente e profissional.
-          </p>
-
-          <div className="panel-grid marketplace-worker-grid">
-            {discoveryLoading ? (
-              <p className="status">A carregar profissionais...</p>
-            ) : featuredPreviewWorkers.length === 0 ? (
-              <div className="marketplace-empty-state">
-                <p className="empty-state">
-                  Não encontrámos profissionais para este filtro. Ajusta a pesquisa ou remove a categoria selecionada.
-                </p>
-                <div className="actions actions--inline">
-                  <button type="button" onClick={onResetDiscoveryFilters}>
-                    Ver mais profissionais
-                  </button>
-                  {hasSession ? (
-                    <Link href="/prestadores" className="primary primary--ghost">
-                      Abrir catálogo completo
-                    </Link>
-                  ) : (
-                    <button
-                      type="button"
-                      className="primary primary--ghost"
-                      onClick={() =>
-                        redirectToLoginWithIntent({
-                          nextPath: "/app/pedidos",
-                          sourcePath: "/",
-                          selectedService:
-                            discoverySearch.trim() || discoveryCategory || undefined,
-                        })
-                      }
-                    >
-                      Entrar para continuar
-                    </button>
-                  )}
-                </div>
-              </div>
-            ) : (
-              featuredPreviewWorkers.map((worker) => {
-                const hasHourlyRate = typeof worker.hourlyRate === "number";
-                const ratingValue = Number(worker.ratingAvg || 0);
-                const ctaCopy = getWorkerCtaCopy({
-                  isAvailable: worker.isAvailable,
-                  hasHourlyRate,
-                });
-                const rankingLabel =
-                  workerRanking.rankingLabelById[worker.id] ?? "Relevante nesta lista";
-                const isStrongHighlight =
-                  workerRanking.strongHighlightById[worker.id] ?? false;
-                const scoreBreakdown =
-                  workerRanking.scoreBreakdownById[worker.id] ?? null;
-                const decisionBadges = getWorkerDecisionBadges({
-                  isAvailable: worker.isAvailable,
-                  ratingValue,
-                  ratingCount: worker.ratingCount,
-                  experienceYears: worker.experienceYears,
-                  hourlyRate: worker.hourlyRate,
-                  ratingRank: workerRanking.ratingRankById[worker.id] ?? null,
-                  priceRank: workerRanking.priceRankById[worker.id] ?? null,
-                  rankingLabel,
-                  scoreBreakdown,
-                });
-                const priceLabel = getWorkerPriceLabel(worker.hourlyRate);
-                const mainCategoryLabel = getWorkerMainCategoryLabel(worker);
-                const workerTitle = resolveWorkerDisplayName(worker);
-
-                return (
-                  <MarketplaceWorkerCard
-                    key={worker.id}
-                    title={workerTitle}
-                    avatarFallbackLabel={workerTitle}
-                    highlighted={isStrongHighlight}
-                    relevanceLabel={isStrongHighlight ? rankingLabel : undefined}
-                    availabilityTone={worker.isAvailable ? "is-ok" : "is-muted"}
-                    availabilityLabel={
-                      worker.isAvailable ? "Disponível" : "Agenda limitada"
-                    }
-                    rating={{
-                      stars: formatStars(worker.ratingAvg),
-                      value: formatRatingValue(worker.ratingAvg),
-                      reviewCount: worker.ratingCount,
-                    }}
-                    trustSignals={[
-                      {
-                        label: "Especialidade",
-                        value: mainCategoryLabel,
-                      },
-                    ]}
-                    badges={
-                      <>
-                        {decisionBadges.slice(0, 1).map((badge) => (
-                          <span key={badge.label} className={`status-pill ${badge.tone}`}>
-                            {badge.label}
-                          </span>
-                        ))}
-                      </>
-                    }
-                    details={[
-                      {
-                        label: "Localização",
-                        value: worker.location ?? "Não indicada",
-                      },
-                      {
-                        label: "Preço",
-                        value: priceLabel,
-                      },
-                    ]}
-                    onCardClick={() =>
-                      trackEvent("marketplace.worker.card.click", {
-                        source: "landing.worker_card",
-                        view: "landing",
-                        workerId: worker.id,
-                        highlighted: isStrongHighlight,
-                        relevanceLabel: rankingLabel,
-                      })
-                    }
-                    actions={
-                      hasSession ? (
-                        <Link
-                          href="/app/pedidos#novo-pedido"
-                          className="primary"
-                          onClick={() =>
-                            trackEvent("marketplace.cta.click", {
-                              source: "landing.worker_card",
-                              view: "landing",
-                              workerId: worker.id,
-                              label: ctaCopy.primaryLabel,
-                              ctaType: "primary",
-                              sessionState: "authenticated",
-                            })
-                          }
-                        >
-                          {ctaCopy.primaryLabel}
-                        </Link>
-                      ) : (
-                        <button
-                          type="button"
-                          className="primary"
-                          onClick={() =>
-                            redirectToLoginWithIntent({
-                              nextPath: "/app/pedidos#novo-pedido",
-                              sourcePath: "/",
-                              selectedService:
-                                discoverySearch.trim() || mainCategoryLabel || undefined,
-                              selectedProviderId: worker.id,
-                            })
-                          }
-                        >
-                          Entrar para pedir serviço
-                        </button>
-                      )
-                    }
-                    footer={
-                      <Link
-                        href={`/prestadores/${worker.userId}`}
-                        className="marketplace-inline-link"
-                      >
-                        Ver perfil
-                      </Link>
-                    }
-                  />
-                );
-              })
-            )}
-          </div>
-        </section>
-
-        <section className="landing-how" aria-label="Como funciona">
-          <div className="landing-how-head">
-            <h2 className="section-title">Como funciona no Tchuno</h2>
-            <p className="section-lead">
-              Encontra quem resolve o teu problema ou começa a ganhar com o teu talento.
-              Tudo em poucos passos.
+            <p className={styles.heroFlow}>
+              Descreve o serviço. Recebe propostas. Escolhe com confiança.
             </p>
-          </div>
 
-          <div className="landing-how-grid">
-            {journeyFlows.map((journey) => (
-              <article
-                key={journey.audience}
-                className={`landing-how-card ${
-                  journey.key === "client" ? "is-client" : "is-provider"
-                }`}
+            <div className={styles.heroActions}>
+              <button
+                type="button"
+                className={`primary ${styles.heroPrimary}`}
+                onClick={handleHeroCreateRequest}
               >
-                <p className="landing-how-audience">{journey.audience}</p>
-                <h3>{journey.title}</h3>
-                <ol className="landing-how-steps">
-                  {journey.steps.map((step, index) => (
-                    <li key={step}>
-                      <span className="landing-how-step-index">{index + 1}</span>
-                      <span>{step}</span>
-                    </li>
-                  ))}
-                </ol>
-                {journey.ctaHref.startsWith("#") ? (
-                  <button
-                    type="button"
-                    className={`primary landing-how-cta${
-                      journey.key === "provider" ? " primary--ghost" : ""
-                    }`}
-                    onClick={scrollToDiscoverResults}
-                  >
-                    {journey.ctaLabel}
-                  </button>
-                ) : (
-                  <Link
-                    href={journey.ctaHref}
-                    className={`primary landing-how-cta${
-                      journey.key === "provider" ? " primary--ghost" : ""
-                    }`}
-                  >
-                    {journey.ctaLabel}
-                  </Link>
-                )}
+                Criar pedido
+              </button>
+              <Link href="/registo" className="primary primary--ghost">
+                Quero trabalhar no Tchuno
+              </Link>
+            </div>
+
+            <p className={styles.heroExamples}>{heroExamples.join(" • ")}</p>
+          </div>
+        </header>
+
+        <section className={styles.sectionBlock} aria-label="Como funciona">
+          <div className={styles.sectionHeader}>
+            <p className="kicker">Como funciona</p>
+            <h2 className="section-title">Pedido primeiro. Escolha depois.</h2>
+          </div>
+
+          <div className={styles.stepGrid}>
+            {flowSteps.map((step, index) => (
+              <article key={step.title} className={styles.stepCard}>
+                <span className={styles.stepNumber}>{index + 1}</span>
+                <h3>{step.title}</h3>
+                <p>{step.description}</p>
+              </article>
+            ))}
+          </div>
+        </section>
+
+        <section className={styles.sectionBlock} aria-label="Confiança">
+          <div className={styles.sectionHeader}>
+            <p className="kicker">Confiança</p>
+            <h2 className="section-title">Indicadores simples para decidir</h2>
+          </div>
+
+          <div className={styles.metricGrid}>
+            <article className={styles.metricCard}>
+              <p className="metric-label">Profissionais disponíveis</p>
+              <p className={styles.metricValue}>{trustSummary.totalCount}</p>
+            </article>
+            <article className={styles.metricCard}>
+              <p className="metric-label">Avaliação média</p>
+              <p className={styles.metricValue}>{averageRating}</p>
+            </article>
+            <article className={styles.metricCard}>
+              <p className="metric-label">Resposta média estimada</p>
+              <p className={styles.metricValue}>{trustSummary.responseEstimate}</p>
+            </article>
+          </div>
+        </section>
+
+        <section className={styles.sectionBlock} aria-label="Áreas do Tchuno">
+          <div className={styles.sectionHeader}>
+            <p className="kicker">Áreas</p>
+            <h2 className="section-title">Áreas onde já podes pedir ajuda</h2>
+          </div>
+
+          {discoveryLoading ? (
+            <p className="status">A carregar áreas...</p>
+          ) : null}
+
+          <div className={styles.areaGrid}>
+            {featuredAreas.map((area) => (
+              <article key={area} className={styles.areaCard}>
+                {area}
               </article>
             ))}
           </div>
 
-          <div className="landing-how-final">
-            <h3>Começa agora, sem complicação</h3>
-            <Link
-              href="/login?next=%2Fapp%2Fpedidos"
-              className="primary landing-how-final-cta"
-            >
-              Entrar no Tchuno
+          <div className={styles.sectionAction}>
+            <Link href="/categorias" className="primary primary--ghost">
+              Ver todas as áreas
             </Link>
           </div>
         </section>
 
+        <section className={styles.finalCta} aria-label="Chamadas para ação finais">
+          <article className={`${styles.finalCard} ${styles.finalCardPrimary}`}>
+            <p className="kicker">Para clientes</p>
+            <h2>Precisas de ajuda agora?</h2>
+            <p>Cria o teu pedido e recebe propostas sem perder tempo.</p>
+            <button type="button" className="primary" onClick={handleFinalCreateRequest}>
+              Criar pedido
+            </button>
+          </article>
+
+          <article className={`${styles.finalCard} ${styles.finalCardSecondary}`}>
+            <p className="kicker">Para prestadores</p>
+            <h2>Queres ganhar dinheiro com as tuas competências?</h2>
+            <p>Cria o teu perfil e começa a receber pedidos na tua área.</p>
+            <Link href="/registo" className="primary primary--ghost">
+              Criar perfil de prestador
+            </Link>
+          </article>
+        </section>
       </section>
     </main>
   );

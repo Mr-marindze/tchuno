@@ -1,21 +1,9 @@
 "use client";
 
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { buildWorkerRankingContext } from "@/components/marketplace/marketplace-worker-presenter";
+import { useEffect, useState } from "react";
 import { listCategories } from "@/lib/categories";
 import { humanizeUnknownError } from "@/lib/http-errors";
-import { listSharedWorkerRanking } from "@/lib/shared-worker-ranking";
-import {
-  getBehaviorAggregationVersion,
-  setSharedWorkerBehaviorSignals,
-  subscribeBehaviorAggregation,
-  trackEvent,
-} from "@/lib/tracking";
-import {
-  listWorkerProfiles,
-  resolveWorkerPublicName,
-  WorkerProfile,
-} from "@/lib/worker-profile";
+import { listWorkerProfiles, WorkerProfile } from "@/lib/worker-profile";
 
 type MarketplaceCategory = {
   id: string;
@@ -24,48 +12,61 @@ type MarketplaceCategory = {
   description: string | null;
 };
 
-type DiscoveryTrustSummary = {
-  totalCount: number;
-  avgRating: string;
-};
-
 type UseMarketplaceDiscoveryResult = {
   discoveryLoading: boolean;
   discoveryMessage: string;
-  discoverySearch: string;
-  discoveryCategory: string;
   marketCategories: MarketplaceCategory[];
-  featuredWorkers: WorkerProfile[];
-  visibleCategories: MarketplaceCategory[];
-  visibleWorkers: WorkerProfile[];
-  trustSummary: DiscoveryTrustSummary;
-  onDiscoverySearchChange: (value: string) => void;
-  onToggleDiscoveryCategory: (categorySlug: string) => void;
-  onResetDiscoveryFilters: () => void;
+  trustSummary: {
+    totalCount: number;
+    avgRating: string;
+    responseEstimate: string;
+  };
 };
+
+function getResponseEstimate(workers: WorkerProfile[]): string {
+  const fastResponse = workers.some(
+    (worker) =>
+      worker.isAvailable &&
+      (worker.ratingCount >= 10 || worker.experienceYears >= 8),
+  );
+
+  if (fastResponse) {
+    return "~10 min";
+  }
+
+  const mediumResponse = workers.some(
+    (worker) =>
+      worker.isAvailable &&
+      (worker.ratingCount >= 4 || worker.experienceYears >= 4),
+  );
+
+  if (mediumResponse) {
+    return "~30 min";
+  }
+
+  return "Até 1h";
+}
 
 export function useMarketplaceDiscovery(): UseMarketplaceDiscoveryResult {
   const [discoveryLoading, setDiscoveryLoading] = useState(true);
   const [discoveryMessage, setDiscoveryMessage] = useState(
-    "A carregar descoberta de profissionais...",
+    "A carregar áreas do Tchuno...",
   );
-  const [discoverySearch, setDiscoverySearch] = useState("");
-  const [discoveryCategory, setDiscoveryCategory] = useState("");
   const [marketCategories, setMarketCategories] = useState<MarketplaceCategory[]>(
     [],
   );
-  const [featuredWorkers, setFeaturedWorkers] = useState<WorkerProfile[]>([]);
-  const [behaviorAggregationVersion, setBehaviorAggregationVersion] = useState(0);
-  const searchTrackTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(
-    null,
-  );
+  const [trustSummary, setTrustSummary] = useState({
+    totalCount: 0,
+    avgRating: "0.0",
+    responseEstimate: "Até 1h",
+  });
 
   useEffect(() => {
     let isActive = true;
 
     async function loadDiscovery() {
       setDiscoveryLoading(true);
-      setDiscoveryMessage("A carregar descoberta de profissionais...");
+      setDiscoveryMessage("A carregar áreas do Tchuno...");
 
       try {
         const [categories, workersResponse] = await Promise.all([
@@ -93,15 +94,27 @@ export function useMarketplaceDiscovery(): UseMarketplaceDiscoveryResult {
             description: item.description,
           }));
 
-        const topWorkers = [...workersResponse.data]
-          .sort((a, b) => Number(b.ratingAvg) - Number(a.ratingAvg))
-          .slice(0, 8);
-
         setMarketCategories(activeCategories);
-        setFeaturedWorkers(topWorkers);
-        setDiscoveryMessage(
-          "Pesquisa por serviço, área ou profissional para encontrar o melhor perfil.",
+        const ratedWorkers = workersResponse.data.filter(
+          (worker) => Number(worker.ratingCount) > 0,
         );
+        const avgRating =
+          ratedWorkers.length > 0
+            ? (
+                ratedWorkers.reduce(
+                  (acc, worker) => acc + Number(worker.ratingAvg || 0),
+                  0,
+                ) / ratedWorkers.length
+              ).toFixed(1)
+            : "0.0";
+
+        setTrustSummary({
+          totalCount:
+            workersResponse.meta?.total ?? workersResponse.data.length,
+          avgRating,
+          responseEstimate: getResponseEstimate(workersResponse.data),
+        });
+        setDiscoveryMessage("Áreas disponíveis carregadas.");
       } catch (error) {
         if (!isActive) {
           return;
@@ -110,7 +123,7 @@ export function useMarketplaceDiscovery(): UseMarketplaceDiscoveryResult {
         setDiscoveryMessage(
           humanizeUnknownError(
             error,
-            "Descoberta indisponível agora. Tenta novamente em instantes.",
+            "Não foi possível carregar as áreas neste momento.",
           ),
         );
       } finally {
@@ -127,198 +140,10 @@ export function useMarketplaceDiscovery(): UseMarketplaceDiscoveryResult {
     };
   }, []);
 
-  useEffect(() => {
-    return () => {
-      if (searchTrackTimeoutRef.current) {
-        clearTimeout(searchTrackTimeoutRef.current);
-      }
-    };
-  }, []);
-
-  useEffect(() => {
-    setBehaviorAggregationVersion(getBehaviorAggregationVersion());
-    return subscribeBehaviorAggregation(() => {
-      setBehaviorAggregationVersion(getBehaviorAggregationVersion());
-    });
-  }, []);
-
-  useEffect(() => {
-    let isActive = true;
-
-    async function bootstrapSharedRanking() {
-      try {
-        const response = await listSharedWorkerRanking({
-          page: 1,
-          limit: 100,
-          includeUnavailable: true,
-        });
-
-        if (!isActive) {
-          return;
-        }
-
-        setSharedWorkerBehaviorSignals(
-          response.data.map((item) => ({
-            workerProfileId: item.workerProfileId,
-            interactions: item.interactions,
-            clicks: item.clicks,
-            ctaClicks: item.ctaClicks,
-            conversions: item.conversions,
-            lastEventAt: item.lastEventAt,
-          })),
-        );
-      } catch {
-        // Keep local-only ranking when shared ranking is unavailable.
-      }
-    }
-
-    void bootstrapSharedRanking();
-
-    return () => {
-      isActive = false;
-    };
-  }, []);
-
-  const normalizedSearch = discoverySearch.trim().toLowerCase();
-
-  const visibleCategories = useMemo(() => {
-    if (normalizedSearch.length === 0) {
-      return marketCategories;
-    }
-
-    return marketCategories.filter((category) => {
-      const description = category.description?.toLowerCase() ?? "";
-      return (
-        category.name.toLowerCase().includes(normalizedSearch) ||
-        description.includes(normalizedSearch)
-      );
-    });
-  }, [marketCategories, normalizedSearch]);
-
-  const visibleWorkers = useMemo(() => {
-    const filtered = featuredWorkers.filter((worker) => {
-      if (
-        discoveryCategory.length > 0 &&
-        !worker.categories.some((item) => item.slug === discoveryCategory)
-      ) {
-        return false;
-      }
-
-      if (normalizedSearch.length === 0) {
-        return true;
-      }
-
-      const categoriesLabel = worker.categories
-        .map((item) => item.name.toLowerCase())
-        .join(" ");
-      const publicName = resolveWorkerPublicName(worker)?.toLowerCase() ?? "";
-
-      return (
-        worker.location?.toLowerCase().includes(normalizedSearch) ||
-        categoriesLabel.includes(normalizedSearch) ||
-        worker.bio?.toLowerCase().includes(normalizedSearch) ||
-        publicName.includes(normalizedSearch)
-      );
-    });
-
-    const ranking = buildWorkerRankingContext(
-      filtered,
-      behaviorAggregationVersion,
-    );
-    return [...filtered].sort((a, b) => {
-      const scoreDiff =
-        (ranking.relevanceScoreById[b.id] ?? 0) -
-        (ranking.relevanceScoreById[a.id] ?? 0);
-      if (scoreDiff !== 0) {
-        return scoreDiff;
-      }
-
-      return Number(b.ratingAvg || 0) - Number(a.ratingAvg || 0);
-    });
-  }, [
-    featuredWorkers,
-    discoveryCategory,
-    normalizedSearch,
-    behaviorAggregationVersion,
-  ]);
-
-  const trustSummary = useMemo(() => {
-    const totalCount = featuredWorkers.length;
-    const avgRating =
-      featuredWorkers.length > 0
-        ? (
-            featuredWorkers.reduce(
-              (acc, worker) => acc + Number(worker.ratingAvg || 0),
-              0,
-            ) / featuredWorkers.length
-          ).toFixed(1)
-        : "0.0";
-
-    return {
-      totalCount,
-      avgRating,
-    };
-  }, [featuredWorkers]);
-
-  const handleDiscoverySearchChange = useCallback(
-    (value: string) => {
-      setDiscoverySearch(value);
-
-      if (searchTrackTimeoutRef.current) {
-        clearTimeout(searchTrackTimeoutRef.current);
-      }
-
-      searchTrackTimeoutRef.current = setTimeout(() => {
-        const normalized = value.trim();
-        trackEvent("marketplace.search.change", {
-          source: "landing.discovery",
-          view: "landing",
-          queryLength: normalized.length,
-          hasCategoryFilter: discoveryCategory.length > 0,
-          resultCount: visibleWorkers.length,
-        });
-      }, 250);
-    },
-    [discoveryCategory, visibleWorkers.length],
-  );
-
-  const handleToggleDiscoveryCategory = useCallback(
-    (categorySlug: string) => {
-      setDiscoveryCategory((current) => {
-        const nextCategory = current === categorySlug ? "" : categorySlug;
-
-        trackEvent("marketplace.category.select", {
-          source: "landing.discovery",
-          view: "landing",
-          categorySlug: nextCategory || null,
-          previousCategorySlug: current || null,
-          categoryCount: marketCategories.length,
-          resultCount: visibleWorkers.length,
-        });
-
-        return nextCategory;
-      });
-    },
-    [marketCategories.length, visibleWorkers.length],
-  );
-
-  const handleResetDiscoveryFilters = useCallback(() => {
-    setDiscoverySearch("");
-    setDiscoveryCategory("");
-  }, []);
-
   return {
     discoveryLoading,
     discoveryMessage,
-    discoverySearch,
-    discoveryCategory,
     marketCategories,
-    featuredWorkers,
-    visibleCategories,
-    visibleWorkers,
     trustSummary,
-    onDiscoverySearchChange: handleDiscoverySearchChange,
-    onToggleDiscoveryCategory: handleToggleDiscoveryCategory,
-    onResetDiscoveryFilters: handleResetDiscoveryFilters,
   };
 }
