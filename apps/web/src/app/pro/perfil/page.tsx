@@ -6,6 +6,7 @@ import { listCategories, Category } from '@/lib/categories';
 import { humanizeUnknownError } from '@/lib/http-errors';
 import {
   getMyWorkerProfile,
+  resolveWorkerDisplayName,
   upsertMyWorkerProfile,
   WorkerProfile,
 } from '@/lib/worker-profile';
@@ -18,6 +19,7 @@ export default function ProviderProfilePage() {
   const [saving, setSaving] = useState(false);
   const [status, setStatus] = useState('A carregar perfil profissional...');
 
+  const [publicName, setPublicName] = useState('');
   const [bio, setBio] = useState('');
   const [location, setLocation] = useState('');
   const [hourlyRate, setHourlyRate] = useState('');
@@ -56,6 +58,7 @@ export default function ProviderProfilePage() {
         setAccessToken(token);
         setCategories(activeCategories);
         setProfile(myProfile);
+        setPublicName(myProfile?.publicName ?? '');
         setBio(myProfile?.bio ?? '');
         setLocation(myProfile?.location ?? '');
         setHourlyRate(
@@ -87,7 +90,7 @@ export default function ProviderProfilePage() {
     if (!profile) {
       return 'Prestador';
     }
-    return profile.displayName ?? profile.publicName ?? profile.name ?? 'Prestador';
+    return resolveWorkerDisplayName(profile, 'Prestador');
   }, [profile]);
 
   function toggleCategory(categoryId: string, checked: boolean) {
@@ -128,6 +131,7 @@ export default function ProviderProfilePage() {
 
     try {
       const updated = await upsertMyWorkerProfile(accessToken, {
+        publicName: publicName.trim().length > 0 ? publicName.trim() : undefined,
         bio: bio.trim().length > 0 ? bio.trim() : undefined,
         location: location.trim().length > 0 ? location.trim() : undefined,
         hourlyRate:
@@ -138,6 +142,7 @@ export default function ProviderProfilePage() {
       });
 
       setProfile(updated);
+      setPublicName(updated.publicName ?? '');
       setStatus('Perfil profissional atualizado.');
     } catch (error) {
       setStatus(humanizeUnknownError(error, 'Falha ao guardar perfil.'));
@@ -160,7 +165,7 @@ export default function ProviderProfilePage() {
 
         <div className='mt-4 grid gap-3 sm:grid-cols-3'>
           <article className='rounded-xl border border-slate-200 bg-slate-50 p-3'>
-            <p className='text-xs text-slate-500'>Nome</p>
+            <p className='text-xs text-slate-500'>Nome público</p>
             <p className='mt-1 font-semibold text-slate-900'>{profileName}</p>
           </article>
           <article className='rounded-xl border border-slate-200 bg-slate-50 p-3'>
@@ -180,6 +185,22 @@ export default function ProviderProfilePage() {
 
       <section className='rounded-2xl border border-slate-200 bg-white p-4 shadow-sm sm:p-5'>
         <form className='space-y-4' onSubmit={handleSubmit}>
+          <label className='block space-y-1 text-sm text-slate-700'>
+            <span>Nome público</span>
+            <input
+              type='text'
+              value={publicName}
+              onChange={(event) => setPublicName(event.target.value)}
+              maxLength={80}
+              placeholder='Ex.: João Canalizações'
+              className='w-full rounded-lg border border-slate-300 px-3 py-2 outline-none focus:border-blue-500'
+            />
+            <span className='block text-xs text-slate-500'>
+              Este nome aparece no catálogo e no teu perfil público. Se deixares vazio,
+              usamos o nome da tua conta.
+            </span>
+          </label>
+
           <label className='block space-y-1 text-sm text-slate-700'>
             <span>Bio</span>
             <textarea

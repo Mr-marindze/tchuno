@@ -19,6 +19,14 @@ export class UpsertWorkerProfileDto {
     typeof value === 'string' ? value.trim() : value,
   )
   @IsString()
+  @MaxLength(80)
+  publicName?: string;
+
+  @IsOptional()
+  @Transform(({ value }: { value: unknown }) =>
+    typeof value === 'string' ? value.trim() : value,
+  )
+  @IsString()
   @MaxLength(1000)
   bio?: string;
 

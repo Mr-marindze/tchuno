@@ -58,6 +58,7 @@ model Category {
 model WorkerProfile {
   id              String                  @id @default(cuid())
   userId          String                  @unique
+  publicName      String?
   bio             String?
   location        String?
   hourlyRate      Int?

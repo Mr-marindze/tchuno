@@ -14,6 +14,11 @@ import { UpdateWorkerProfileDto } from './dto/update-worker-profile.dto';
 import { UpsertWorkerProfileDto } from './dto/upsert-worker-profile.dto';
 
 const workerProfileInclude = {
+  user: {
+    select: {
+      name: true,
+    },
+  },
   categories: {
     include: {
       category: true,
@@ -53,6 +58,22 @@ export class WorkerProfileService {
       ...(normalizedSearch
         ? {
             OR: [
+              {
+                publicName: {
+                  contains: normalizedSearch,
+                  mode: 'insensitive',
+                },
+              },
+              {
+                user: {
+                  is: {
+                    name: {
+                      contains: normalizedSearch,
+                      mode: 'insensitive',
+                    },
+                  },
+                },
+              },
               {
                 userId: {
                   contains: normalizedSearch,
@@ -137,6 +158,7 @@ export class WorkerProfileService {
         where: { userId },
         create: {
           userId,
+          publicName: dto.publicName?.trim() || null,
           bio: dto.bio?.trim() || null,
           location: dto.location?.trim() || null,
           hourlyRate: dto.hourlyRate ?? null,
@@ -144,6 +166,7 @@ export class WorkerProfileService {
           isAvailable: dto.isAvailable ?? true,
         },
         update: {
+          publicName: dto.publicName?.trim() || null,
           bio: dto.bio?.trim() || null,
           location: dto.location?.trim() || null,
           hourlyRate: dto.hourlyRate ?? null,
@@ -194,6 +217,9 @@ export class WorkerProfileService {
       await tx.workerProfile.update({
         where: { userId },
         data: {
+          ...(dto.publicName !== undefined
+            ? { publicName: dto.publicName.trim() || null }
+            : {}),
           ...(dto.bio !== undefined ? { bio: dto.bio.trim() || null } : {}),
           ...(dto.location !== undefined
             ? { location: dto.location.trim() || null }
@@ -283,9 +309,16 @@ export class WorkerProfileService {
   }
 
   private toDto(profile: WorkerProfileWithRelations) {
+    const publicName = profile.publicName?.trim() || null;
+    const accountName = profile.user.name?.trim() || null;
+    const displayName = publicName ?? accountName;
+
     return {
       id: profile.id,
       userId: profile.userId,
+      publicName,
+      displayName,
+      name: accountName,
       bio: profile.bio,
       location: profile.location,
       hourlyRate: profile.hourlyRate,

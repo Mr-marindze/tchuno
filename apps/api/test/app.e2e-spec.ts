@@ -46,6 +46,9 @@ type CategoryPayload = {
 type WorkerProfilePayload = {
   id: string;
   userId: string;
+  publicName: string | null;
+  displayName: string | null;
+  name: string | null;
   ratingAvg: string;
   ratingCount: number;
 };
@@ -813,6 +816,92 @@ describe('Auth and Sessions (e2e)', () => {
       .set('x-device-id', 'reuse-device')
       .send({ refreshToken: firstRefreshBody.refreshToken })
       .expect(401);
+  });
+
+  it('persists public worker names and falls back to account name when cleared', async () => {
+    const email = `worker_public_name_${Date.now()}@tchuno.local`;
+    const password = 'abc12345';
+
+    const registerResponse = await request(app.getHttpServer())
+      .post('/auth/register')
+      .send({ email, password, name: 'Nome da Conta' })
+      .expect(201);
+    const auth = registerResponse.body as AuthPayload;
+
+    const category = (await prisma.category.create({
+      data: {
+        name: `Pintura Pública ${Date.now()}`,
+        slug: `pintura-publica-${Date.now()}`,
+        description: 'Categoria para validar identidade pública',
+        sortOrder: 38,
+      },
+      select: {
+        id: true,
+      },
+    })) as { id: string };
+
+    const upsertResponse = await request(app.getHttpServer())
+      .put('/worker-profile/me')
+      .set('Authorization', `Bearer ${auth.accessToken}`)
+      .send({
+        publicName: 'Mestre Nando',
+        bio: 'Especialista em acabamentos e pintura',
+        location: 'Matola',
+        experienceYears: 6,
+        isAvailable: true,
+        categoryIds: [category.id],
+      })
+      .expect(200);
+    const upsertedProfile = upsertResponse.body as WorkerProfilePayload;
+
+    expect(upsertedProfile.publicName).toBe('Mestre Nando');
+    expect(upsertedProfile.displayName).toBe('Mestre Nando');
+    expect(upsertedProfile.name).toBe('Nome da Conta');
+
+    const meResponse = await request(app.getHttpServer())
+      .get('/worker-profile/me')
+      .set('Authorization', `Bearer ${auth.accessToken}`)
+      .expect(200);
+    const myProfile = meResponse.body as WorkerProfilePayload;
+    expect(myProfile.publicName).toBe('Mestre Nando');
+    expect(myProfile.displayName).toBe('Mestre Nando');
+
+    const listResponse = await request(app.getHttpServer())
+      .get('/worker-profile?search=Mestre%20Nando')
+      .expect(200);
+    const listedProfiles =
+      listResponse.body as PaginatedResponse<WorkerProfilePayload>;
+    expect(
+      listedProfiles.data.some((profile) => profile.userId === auth.user.id),
+    ).toBe(true);
+
+    const publicResponse = await request(app.getHttpServer())
+      .get(`/worker-profile/${auth.user.id}`)
+      .expect(200);
+    const publicProfile = publicResponse.body as WorkerProfilePayload;
+    expect(publicProfile.publicName).toBe('Mestre Nando');
+    expect(publicProfile.displayName).toBe('Mestre Nando');
+    expect(publicProfile.name).toBe('Nome da Conta');
+
+    const clearResponse = await request(app.getHttpServer())
+      .patch('/worker-profile/me')
+      .set('Authorization', `Bearer ${auth.accessToken}`)
+      .send({ publicName: '   ' })
+      .expect(200);
+    const clearedProfile = clearResponse.body as WorkerProfilePayload;
+
+    expect(clearedProfile.publicName).toBeNull();
+    expect(clearedProfile.displayName).toBe('Nome da Conta');
+    expect(clearedProfile.name).toBe('Nome da Conta');
+
+    const fallbackSearchResponse = await request(app.getHttpServer())
+      .get('/worker-profile?search=Nome%20da%20Conta')
+      .expect(200);
+    const fallbackProfiles =
+      fallbackSearchResponse.body as PaginatedResponse<WorkerProfilePayload>;
+    expect(
+      fallbackProfiles.data.some((profile) => profile.userId === auth.user.id),
+    ).toBe(true);
   });
 
   it('service request -> proposal -> payment -> execution -> review flow', async () => {

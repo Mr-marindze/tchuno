@@ -45,6 +45,7 @@ export type ListWorkerProfilesQuery = {
 };
 
 export type UpsertWorkerProfileInput = {
+  publicName?: string;
   bio?: string;
   location?: string;
   hourlyRate?: number;

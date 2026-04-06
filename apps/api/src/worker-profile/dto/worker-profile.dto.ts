@@ -19,6 +19,15 @@ export class WorkerProfileDto {
   userId!: string;
 
   @ApiProperty({ nullable: true })
+  publicName!: string | null;
+
+  @ApiProperty({ nullable: true })
+  displayName!: string | null;
+
+  @ApiProperty({ nullable: true })
+  name!: string | null;
+
+  @ApiProperty({ nullable: true })
   bio!: string | null;
 
   @ApiProperty({ nullable: true })

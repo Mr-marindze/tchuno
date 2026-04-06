@@ -46,7 +46,8 @@ export class ListWorkerProfilesQueryDto extends PaginationQueryDto {
   isAvailable?: boolean;
 
   @ApiPropertyOptional({
-    description: 'Search by user id, location, or category name',
+    description:
+      'Search by public name, account name, user id, location, or category name',
   })
   @IsOptional()
   @Transform(({ value }: { value: unknown }) =>
