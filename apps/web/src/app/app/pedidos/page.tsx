@@ -1,6 +1,7 @@
 'use client';
 
 import Link from 'next/link';
+import { useRouter } from 'next/navigation';
 import { FormEvent, useEffect, useMemo, useState } from 'react';
 import { ensureSession } from '@/lib/auth';
 import { Category, listCategories } from '@/lib/categories';
@@ -102,6 +103,7 @@ function getRequestFlowState(request: ServiceRequest): FlowState {
 }
 
 export default function CustomerOrdersPage() {
+  const router = useRouter();
   const [accessToken, setAccessToken] = useState<string | null>(null);
   const [categories, setCategories] = useState<Category[]>([]);
   const [requests, setRequests] = useState<ServiceRequest[]>([]);
@@ -195,7 +197,7 @@ export default function CustomerOrdersPage() {
     setStatus('A criar pedido...');
 
     try {
-      await createServiceRequest(accessToken, {
+      const createdRequest = await createServiceRequest(accessToken, {
         categoryId,
         title,
         description,
@@ -207,8 +209,8 @@ export default function CustomerOrdersPage() {
       setDescription('');
       setLocation('');
       setShowCreateForm(false);
-      await reloadRequests();
       setStatus('Pedido criado com sucesso.');
+      router.push(`/app/pedidos/${createdRequest.id}`);
     } catch (error) {
       setStatus(humanizeUnknownError(error, 'Falha ao criar pedido.'));
     } finally {

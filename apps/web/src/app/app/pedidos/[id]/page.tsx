@@ -3,6 +3,7 @@
 import Link from 'next/link';
 import { useParams } from 'next/navigation';
 import { useEffect, useMemo, useState } from 'react';
+import { formatRatingValue } from '@/components/dashboard/dashboard-formatters';
 import { ensureSession } from '@/lib/auth';
 import { humanizeUnknownError } from '@/lib/http-errors';
 import { getJobById, JobDetails } from '@/lib/jobs';
@@ -16,6 +17,16 @@ import {
   selectProposal,
   ServiceRequest,
 } from '@/lib/service-requests';
+import {
+  buildRequestWorkerRecommendations,
+  RecommendationPoolScope,
+  RequestWorkerRecommendation,
+} from '@/lib/request-worker-recommendations';
+import {
+  listWorkerProfiles,
+  resolveWorkerDisplayName,
+  WorkerProfile,
+} from '@/lib/worker-profile';
 
 const payableIntentStatuses = new Set([
   'AWAITING_PAYMENT',
@@ -34,6 +45,8 @@ const paymentStatusLabel: Record<string, string> = {
   EXPIRED: 'Expirado',
   CANCELED: 'Cancelado',
 };
+
+const inviteStorageKey = 'tchuno_request_worker_invites_v1';
 
 function formatCurrencyMzn(value: number): string {
   return new Intl.NumberFormat('pt-PT', {
@@ -106,6 +119,76 @@ function resolveFlowVisualState(
   };
 }
 
+function readInvitedWorkerIds(requestId: string): string[] {
+  if (typeof window === 'undefined') {
+    return [];
+  }
+
+  try {
+    const rawValue = window.localStorage.getItem(inviteStorageKey);
+    if (!rawValue) {
+      return [];
+    }
+
+    const parsed = JSON.parse(rawValue) as Record<string, string[]>;
+    return Array.isArray(parsed[requestId]) ? parsed[requestId] : [];
+  } catch {
+    return [];
+  }
+}
+
+function writeInvitedWorkerIds(requestId: string, workerIds: string[]): void {
+  if (typeof window === 'undefined') {
+    return;
+  }
+
+  try {
+    const rawValue = window.localStorage.getItem(inviteStorageKey);
+    const currentValue = rawValue
+      ? (JSON.parse(rawValue) as Record<string, string[]>)
+      : {};
+
+    currentValue[requestId] = workerIds;
+    window.localStorage.setItem(inviteStorageKey, JSON.stringify(currentValue));
+  } catch {
+    // Keep UI operational even when localStorage is unavailable.
+  }
+}
+
+async function loadCandidateWorkersForRequest(request: ServiceRequest): Promise<{
+  workers: WorkerProfile[];
+  scope: RecommendationPoolScope;
+}> {
+  if (request.category?.slug) {
+    const categoryWorkers = await listWorkerProfiles({
+      categorySlug: request.category.slug,
+      isAvailable: true,
+      sort: 'rating:desc',
+      page: 1,
+      limit: 48,
+    });
+
+    if (categoryWorkers.data.length > 0) {
+      return {
+        workers: categoryWorkers.data,
+        scope: 'category-available',
+      };
+    }
+  }
+
+  const catalogWorkers = await listWorkerProfiles({
+    isAvailable: true,
+    sort: 'rating:desc',
+    page: 1,
+    limit: 48,
+  });
+
+  return {
+    workers: catalogWorkers.data,
+    scope: 'catalog-available',
+  };
+}
+
 export default function OrderDetailsPage() {
   const params = useParams<{ id: string }>();
   const requestId = Array.isArray(params.id) ? params.id[0] : params.id;
@@ -114,6 +197,15 @@ export default function OrderDetailsPage() {
   const [request, setRequest] = useState<ServiceRequest | null>(null);
   const [jobDetails, setJobDetails] = useState<JobDetails | null>(null);
   const [financial, setFinancial] = useState<JobFinancialState | null>(null);
+  const [recommendedWorkers, setRecommendedWorkers] = useState<
+    RequestWorkerRecommendation[]
+  >([]);
+  const [recommendationLoading, setRecommendationLoading] = useState(false);
+  const [recommendationStatus, setRecommendationStatus] = useState(
+    'A preparar profissionais próximos...',
+  );
+  const [invitedWorkerIds, setInvitedWorkerIds] = useState<string[]>([]);
+  const [inviteFeedback, setInviteFeedback] = useState('');
   const [loading, setLoading] = useState(true);
   const [runningAction, setRunningAction] = useState(false);
   const [status, setStatus] = useState('A carregar detalhes do pedido...');
@@ -187,6 +279,11 @@ export default function OrderDetailsPage() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [requestId]);
 
+  useEffect(() => {
+    setInvitedWorkerIds(readInvitedWorkerIds(requestId));
+    setInviteFeedback('');
+  }, [requestId]);
+
   const selectedProposal = useMemo(() => {
     if (!request?.selectedProposalId) {
       return null;
@@ -212,6 +309,89 @@ export default function OrderDetailsPage() {
 
   const latestIntent = useMemo(() => financial?.intents[0] ?? null, [financial]);
   const flowState = resolveFlowVisualState(request, financial);
+  const canInviteWorkers =
+    request?.status === 'OPEN' && !request.selectedProposalId;
+
+  useEffect(() => {
+    let active = true;
+
+    async function loadRecommendedWorkers() {
+      if (!request) {
+        if (active) {
+          setRecommendedWorkers([]);
+          setRecommendationLoading(false);
+          setRecommendationStatus('Ainda sem pedido carregado.');
+        }
+        return;
+      }
+
+      if (!canInviteWorkers) {
+        if (active) {
+          setRecommendedWorkers([]);
+          setRecommendationLoading(false);
+          setRecommendationStatus(
+            'Os convites para proposta fecham assim que uma proposta é selecionada.',
+          );
+        }
+        return;
+      }
+
+      setRecommendationLoading(true);
+      setRecommendationStatus('A procurar profissionais para este pedido...');
+
+      try {
+        const { workers, scope } = await loadCandidateWorkersForRequest(request);
+
+        if (!active) {
+          return;
+        }
+
+        const nextRecommendations = buildRequestWorkerRecommendations(
+          request,
+          workers,
+          scope,
+        );
+
+        setRecommendedWorkers(nextRecommendations.items);
+        setRecommendationStatus(nextRecommendations.statusMessage);
+      } catch (error) {
+        if (!active) {
+          return;
+        }
+
+        setRecommendedWorkers([]);
+        setRecommendationStatus(
+          humanizeUnknownError(
+            error,
+            'Não foi possível carregar profissionais sugeridos.',
+          ),
+        );
+      } finally {
+        if (active) {
+          setRecommendationLoading(false);
+        }
+      }
+    }
+
+    void loadRecommendedWorkers();
+
+    return () => {
+      active = false;
+    };
+  }, [canInviteWorkers, request]);
+
+  function handleInviteWorker(workerId: string, workerName: string) {
+    setInvitedWorkerIds((current) => {
+      if (current.includes(workerId)) {
+        return current;
+      }
+
+      const nextWorkerIds = [...current, workerId];
+      writeInvitedWorkerIds(requestId, nextWorkerIds);
+      return nextWorkerIds;
+    });
+    setInviteFeedback(`${workerName} ficou marcado para convite neste pedido.`);
+  }
 
   async function handleSelectProposal(proposalId: string) {
     if (!accessToken || !request) {
@@ -340,6 +520,149 @@ export default function OrderDetailsPage() {
                 </div>
               </div>
             </article>
+          </section>
+
+          <section className='rounded-2xl border border-slate-200 bg-white p-4 shadow-sm sm:p-5'>
+            <div className='flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between'>
+              <div>
+                <p className='text-xs font-semibold uppercase tracking-wide text-slate-500'>
+                  Profissionais próximos de ti
+                </p>
+                <h2 className='mt-2 text-lg font-semibold text-slate-900'>
+                  Perfis sugeridos para acelerar propostas
+                </h2>
+                <p className='mt-1 text-sm text-slate-600'>
+                  Priorizamos proximidade, rating e disponibilidade para
+                  reduzires o tempo até receber propostas.
+                </p>
+              </div>
+
+              <div className='rounded-xl border border-slate-200 bg-slate-50 px-3 py-2 text-sm text-slate-600'>
+                {recommendedWorkers.length} sugestão(ões)
+              </div>
+            </div>
+
+            <p
+              className={`mt-4 text-sm ${
+                recommendationLoading ? 'text-blue-700' : 'text-slate-600'
+              }`}
+            >
+              {recommendationStatus}
+            </p>
+
+            {inviteFeedback ? (
+              <p className='mt-2 text-sm text-blue-700'>{inviteFeedback}</p>
+            ) : null}
+
+            <div className='mt-3 rounded-xl border border-blue-100 bg-blue-50 p-3 text-sm text-blue-800'>
+              O convite não cria contratação direta. Serve apenas para priorizar
+              quem queres chamar para enviar proposta.
+            </div>
+
+            {canInviteWorkers ? (
+              request.proposals && request.proposals.length > 0 ? (
+                <p className='mt-3 text-xs text-slate-500'>
+                  Perfis que já enviaram proposta ficam fora desta lista para
+                  evitar repetição.
+                </p>
+              ) : null
+            ) : (
+              <div className='mt-4 rounded-xl border border-slate-200 bg-slate-50 p-4 text-sm text-slate-600'>
+                Convites encerrados para este pedido depois da seleção da
+                proposta.
+              </div>
+            )}
+
+            {canInviteWorkers && !recommendationLoading ? (
+              recommendedWorkers.length === 0 ? (
+                <div className='mt-4 rounded-xl border border-dashed border-slate-300 bg-slate-50 p-4 text-sm text-slate-600'>
+                  Ainda não encontrámos profissionais relevantes para convidar.
+                </div>
+              ) : (
+                <div className='mt-4 grid gap-3 xl:grid-cols-2'>
+                  {recommendedWorkers.map((item) => {
+                    const worker = item.worker;
+                    const displayName = resolveWorkerDisplayName(worker);
+                    const specialty =
+                      worker.categories[0]?.name ??
+                      request.category?.name ??
+                      'Serviço local';
+                    const availabilityLabel = worker.isAvailable
+                      ? 'Disponível'
+                      : 'Agenda limitada';
+                    const ratingLabel =
+                      worker.ratingCount > 0
+                        ? `${formatRatingValue(worker.ratingAvg)}/5`
+                        : 'Novo';
+                    const isInvited = invitedWorkerIds.includes(worker.userId);
+
+                    return (
+                      <article
+                        key={worker.id}
+                        className='rounded-xl border border-slate-200 bg-slate-50 p-4'
+                      >
+                        <div className='flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between'>
+                          <div>
+                            <h3 className='text-base font-semibold text-slate-900'>
+                              {displayName}
+                            </h3>
+                            <p className='mt-1 text-sm text-slate-600'>
+                              {specialty}
+                            </p>
+                          </div>
+
+                          <span
+                            className={`rounded-full px-2.5 py-1 text-xs font-semibold ${
+                              worker.isAvailable
+                                ? 'bg-emerald-100 text-emerald-700'
+                                : 'bg-slate-200 text-slate-700'
+                            }`}
+                          >
+                            {availabilityLabel}
+                          </span>
+                        </div>
+
+                        <div className='mt-4 grid gap-3 sm:grid-cols-3'>
+                          <div className='rounded-lg border border-slate-200 bg-white p-3'>
+                            <p className='text-xs text-slate-500'>Rating</p>
+                            <p className='mt-1 text-sm font-semibold text-slate-900'>
+                              {ratingLabel}
+                            </p>
+                          </div>
+                          <div className='rounded-lg border border-slate-200 bg-white p-3'>
+                            <p className='text-xs text-slate-500'>Distância</p>
+                            <p className='mt-1 text-sm font-semibold text-slate-900'>
+                              {item.distanceLabel}
+                            </p>
+                          </div>
+                          <div className='rounded-lg border border-slate-200 bg-white p-3'>
+                            <p className='text-xs text-slate-500'>Disponibilidade</p>
+                            <p className='mt-1 text-sm font-semibold text-slate-900'>
+                              {availabilityLabel}
+                            </p>
+                          </div>
+                        </div>
+
+                        <p className='mt-4 text-sm text-slate-600'>
+                          {item.shortComment}
+                        </p>
+
+                        <button
+                          type='button'
+                          className='mt-4 inline-flex items-center rounded-lg bg-blue-600 px-4 py-2 text-sm font-semibold text-white hover:bg-blue-700 disabled:cursor-not-allowed disabled:opacity-60'
+                          onClick={() =>
+                            handleInviteWorker(worker.userId, displayName)
+                          }
+                          disabled={isInvited}
+                        >
+                          {isInvited ? 'Convite marcado' : 'Convidar para proposta'}
+                        </button>
+                      </article>
+                    );
+                  })}
+                </div>
+              )
+            ) : null}
           </section>
 
           <section className='rounded-2xl border border-slate-200 bg-white p-4 shadow-sm sm:p-5'>
