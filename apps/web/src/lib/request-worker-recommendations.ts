@@ -5,10 +5,20 @@ export type RecommendationPoolScope =
   | "category-available"
   | "catalog-available";
 
+export type RecommendationProximityTier =
+  | "same-zone"
+  | "nearby-zone"
+  | "nearby-area"
+  | "broader-area"
+  | "location-pending";
+
 export type RequestWorkerRecommendation = {
   worker: WorkerProfile;
+  categoryScore: number;
   proximityScore: number;
-  distanceLabel: string;
+  proximityTier: RecommendationProximityTier;
+  proximityLabel: string;
+  distanceMeters: number | null;
   shortComment: string;
 };
 
@@ -113,28 +123,52 @@ function getProximityScore(
   return 0;
 }
 
-function getDistanceLabel(
+function getProximityLabel(
   requestLocation: string | null | undefined,
   workerLocation: string | null | undefined,
   proximityScore: number,
 ): string {
   if (!requestLocation || !workerLocation) {
-    return "Distância a confirmar";
+    return "Localização por confirmar";
   }
 
   if (proximityScore >= 3) {
-    return "0-2 km (estimado)";
+    return "Mesma zona";
   }
 
   if (proximityScore >= 2) {
-    return "2-5 km (estimado)";
+    return "Zona próxima";
   }
 
   if (proximityScore >= 1) {
-    return "5-12 km (estimado)";
+    return "Área próxima";
   }
 
-  return "Mais de 12 km (estimado)";
+  return "Mais amplo";
+}
+
+function getProximityTier(
+  requestLocation: string | null | undefined,
+  workerLocation: string | null | undefined,
+  proximityScore: number,
+): RecommendationProximityTier {
+  if (!requestLocation || !workerLocation) {
+    return "location-pending";
+  }
+
+  if (proximityScore >= 3) {
+    return "same-zone";
+  }
+
+  if (proximityScore >= 2) {
+    return "nearby-zone";
+  }
+
+  if (proximityScore >= 1) {
+    return "nearby-area";
+  }
+
+  return "broader-area";
 }
 
 function getShortComment(worker: WorkerProfile): string {
@@ -167,22 +201,22 @@ function buildStatusMessage(input: {
   stage: RecommendationStage;
 }): string {
   if (!input.request.location) {
-    return "Sem localização definida no pedido. Mostramos profissionais relevantes desta área por reputação e disponibilidade.";
+    return "O pedido ainda não tem localização suficiente para medir proximidade. Mostramos profissionais relevantes desta área por reputação e disponibilidade.";
   }
 
   if (input.stage === "nearby") {
-    return "Mostramos primeiro profissionais na tua zona com melhor encaixe para este pedido.";
+    return "Mostramos primeiro profissionais da mesma zona do pedido, ordenados por proximidade textual, avaliação e disponibilidade.";
   }
 
   if (input.stage === "expanded") {
-    return "Não encontrámos perfis na mesma zona. Expandimos a procura para áreas próximas.";
+    return "Não encontrámos perfis na mesma zona. Alargámos a procura para zonas e áreas próximas.";
   }
 
   if (input.scope === "category-available") {
-    return "Ainda não encontrámos profissionais próximos. Continuamos a procurar na tua zona.";
+    return "Ainda não encontrámos correspondência de zona suficiente. Mantemos uma procura mais ampla dentro desta área.";
   }
 
-  return "Ainda não encontrámos profissionais próximos. Mostramos opções mais amplas para acelerar propostas.";
+  return "Ainda não encontrámos correspondência de zona suficiente. Mostramos opções mais amplas para acelerar propostas.";
 }
 
 export function buildRequestWorkerRecommendations(
@@ -211,15 +245,23 @@ export function buildRequestWorkerRecommendations(
 
   const scoredWorkers = eligibleWorkers.map((worker) => {
     const proximityScore = getProximityScore(request.location, worker.location);
+    const categoryScore = matchesRequestCategory(request, worker) ? 1 : 0;
 
     return {
       worker,
+      categoryScore,
       proximityScore,
-      distanceLabel: getDistanceLabel(
+      proximityTier: getProximityTier(
         request.location,
         worker.location,
         proximityScore,
       ),
+      proximityLabel: getProximityLabel(
+        request.location,
+        worker.location,
+        proximityScore,
+      ),
+      distanceMeters: null,
       shortComment: getShortComment(worker),
     };
   });
@@ -241,6 +283,11 @@ export function buildRequestWorkerRecommendations(
   }
 
   const orderedWorkers = [...selectedWorkers].sort((left, right) => {
+    const categoryDiff = right.categoryScore - left.categoryScore;
+    if (categoryDiff !== 0) {
+      return categoryDiff;
+    }
+
     const proximityDiff = right.proximityScore - left.proximityScore;
     if (proximityDiff !== 0) {
       return proximityDiff;

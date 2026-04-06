@@ -188,7 +188,7 @@ export default function OrderDetailsPage() {
   >([]);
   const [recommendationLoading, setRecommendationLoading] = useState(false);
   const [recommendationStatus, setRecommendationStatus] = useState(
-    'A preparar profissionais próximos...',
+    'A preparar sugestões para o teu pedido...',
   );
   const [inviteFeedback, setInviteFeedback] = useState('');
   const [invitingWorkerId, setInvitingWorkerId] = useState<string | null>(null);
@@ -339,7 +339,7 @@ export default function OrderDetailsPage() {
       return {
         title: 'Aguardar propostas',
         description:
-          'Enquanto esperas, podes priorizar profissionais próximos para acelerar respostas.',
+          'Enquanto esperas, podes convidar profissionais relevantes para acelerar respostas.',
       };
     }
 
@@ -374,7 +374,7 @@ export default function OrderDetailsPage() {
       }
 
       setRecommendationLoading(true);
-      setRecommendationStatus('A procurar profissionais para este pedido...');
+      setRecommendationStatus('A procurar profissionais relevantes para este pedido...');
 
       try {
         const { workers, scope } = await loadCandidateWorkersForRequest(request);
@@ -579,9 +579,9 @@ export default function OrderDetailsPage() {
                     Profissionais próximos de ti
                   </h2>
                   <p className='mt-1 max-w-3xl text-sm text-slate-600'>
-                    Com base na localização do teu pedido, mostramos primeiro
-                    profissionais mais próximos, disponíveis e com melhor
-                    avaliação.
+                    {request.location
+                      ? 'Usamos a localização do teu pedido para dar prioridade a perfis da mesma zona ou de zonas próximas. Quando não há correspondência suficiente, alargamos a procura.'
+                      : 'O teu pedido ainda não tem localização suficiente para medir proximidade. Por agora mostramos perfis relevantes por área, reputação e disponibilidade.'}
                   </p>
                 </div>
 
@@ -673,8 +673,8 @@ export default function OrderDetailsPage() {
                 recommendedWorkers.length === 0 ? (
                   <div className='mt-4 rounded-2xl border border-dashed border-slate-300 bg-slate-50 p-4 text-sm text-slate-600'>
                     {request.location
-                      ? 'Ainda não encontrámos profissionais próximos. Continuamos a procurar na tua zona.'
-                      : 'Ainda não encontrámos profissionais relevantes para este pedido.'}
+                      ? 'Ainda não encontrámos perfis da mesma zona ou de zonas próximas. Continuamos a procurar dentro desta área.'
+                      : 'Ainda não temos localização suficiente no pedido. Continuamos a mostrar perfis relevantes desta área.'}
                   </div>
                 ) : (
                   <div className='mt-4 grid gap-3 xl:grid-cols-2'>
@@ -737,9 +737,9 @@ export default function OrderDetailsPage() {
                               </p>
                             </div>
                             <div className='rounded-xl border border-slate-200 bg-white p-3'>
-                              <p className='text-xs text-slate-500'>Distância</p>
+                              <p className='text-xs text-slate-500'>Proximidade</p>
                               <p className='mt-1 text-sm font-semibold text-slate-900'>
-                                {item.distanceLabel}
+                                {item.proximityLabel}
                               </p>
                             </div>
                             <div className='rounded-xl border border-slate-200 bg-white p-3'>
