@@ -1,5 +1,6 @@
 import Link from "next/link";
 import { ReactNode } from "react";
+import { buildAuthRoute } from "@/lib/access-control";
 
 type PublicPageShellProps = {
   title: string;
@@ -12,6 +13,15 @@ export function PublicPageShell({
   description,
   children,
 }: PublicPageShellProps) {
+  const loginHref = buildAuthRoute({
+    mode: "login",
+    nextPath: "/app/pedidos",
+  });
+  const createRequestHref = buildAuthRoute({
+    mode: "login",
+    nextPath: "/app/pedidos#novo-pedido",
+  });
+
   return (
     <main className="shell">
       <section className="card card--wide">
@@ -24,12 +34,12 @@ export function PublicPageShell({
         <nav className="dashboard-nav" aria-label="Navegação pública">
           <Link href="/">Início</Link>
           <Link href="/como-funciona">Como funciona</Link>
-          <Link href="/categorias">Categorias</Link>
-          <Link href="/prestadores">Profissionais</Link>
-          <Link href="/faq">FAQ</Link>
-          <Link href="/sobre">Sobre</Link>
           <Link href="/contacto">Contacto</Link>
-          <Link href="/login">Entrar</Link>
+          <Link href="/faq">Ajuda</Link>
+          <Link href="/sobre">Sobre</Link>
+          <Link href="/registo">Trabalhar no Tchuno</Link>
+          <Link href={loginHref}>Entrar</Link>
+          <Link href={createRequestHref}>Criar pedido</Link>
         </nav>
 
         <section className="marketplace-section">{children}</section>

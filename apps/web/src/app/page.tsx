@@ -9,7 +9,6 @@ import {
   LandingIcon,
   QuickAreaChip,
   type LandingIconName,
-  SpotlightCard,
   StatCard,
 } from "@/components/public/landing-ui";
 import { useMarketplaceDiscovery } from "@/components/marketplace/use-marketplace-discovery";
@@ -20,92 +19,37 @@ import styles from "./page.module.css";
 const preferredAreaLabels = [
   "Canalização",
   "Eletricista",
-  "Reparações Domésticas",
+  "Reparações",
   "Construção",
   "Pintura",
   "Carpintaria",
 ];
-
-const areaDescriptions: Record<
-  string,
-  { description: string; note: string; icon: LandingIconName }
-> = {
-  canalizacao: {
-    description: "Fugas, torneiras, pressão de água e pequenas instalações.",
-    note: "Entrada rápida para pedidos urgentes e manutenção.",
-    icon: "plumbing",
-  },
-  eletricista: {
-    description: "Tomadas, iluminação, quadros e avarias elétricas.",
-    note: "Bom ponto de entrada para problemas domésticos frequentes.",
-    icon: "electric",
-  },
-  "reparacoes domesticas": {
-    description: "Pequenos arranjos, manutenção e apoio em casa.",
-    note: "Útil para quem ainda está a afinar o tipo exato de serviço.",
-    icon: "repairs",
-  },
-  construcao: {
-    description: "Pequenas obras, acabamentos e apoio em remodelação.",
-    note: "Ideal para pedidos com mais contexto e comparação de propostas.",
-    icon: "construction",
-  },
-  pintura: {
-    description: "Pintura interior, exterior, retoques e acabamento.",
-    note: "Ajuda a entrar por descoberta sem escolher profissional cedo demais.",
-    icon: "painting",
-  },
-  carpintaria: {
-    description: "Portas, armários, ajustes, roupeiros e trabalhos em madeira.",
-    note: "Boa área para pedidos detalhados com necessidade de comparação.",
-    icon: "carpentry",
-  },
-};
 
 const flowSteps = [
   {
     icon: "request" as const,
     eyebrow: "Passo 1",
     title: "Cria o teu pedido",
-    description: "Descreve o serviço, a tua zona e o contexto do que precisas resolver.",
+    description: "Descreve o que precisas, onde e quando.",
   },
   {
     icon: "proposal" as const,
     eyebrow: "Passo 2",
-    title: "Recebe propostas de profissionais reais",
-    description: "Vês respostas concretas e comparas melhor antes de avançar.",
+    title: "Recebe propostas",
+    description: "Profissionais respondem ao teu pedido.",
   },
   {
     icon: "confidence" as const,
     eyebrow: "Passo 3",
-    title: "Escolhe e avança com confiança",
-    description: "Decides com mais contexto e continuas o fluxo certo do pedido.",
-  },
-];
-
-const cityPresence = [
-  {
-    city: "Maputo",
-    note: "Maior concentração atual de atividade e pedidos locais.",
-  },
-  {
-    city: "Matola",
-    note: "Zona com procura crescente e proximidade operacional forte.",
-  },
-  {
-    city: "Beira",
-    note: "Presença em crescimento para pedidos de serviços locais.",
-  },
-  {
-    city: "Nampula",
-    note: "Cobertura inicial em evolução, com foco em expansão responsável.",
+    title: "Escolhe e avança",
+    description: "Comparas as propostas, escolhes a melhor e continuas com segurança.",
   },
 ];
 
 const providerBenefits = [
-  "Cria um perfil público consistente com as tuas áreas de serviço.",
-  "Recebe pedidos relevantes em vez de depender só de contactos informais.",
-  "Constrói reputação com propostas, execução e avaliações dentro da plataforma.",
+  "Cria perfil e mostra as tuas áreas de serviço.",
+  "Recebe pedidos relevantes sem depender só de contactos informais.",
+  "Cresce com reputação, propostas e execução dentro da plataforma.",
 ];
 
 function normalizeLabel(value: string): string {
@@ -116,14 +60,34 @@ function normalizeLabel(value: string): string {
     .trim();
 }
 
-function getAreaConfig(label: string) {
-  return (
-    areaDescriptions[normalizeLabel(label)] ?? {
-      description: "Entra por área e cria um pedido com mais contexto.",
-      note: "Estrutura preparada para descoberta mais rica no futuro.",
-      icon: "spark" as const,
-    }
-  );
+function getAreaIcon(label: string): LandingIconName {
+  const normalized = normalizeLabel(label);
+
+  if (normalized.includes("canal")) {
+    return "plumbing";
+  }
+
+  if (normalized.includes("eletric")) {
+    return "electric";
+  }
+
+  if (normalized.includes("repar")) {
+    return "repairs";
+  }
+
+  if (normalized.includes("constr")) {
+    return "construction";
+  }
+
+  if (normalized.includes("pint")) {
+    return "painting";
+  }
+
+  if (normalized.includes("carp")) {
+    return "carpentry";
+  }
+
+  return "spark";
 }
 
 export default function Home() {
@@ -148,8 +112,7 @@ export default function Home() {
     nextPath: "/app/pedidos",
   });
 
-  const { discoveryLoading, marketCategories, trustSummary } =
-    useMarketplaceDiscovery();
+  const { marketCategories, trustSummary } = useMarketplaceDiscovery();
 
   const landingAreas = useMemo(() => {
     const namesBySlug = new Map(
@@ -223,22 +186,15 @@ export default function Home() {
 
   return (
     <main className={`shell marketplace-shell ${styles.page}`}>
-      <div className={styles.pageFrame}>
+      <div className={styles.frame}>
         <header className={styles.navbar} aria-label="Navegação principal">
           <Link href="/" className={styles.brand}>
             <span className={styles.brandMark}>Tchuno</span>
             <span className={styles.brandCopy}>
               <strong>Serviços locais em Moçambique</strong>
-              <span>Marketplace de pedidos e propostas</span>
+              <span>Pedido primeiro. Propostas depois.</span>
             </span>
           </Link>
-
-          <nav className={styles.desktopNav}>
-            <a href="#servicos">Serviços</a>
-            <a href="#como-funciona">Como funciona</a>
-            <a href="#cobertura">Cobertura</a>
-            <a href="#prestadores">Prestadores</a>
-          </nav>
 
           <div className={styles.desktopActions}>
             <Link href={loginHref} className={styles.navLink}>
@@ -250,12 +206,12 @@ export default function Home() {
             <button
               type="button"
               className={`primary ${styles.navPrimary}`}
-              onClick={() => goToCreateRequest()}
+              onClick={handleHeroCreateRequest}
             >
               Criar pedido
             </button>
-            <Link href="/registo" className={`primary primary--ghost ${styles.navGhost}`}>
-              Sou prestador
+            <Link href="/registo" className={styles.navSecondary}>
+              Trabalhar no Tchuno
             </Link>
           </div>
 
@@ -277,18 +233,6 @@ export default function Home() {
 
         {mobileMenuOpen ? (
           <div id="landing-mobile-menu" className={styles.mobileMenu}>
-            <a href="#servicos" onClick={() => setMobileMenuOpen(false)}>
-              Serviços
-            </a>
-            <a href="#como-funciona" onClick={() => setMobileMenuOpen(false)}>
-              Como funciona
-            </a>
-            <a href="#cobertura" onClick={() => setMobileMenuOpen(false)}>
-              Cobertura
-            </a>
-            <a href="#prestadores" onClick={() => setMobileMenuOpen(false)}>
-              Prestadores
-            </a>
             <Link href={registerHref} onClick={() => setMobileMenuOpen(false)}>
               Criar conta
             </Link>
@@ -297,25 +241,27 @@ export default function Home() {
               className={`primary ${styles.mobilePrimary}`}
               onClick={() => {
                 setMobileMenuOpen(false);
-                goToCreateRequest();
+                handleHeroCreateRequest();
               }}
             >
               Criar pedido
             </button>
             <Link
               href="/registo"
-              className={`primary primary--ghost ${styles.mobileGhost}`}
+              className={styles.mobileSecondary}
               onClick={() => setMobileMenuOpen(false)}
             >
-              Quero trabalhar no Tchuno
+              Trabalhar no Tchuno
             </Link>
           </div>
         ) : null}
 
-        <section className={styles.hero}>
+        <section className={styles.hero} aria-label="Apresentação do Tchuno">
           <div className={styles.heroContent}>
             <p className="kicker">Marketplace moçambicano de serviços locais</p>
-            <h1 className={styles.heroTitle}>O que precisas resolver hoje?</h1>
+            <h1 className={styles.heroTitle}>
+              Resolve serviços locais sem perder tempo.
+            </h1>
             <p className={styles.heroSubtitle}>
               Descreve o serviço. Recebe propostas. Escolhe com confiança.
             </p>
@@ -328,122 +274,52 @@ export default function Home() {
               >
                 Criar pedido
               </button>
-              <Link href="/registo" className={`primary primary--ghost ${styles.heroGhost}`}>
-                Quero trabalhar no Tchuno
-              </Link>
             </div>
 
-            <div className={styles.quickAreas}>
-              <div className={styles.quickAreasHead}>
-                <p className={styles.quickAreasTitle}>Categorias rápidas</p>
-                <span>{discoveryLoading ? "A carregar áreas..." : "Escolhe uma área para começar"}</span>
-              </div>
-
-              <div className={styles.quickAreasGrid}>
-                {landingAreas.map((area) => (
-                  <QuickAreaChip
-                    key={area}
-                    icon={getAreaConfig(area).icon}
-                    label={area}
-                    onClick={() => handleAreaShortcut(area)}
-                  />
-                ))}
-              </div>
+            <div className={styles.heroChips}>
+              {landingAreas.map((area) => (
+                <QuickAreaChip
+                  key={area}
+                  icon={getAreaIcon(area)}
+                  label={area}
+                  onClick={() => handleAreaShortcut(area)}
+                />
+              ))}
             </div>
           </div>
 
-          <aside className={styles.heroPreview} aria-label="Pré-visualização do fluxo">
-            <div className={styles.previewRequest}>
-              <p className={styles.previewEyebrow}>Exemplo de pedido</p>
-              <h2>Entraste por categoria, explicaste o serviço e o pedido ficou pronto.</h2>
-              <div className={styles.previewTags}>
-                <span>Serviço local</span>
-                <span>Zona do pedido</span>
-                <span>Contexto claro</span>
+          <aside className={styles.heroPreview} aria-label="Resumo visual do fluxo">
+            <article className={styles.previewCardPrimary}>
+              <p className={styles.previewEyebrow}>Pedido</p>
+              <h2>Explicas o serviço uma vez e o fluxo começa aí.</h2>
+            </article>
+
+            <article className={styles.previewCard}>
+              <span className={styles.previewIcon}>
+                <LandingIcon name="proposal" />
+              </span>
+              <div>
+                <strong>Propostas reais</strong>
+                <p>Profissionais respondem ao teu pedido com mais contexto.</p>
               </div>
-            </div>
+            </article>
 
-            <div className={styles.previewStack}>
-              <article className={styles.previewCard}>
-                <span className={styles.previewIcon}>
-                  <LandingIcon name="proposal" />
-                </span>
-                <div>
-                  <strong>Recebes propostas</strong>
-                  <p>Compara especialidade, disponibilidade e reputação antes de decidir.</p>
-                </div>
-              </article>
-
-              <article className={styles.previewCard}>
-                <span className={styles.previewIcon}>
-                  <LandingIcon name="confidence" />
-                </span>
-                <div>
-                  <strong>Escolhes com contexto</strong>
-                  <p>O pedido continua organizado sem te empurrar para contratação direta.</p>
-                </div>
-              </article>
-
-              <article className={styles.previewCard}>
-                <span className={styles.previewIcon}>
-                  <LandingIcon name="spark" />
-                </span>
-                <div>
-                  <strong>Avanças no fluxo certo</strong>
-                  <p>Da proposta à execução, a experiência continua coerente com o produto.</p>
-                </div>
-              </article>
-            </div>
+            <article className={styles.previewCard}>
+              <span className={styles.previewIcon}>
+                <LandingIcon name="confidence" />
+              </span>
+              <div>
+                <strong>Escolha com confiança</strong>
+                <p>Comparas antes de avançar e o pedido continua organizado.</p>
+              </div>
+            </article>
           </aside>
         </section>
 
-        <section id="servicos" className={styles.section}>
-          <div className={styles.sectionHead}>
-            <div>
-              <p className="kicker">Descoberta</p>
-              <h2 className="section-title">Serviços mais procurados</h2>
-            </div>
-            <p className={styles.sectionLead}>
-              Entradas rápidas para quem já sabe a área do serviço e quer avançar sem perder tempo.
-            </p>
-          </div>
-
-          <div className={styles.spotlightGrid}>
-            {landingAreas.map((area) => {
-              const config = getAreaConfig(area);
-
-              return (
-                <SpotlightCard
-                  key={area}
-                  icon={config.icon}
-                  eyebrow="Área popular"
-                  title={area}
-                  description={config.description}
-                  note={config.note}
-                  action={
-                    <button
-                      type="button"
-                      className={`primary primary--ghost ${styles.cardActionButton}`}
-                      onClick={() => handleAreaShortcut(area)}
-                    >
-                      Criar pedido
-                    </button>
-                  }
-                />
-              );
-            })}
-          </div>
-        </section>
-
         <section id="como-funciona" className={styles.section}>
-          <div className={styles.sectionHead}>
-            <div>
-              <p className="kicker">Fluxo</p>
-              <h2 className="section-title">Como funciona</h2>
-            </div>
-            <p className={styles.sectionLead}>
-              Uma única explicação clara para o utilizador perceber o próximo passo em segundos.
-            </p>
+          <div className={styles.sectionHeader}>
+            <p className="kicker">Como funciona</p>
+            <h2 className="section-title">Uma única explicação clara do fluxo</h2>
           </div>
 
           <div className={styles.flowGrid}>
@@ -459,45 +335,10 @@ export default function Home() {
           </div>
         </section>
 
-        <section id="cobertura" className={`${styles.section} ${styles.coverageSection}`}>
-          <div className={styles.coverageIntro}>
-            <p className="kicker">Cobertura</p>
-            <h2 className="section-title">Onde o Tchuno está a crescer</h2>
-            <p className={styles.sectionLead}>
-              Começamos por zonas com mais atividade e continuamos a expandir de forma responsável.
-            </p>
-            <div className={styles.coverageHighlight}>
-              <span className={styles.coverageIcon}>
-                <LandingIcon name="location" />
-              </span>
-              <div>
-                <strong>Presença geográfica em evolução</strong>
-                <p>
-                  Mostramos cidades onde a procura e a oferta já começam a ganhar ritmo.
-                </p>
-              </div>
-            </div>
-          </div>
-
-          <div className={styles.cityGrid}>
-            {cityPresence.map((item) => (
-              <article key={item.city} className={styles.cityCard}>
-                <p className={styles.cityName}>{item.city}</p>
-                <p className={styles.cityNote}>{item.note}</p>
-              </article>
-            ))}
-          </div>
-        </section>
-
         <section className={styles.section}>
-          <div className={styles.sectionHead}>
-            <div>
-              <p className="kicker">Confiança</p>
-              <h2 className="section-title">Sinais rápidos para decidir melhor</h2>
-            </div>
-            <p className={styles.sectionLead}>
-              Informação curta, honesta e escaneável para dar mais confiança sem poluir a página.
-            </p>
+          <div className={styles.sectionHeader}>
+            <p className="kicker">Confiança</p>
+            <h2 className="section-title">Sinais rápidos para decidir melhor</h2>
           </div>
 
           <div className={styles.statsGrid}>
@@ -511,13 +352,13 @@ export default function Home() {
               icon="rating"
               label="Avaliação média"
               value={averageRating}
-              note="Média baseada nas avaliações públicas já existentes."
+              note="Baseada nas avaliações públicas já disponíveis."
             />
             <StatCard
               icon="clock"
               label="Resposta média estimada"
               value={trustSummary.responseEstimate}
-              note="Estimativa simples com base na atividade disponível."
+              note="Estimativa simples com base na atividade atual."
             />
           </div>
         </section>
@@ -525,9 +366,11 @@ export default function Home() {
         <section id="prestadores" className={`${styles.section} ${styles.providerSection}`}>
           <div className={styles.providerContent}>
             <p className="kicker">Para prestadores</p>
-            <h2 className="section-title">Transforma competências locais em pedidos relevantes</h2>
-            <p className={styles.sectionLead}>
-              Qualquer profissional de serviços locais pode criar perfil e começar a crescer com a plataforma.
+            <h2 className="section-title">
+              Ganha dinheiro com as tuas competências.
+            </h2>
+            <p className={styles.providerLead}>
+              Cria perfil, recebe pedidos relevantes e cresce com a plataforma.
             </p>
 
             <ul className={styles.providerList}>
@@ -540,77 +383,71 @@ export default function Home() {
               <Link href="/registo" className="primary">
                 Criar perfil de prestador
               </Link>
-              <Link href="/prestadores" className="primary primary--ghost">
-                Ver perfis públicos
-              </Link>
             </div>
           </div>
 
-          <div className={styles.providerAside}>
-            <SpotlightCard
-              icon="provider"
-              eyebrow="Perfil + pedidos"
-              title="Uma presença pública mais organizada"
-              description="O teu perfil ajuda clientes a perceber onde ativas, o que fazes e porque vale a pena receberem a tua proposta."
-              note="Estrutura pronta para evoluir reputação, relevância e descoberta."
-            />
-          </div>
+          <aside className={styles.providerCard}>
+            <span className={styles.providerCardIcon}>
+              <LandingIcon name="provider" />
+            </span>
+            <strong>Perfil público simples, pedidos relevantes e reputação em evolução.</strong>
+            <p>
+              O lado do prestador continua claro e presente, mas sem roubar foco ao
+              pedido do cliente.
+            </p>
+          </aside>
         </section>
 
-        <section className={styles.finalBanner}>
-          <div>
-            <p className="kicker">Próximo passo</p>
-            <h2>Precisas de ajuda agora?</h2>
-            <p>
-              Entra pela área certa, cria o pedido e recebe propostas dentro do fluxo oficial do Tchuno.
-            </p>
-          </div>
-          <div className={styles.finalBannerActions}>
-            <button
-              type="button"
-              className={`primary ${styles.finalPrimary}`}
-              onClick={handleFinalCreateRequest}
-            >
-              Criar pedido
-            </button>
-            <Link href="/registo" className={styles.finalSecondaryLink}>
-              Sou prestador
-            </Link>
-          </div>
+        <section className={styles.finalCta}>
+          <p className="kicker">Pronto para começar?</p>
+          <h2>Precisas de ajuda agora?</h2>
+          <p>Cria o teu pedido e recebe propostas.</p>
+          <button
+            type="button"
+            className={`primary ${styles.finalPrimary}`}
+            onClick={handleFinalCreateRequest}
+          >
+            Criar pedido
+          </button>
         </section>
 
         <footer className={styles.footer}>
           <div className={styles.footerBrand}>
             <span className={styles.footerBrandMark}>Tchuno</span>
             <p>
-              Marketplace moçambicano de serviços locais com foco em pedido,
-              propostas e escolha com confiança.
+              Pede serviços locais em Moçambique, recebe propostas e escolhe com
+              mais confiança.
             </p>
           </div>
 
           <div className={styles.footerLinks}>
             <FooterLinkGroup
-              title="Plataforma"
+              title="Tchuno"
               links={[
                 { href: "/sobre", label: "Sobre" },
                 { href: "/como-funciona", label: "Como funciona" },
-                { href: "/categorias", label: "Áreas" },
               ]}
             />
             <FooterLinkGroup
-              title="Clientes"
+              title="Para clientes"
               links={[
                 { href: loginHref, label: "Criar pedido" },
-                { href: "/prestadores", label: "Descobrir perfis" },
                 { href: "/faq", label: "Ajuda" },
               ]}
             />
             <FooterLinkGroup
-              title="Prestadores"
+              title="Para prestadores"
               links={[
-                { href: "/registo", label: "Criar perfil" },
-                { href: "/prestadores", label: "Perfis públicos" },
-                { href: "/contacto", label: "Falar com a equipa" },
+                { href: "/registo", label: "Trabalhar no Tchuno" },
+                { href: registerHref, label: "Criar conta" },
+              ]}
+            />
+            <FooterLinkGroup
+              title="Legal"
+              links={[
+                { href: "/termos", label: "Termos" },
+                { href: "/privacidade", label: "Privacidade" },
+                { href: "/contacto", label: "Suporte" },
               ]}
             />
           </div>

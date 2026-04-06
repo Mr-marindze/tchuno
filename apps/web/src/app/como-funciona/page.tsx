@@ -22,7 +22,8 @@ export default function HowItWorksPage() {
         <article className="panel-card">
           <h2>3. Escolhe, acompanha e avalia</h2>
           <p className="subtitle">
-            Escolhe a proposta certa, paga o sinal para desbloquear contacto, acompanha a execução e deixa review no final.
+            Escolhe a proposta certa, combina os próximos passos e acompanha tudo
+            até ao fim.
           </p>
         </article>
       </div>

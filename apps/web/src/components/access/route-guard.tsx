@@ -140,13 +140,13 @@ export function RouteGuard({ requiredAccess, children }: RouteGuardProps) {
               hasWorkerProfile: Boolean(workerProfile),
             });
           } catch {
-            setState({
-              status: 'forbidden',
-              title: '403 · Área de prestador',
-              message:
-                'Não foi possível validar o teu perfil profissional neste momento.',
-              fallbackPath: '/app/pedidos',
-            });
+        setState({
+          status: 'forbidden',
+          title: '403 · Área para prestadores',
+          message:
+            'Não foi possível validar o teu perfil profissional neste momento.',
+          fallbackPath: '/app/pedidos',
+        });
             return;
           }
         }
@@ -158,9 +158,9 @@ export function RouteGuard({ requiredAccess, children }: RouteGuardProps) {
 
         setState({
           status: 'forbidden',
-          title: '403 · Área de prestador',
+          title: '403 · Área para prestadores',
           message:
-            'Para aceder a esta área precisas de um perfil profissional ativo.',
+            'Esta parte do Tchuno é para profissionais com perfil ativo.',
           fallbackPath: getRoleHomePath(role),
         });
         return;
@@ -181,9 +181,9 @@ export function RouteGuard({ requiredAccess, children }: RouteGuardProps) {
 
         setState({
           status: 'forbidden',
-          title: '403 · Área de cliente',
+          title: '403 · Área para clientes',
           message:
-            'Esta secção é reservada para contas cliente. Usa o espaço profissional para continuar.',
+            'Esta parte do Tchuno é para quem está a pedir um serviço. Para continuar, entra na tua área.',
           fallbackPath: getRoleHomePath(role),
         });
         return;
@@ -218,7 +218,7 @@ export function RouteGuard({ requiredAccess, children }: RouteGuardProps) {
         action={
           <p className='status'>
             <Link href={state.fallbackPath ?? '/'} className='nav-link'>
-              Ir para área permitida
+              Ir para a minha área
             </Link>
           </p>
         }

@@ -7,8 +7,9 @@ export default function AboutPage() {
       description="Plataforma moçambicana para pedir serviços locais com propostas, seleção e execução acompanhada."
     >
       <p className="subtitle">
-        O foco do MVP é clareza operacional: pedido, propostas, seleção, sinal,
-        desbloqueio de contacto, execução e avaliação final.
+        O foco do Tchuno é tornar o processo mais simples: fazes o pedido,
+        recebes propostas, escolhes com mais contexto e acompanhas o serviço até
+        ao fim.
       </p>
     </PublicPageShell>
   );

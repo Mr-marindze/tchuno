@@ -6,6 +6,7 @@ export type LandingIconName =
   | "request"
   | "proposal"
   | "confidence"
+  | "lock"
   | "plumbing"
   | "electric"
   | "repairs"
@@ -51,6 +52,11 @@ type StatCardProps = {
   value: string;
 };
 
+type TrustBadgeProps = {
+  icon: LandingIconName;
+  label: string;
+};
+
 export function LandingIcon({ name }: { name: LandingIconName }) {
   switch (name) {
     case "menu":
@@ -84,6 +90,13 @@ export function LandingIcon({ name }: { name: LandingIconName }) {
         <svg viewBox="0 0 24 24" aria-hidden="true">
           <path d="M12 3 5 6v5c0 4.6 2.9 8 7 9 4.1-1 7-4.4 7-9V6l-7-3Z" />
           <path d="m9.5 12 1.7 1.7 3.3-3.7" />
+        </svg>
+      );
+    case "lock":
+      return (
+        <svg viewBox="0 0 24 24" aria-hidden="true">
+          <rect x="5" y="11" width="14" height="10" rx="2" />
+          <path d="M8 11V8a4 4 0 0 1 8 0v3" />
         </svg>
       );
     case "plumbing":
@@ -259,6 +272,17 @@ export function StatCard({ icon, label, note, value }: StatCardProps) {
       <p className="landing-stat-label">{label}</p>
       <p className="landing-stat-value">{value}</p>
       <p className="landing-stat-note">{note}</p>
+    </article>
+  );
+}
+
+export function TrustBadge({ icon, label }: TrustBadgeProps) {
+  return (
+    <article className="landing-trust-badge">
+      <span className="landing-trust-badge-icon">
+        <LandingIcon name={icon} />
+      </span>
+      <span>{label}</span>
     </article>
   );
 }

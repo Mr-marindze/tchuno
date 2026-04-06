@@ -4,6 +4,7 @@ import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { FormEvent, useEffect, useState } from "react";
 import {
+  type AppRole,
   buildAuthRoute,
   consumeAuthIntent,
   getRoleHomePath,
@@ -52,6 +53,21 @@ function getDefaultPath(auth: AuthResponse, me: unknown): string {
   return getRoleHomePath(role);
 }
 
+function getResolvedRole(auth: AuthResponse, me: unknown): AppRole {
+  const fallbackRole =
+    auth.user.role === "ADMIN"
+      ? auth.user.adminSubrole === "SUPPORT_ADMIN"
+        ? "support_admin"
+        : auth.user.adminSubrole === "OPS_ADMIN"
+          ? "ops_admin"
+          : auth.user.adminSubrole === "SUPER_ADMIN"
+            ? "super_admin"
+            : "admin"
+      : "customer";
+
+  return resolveAppRoleFromMe(me) ?? fallbackRole;
+}
+
 export function AuthEntryForm({ mode }: AuthEntryFormProps) {
   const router = useRouter();
   const [email, setEmail] = useState("user1@tchuno.local");
@@ -89,6 +105,7 @@ export function AuthEntryForm({ mode }: AuthEntryFormProps) {
       const destination = resolvePostLoginPath({
         nextPath: safeNextPath,
         fallbackPath: getDefaultPath(session.auth, session.me),
+        role: getResolvedRole(session.auth, session.me),
       });
       router.replace(destination);
     }
@@ -136,6 +153,7 @@ export function AuthEntryForm({ mode }: AuthEntryFormProps) {
       const destination = resolvePostLoginPath({
         nextPath: safeNextPath ?? consumedIntent?.nextPath,
         fallbackPath: session ? getDefaultPath(session.auth, session.me) : "/app",
+        role: session ? getResolvedRole(session.auth, session.me) : "guest",
       });
 
       setStatus(mode === "login" ? "Sessão iniciada com sucesso." : "Conta criada com sucesso.");
@@ -160,7 +178,9 @@ export function AuthEntryForm({ mode }: AuthEntryFormProps) {
           <h1>{mode === "login" ? "Entrar" : "Criar conta"}</h1>
           <p className="subtitle">
             {mode === "login"
-              ? "Acede para continuar exatamente do ponto onde estavas."
+              ? forceLogin
+                ? "Entra com outra conta. Depois do login vais para a área certa dessa conta."
+                : "Acede para continuar do ponto certo."
               : "Cria a tua conta e começa a pedir ou prestar serviços."}
           </p>
         </header>

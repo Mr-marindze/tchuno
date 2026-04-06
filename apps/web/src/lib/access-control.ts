@@ -116,14 +116,75 @@ export function isSafeInternalPath(path: string | null | undefined): boolean {
   return true;
 }
 
+function normalizeInternalPath(path: string): string {
+  const [pathname] = path.split(/[?#]/, 1);
+  return pathname || path;
+}
+
+export function getAccessScopeForPath(
+  path: string | null | undefined,
+): "public" | "customer" | "provider" | "admin" {
+  if (!isSafeInternalPath(path)) {
+    return "public";
+  }
+
+  const pathname = normalizeInternalPath(path as string);
+
+  if (pathname === "/admin" || pathname.startsWith("/admin/")) {
+    return "admin";
+  }
+
+  if (pathname === "/pro" || pathname.startsWith("/pro/")) {
+    return "provider";
+  }
+
+  if (pathname === "/app" || pathname.startsWith("/app/")) {
+    return "customer";
+  }
+
+  return "public";
+}
+
+export function canRoleAccessPath(
+  role: AppRole,
+  path: string | null | undefined,
+): boolean {
+  const scope = getAccessScopeForPath(path);
+
+  if (scope === "public") {
+    return true;
+  }
+
+  if (scope === "customer") {
+    return role === "customer";
+  }
+
+  if (scope === "provider") {
+    return role === "provider";
+  }
+
+  return (
+    role === "admin" ||
+    role === "ops_admin" ||
+    role === "support_admin" ||
+    role === "super_admin"
+  );
+}
+
 export function resolvePostLoginPath(input?: {
   nextPath?: string | null;
   fallbackPath?: string;
+  role?: AppRole;
 }): string {
   const fallbackPath = input?.fallbackPath ?? "/app";
   const nextPath = input?.nextPath ?? null;
+  const role = input?.role ?? "guest";
 
   if (!isSafeInternalPath(nextPath)) {
+    return fallbackPath;
+  }
+
+  if (!canRoleAccessPath(role, nextPath)) {
     return fallbackPath;
   }
 
