@@ -1,20 +1,31 @@
 import {
+  BadRequestException,
   ConflictException,
   Injectable,
   Logger,
+  NotFoundException,
   UnauthorizedException,
 } from '@nestjs/common';
 import { JwtService } from '@nestjs/jwt';
-import { Prisma, Session, User } from '@prisma/client';
+import {
+  PasswordRecoveryRequestStatus,
+  Prisma,
+  Session,
+  User,
+} from '@prisma/client';
 import * as bcrypt from 'bcryptjs';
 import { createHash, randomUUID } from 'crypto';
 import { MetricsService } from '../observability/metrics.service';
 import { PrismaService } from '../prisma/prisma.service';
 import { ListSessionsQueryDto } from './dto/list-sessions-query.dto';
 import { LoginDto } from './dto/login.dto';
+import { ListPasswordRecoveryRequestsQueryDto } from './dto/list-password-recovery-requests-query.dto';
 import { RegisterDto } from './dto/register.dto';
+import { RequestPasswordRecoveryDto } from './dto/request-password-recovery.dto';
+import { UpdatePasswordRecoveryRequestDto } from './dto/update-password-recovery-request.dto';
 import { SecurityAuditService } from './security-audit.service';
 import { AuthResponse, SessionClientInfo } from './types';
+import { AppRole } from './authorization.types';
 
 type RefreshTokenPayload = {
   sub: string;
@@ -307,6 +318,204 @@ export class AuthService {
     return this.prisma.user.findUnique({
       where: { id: userId },
     });
+  }
+
+  async requestPasswordRecovery(
+    dto: RequestPasswordRecoveryDto,
+    clientInfo?: SessionClientInfo,
+  ) {
+    const email = dto.email.trim().toLowerCase();
+    const user = await this.prisma.user.findUnique({
+      where: { email },
+      select: {
+        id: true,
+      },
+    });
+
+    const existing = await this.prisma.passwordRecoveryRequest.findFirst({
+      where: {
+        email,
+        status: {
+          in: [
+            PasswordRecoveryRequestStatus.OPEN,
+            PasswordRecoveryRequestStatus.IN_PROGRESS,
+          ],
+        },
+      },
+      orderBy: [{ requestedAt: 'desc' }, { id: 'desc' }],
+    });
+
+    if (!existing) {
+      await this.prisma.passwordRecoveryRequest.create({
+        data: {
+          email,
+          userId: user?.id ?? null,
+        },
+      });
+    } else if (!existing.userId && user?.id) {
+      await this.prisma.passwordRecoveryRequest.update({
+        where: { id: existing.id },
+        data: {
+          userId: user.id,
+        },
+      });
+    }
+
+    this.audit('password_recovery_requested', {
+      email,
+      userId: user?.id ?? null,
+      ip: clientInfo?.ip ?? null,
+    });
+
+    return {
+      accepted: true,
+      message:
+        'Recebemos o pedido. A equipa vai ajudar a recuperar a conta em segurança.',
+    };
+  }
+
+  async listPasswordRecoveryRequests(
+    query: ListPasswordRecoveryRequestsQueryDto,
+  ) {
+    const page = Math.max(1, query.page ?? 1);
+    const limit = Math.min(Math.max(1, query.limit ?? 20), 100);
+    const skip = (page - 1) * limit;
+
+    const where: Prisma.PasswordRecoveryRequestWhereInput = {
+      ...(query.status ? { status: query.status } : {}),
+    };
+
+    const [total, rows] = await this.prisma.$transaction([
+      this.prisma.passwordRecoveryRequest.count({ where }),
+      this.prisma.passwordRecoveryRequest.findMany({
+        where,
+        include: {
+          user: {
+            select: {
+              id: true,
+              email: true,
+              isActive: true,
+            },
+          },
+          resolvedBy: {
+            select: {
+              id: true,
+              email: true,
+              name: true,
+            },
+          },
+        },
+        orderBy: [{ requestedAt: 'desc' }, { id: 'desc' }],
+        skip,
+        take: limit,
+      }),
+    ]);
+
+    return {
+      data: rows,
+      meta: {
+        total,
+        page,
+        limit,
+        hasNext: skip + rows.length < total,
+      },
+    };
+  }
+
+  async updatePasswordRecoveryRequest(
+    id: string,
+    dto: UpdatePasswordRecoveryRequestDto,
+    actor: {
+      userId: string;
+      role: AppRole;
+      clientInfo?: SessionClientInfo;
+    },
+  ) {
+    const allowedStatuses: PasswordRecoveryRequestStatus[] = [
+      PasswordRecoveryRequestStatus.IN_PROGRESS,
+      PasswordRecoveryRequestStatus.RESOLVED,
+      PasswordRecoveryRequestStatus.CANCELED,
+    ];
+
+    if (!allowedStatuses.includes(dto.status)) {
+      throw new BadRequestException('Invalid password recovery status');
+    }
+
+    const existing = await this.prisma.passwordRecoveryRequest.findUnique({
+      where: { id },
+    });
+
+    if (!existing) {
+      throw new NotFoundException('Password recovery request not found');
+    }
+
+    if (
+      existing.status === PasswordRecoveryRequestStatus.RESOLVED ||
+      existing.status === PasswordRecoveryRequestStatus.CANCELED
+    ) {
+      throw new ConflictException(
+        'Password recovery request is already closed',
+      );
+    }
+
+    const now = new Date();
+    const updated = await this.prisma.passwordRecoveryRequest.update({
+      where: { id },
+      data: {
+        status: dto.status,
+        note: dto.note?.trim().length ? dto.note.trim() : existing.note,
+        startedAt:
+          dto.status === PasswordRecoveryRequestStatus.IN_PROGRESS
+            ? (existing.startedAt ?? now)
+            : existing.startedAt,
+        resolvedAt:
+          dto.status === PasswordRecoveryRequestStatus.RESOLVED ||
+          dto.status === PasswordRecoveryRequestStatus.CANCELED
+            ? now
+            : null,
+        resolvedByUserId:
+          dto.status === PasswordRecoveryRequestStatus.RESOLVED ||
+          dto.status === PasswordRecoveryRequestStatus.CANCELED
+            ? actor.userId
+            : null,
+      },
+      include: {
+        user: {
+          select: {
+            id: true,
+            email: true,
+            isActive: true,
+          },
+        },
+        resolvedBy: {
+          select: {
+            id: true,
+            email: true,
+            name: true,
+          },
+        },
+      },
+    });
+
+    await this.securityAuditService.logAdminAction({
+      userId: actor.userId,
+      role: actor.role,
+      action: 'auth.password_recovery.update',
+      method: 'POST',
+      path: `/auth/password-recovery/requests/${id}`,
+      status: 'success',
+      targetType: 'PASSWORD_RECOVERY_REQUEST',
+      targetId: id,
+      reason: dto.note?.trim().length ? dto.note.trim() : null,
+      ipAddress: actor.clientInfo?.ip ?? null,
+      userAgent: actor.clientInfo?.userAgent ?? null,
+      metadata: {
+        nextStatus: dto.status,
+        email: existing.email,
+      },
+    });
+
+    return updated;
   }
 
   private async issueTokens(

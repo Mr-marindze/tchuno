@@ -1,4 +1,5 @@
 import { readApiError } from "@/lib/http-errors";
+import { PaginatedResponse } from "@/lib/pagination";
 
 export type AuthResponse = {
   user: {
@@ -52,6 +53,47 @@ export type SessionListMeta = {
 export type SessionListResponse = {
   data: DeviceSession[];
   meta: SessionListMeta;
+};
+
+export type PasswordRecoveryRequestStatus =
+  | "OPEN"
+  | "IN_PROGRESS"
+  | "RESOLVED"
+  | "CANCELED";
+
+export type PasswordRecoveryRequest = {
+  id: string;
+  email: string;
+  userId: string | null;
+  status: PasswordRecoveryRequestStatus;
+  note: string | null;
+  requestedAt: string;
+  startedAt: string | null;
+  resolvedAt: string | null;
+  resolvedByUserId: string | null;
+  createdAt: string;
+  updatedAt: string;
+  user?: {
+    id: string;
+    email: string;
+    isActive: boolean;
+  } | null;
+  resolvedBy?: {
+    id: string;
+    email: string;
+    name: string | null;
+  } | null;
+};
+
+export type PasswordRecoveryRequestResponse = {
+  accepted: boolean;
+  message: string;
+};
+
+export type ListPasswordRecoveryRequestsQuery = {
+  status?: PasswordRecoveryRequestStatus;
+  page?: number;
+  limit?: number;
 };
 
 export const API_URL = process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:3001";
@@ -156,6 +198,26 @@ export async function register(input: {
   return postJson<AuthResponse>("/auth/register", input);
 }
 
+function buildPasswordRecoveryQuery(
+  query?: ListPasswordRecoveryRequestsQuery,
+): string {
+  const params = new URLSearchParams();
+
+  if (query?.status) {
+    params.set("status", query.status);
+  }
+
+  if (typeof query?.page === "number") {
+    params.set("page", String(query.page));
+  }
+
+  if (typeof query?.limit === "number") {
+    params.set("limit", String(query.limit));
+  }
+
+  return params.size > 0 ? `?${params.toString()}` : "";
+}
+
 export async function login(input: {
   email: string;
   password: string;
@@ -189,6 +251,14 @@ export async function confirmReauth(input: {
 
 export async function refresh(refreshToken: string): Promise<AuthResponse> {
   return postJson<AuthResponse>("/auth/refresh", { refreshToken });
+}
+
+export async function requestPasswordRecovery(
+  email: string,
+): Promise<PasswordRecoveryRequestResponse> {
+  return postJson<PasswordRecoveryRequestResponse>("/auth/password-recovery/request", {
+    email,
+  });
 }
 
 export async function logout(refreshToken: string): Promise<void> {
@@ -239,6 +309,50 @@ export async function listSessions(
   const path = params.size > 0 ? `/auth/sessions?${params.toString()}` : "/auth/sessions";
 
   return getJson<SessionListResponse>(path, accessToken);
+}
+
+export async function listPasswordRecoveryRequests(
+  accessToken: string,
+  query?: ListPasswordRecoveryRequestsQuery,
+): Promise<PaginatedResponse<PasswordRecoveryRequest>> {
+  const response = await fetch(
+    `${API_URL}/auth/password-recovery/requests${buildPasswordRecoveryQuery(query)}`,
+    {
+      headers: {
+        Authorization: `Bearer ${accessToken}`,
+      },
+    },
+  );
+
+  if (!response.ok) {
+    throw new Error(await readApiError(response));
+  }
+
+  return (await response.json()) as PaginatedResponse<PasswordRecoveryRequest>;
+}
+
+export async function updatePasswordRecoveryRequest(
+  accessToken: string,
+  id: string,
+  input: {
+    status: Exclude<PasswordRecoveryRequestStatus, "OPEN">;
+    note?: string;
+  },
+): Promise<PasswordRecoveryRequest> {
+  const response = await fetch(`${API_URL}/auth/password-recovery/requests/${id}`, {
+    method: "POST",
+    headers: {
+      Authorization: `Bearer ${accessToken}`,
+      "Content-Type": "application/json",
+    },
+    body: JSON.stringify(input),
+  });
+
+  if (!response.ok) {
+    throw new Error(await readApiError(response));
+  }
+
+  return (await response.json()) as PasswordRecoveryRequest;
 }
 
 export async function revokeSession(

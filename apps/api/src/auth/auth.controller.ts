@@ -1,17 +1,18 @@
 import {
   Body,
   Controller,
-  Delete,
-  Get,
   HttpCode,
   HttpStatus,
-  Query,
+  Delete,
+  Get,
   Param,
+  Query,
   Post,
   Req,
   UseGuards,
 } from '@nestjs/common';
 import {
+  ApiAcceptedResponse,
   ApiBadRequestResponse,
   ApiBearerAuth,
   ApiBody,
@@ -22,21 +23,28 @@ import {
   ApiOperation,
   ApiParam,
   ApiTags,
+  ApiForbiddenResponse,
   ApiTooManyRequestsResponse,
   ApiUnauthorizedResponse,
 } from '@nestjs/swagger';
 import { Throttle } from '@nestjs/throttler';
 import type { Request } from 'express';
+import { AppRole } from './authorization.types';
+import { RequireAppRoles } from './decorators/require-app-roles.decorator';
 import { AuthService } from './auth.service';
+import { AccessPolicyGuard } from './guards/access-policy.guard';
 import { AuthResponseDto } from './dto/auth-response.dto';
 import { ErrorResponseDto } from './dto/error-response.dto';
+import { ListPasswordRecoveryRequestsQueryDto } from './dto/list-password-recovery-requests-query.dto';
 import { ListSessionsQueryDto } from './dto/list-sessions-query.dto';
 import { LoginDto } from './dto/login.dto';
+import { RequestPasswordRecoveryDto } from './dto/request-password-recovery.dto';
 import { RefreshTokenDto } from './dto/refresh-token.dto';
 import { ConfirmReauthDto } from './dto/confirm-reauth.dto';
 import { ReauthResponseDto } from './dto/reauth-response.dto';
 import { RegisterDto } from './dto/register.dto';
 import { SessionListResponseDto } from './dto/session-list-response.dto';
+import { UpdatePasswordRecoveryRequestDto } from './dto/update-password-recovery-request.dto';
 import { AuthorizationService } from './authorization.service';
 import { JwtAuthGuard } from './guards/jwt-auth.guard';
 import { ReauthService } from './reauth.service';
@@ -58,6 +66,9 @@ type AuthenticatedRequest = {
       role?: 'USER' | 'ADMIN';
       adminSubrole?: AdminSubrole | null;
     };
+  };
+  authz?: {
+    role?: AppRole;
   };
 };
 
@@ -109,6 +120,24 @@ export class AuthController {
     );
   }
 
+  @Post('password-recovery/request')
+  @HttpCode(HttpStatus.ACCEPTED)
+  @Throttle({ default: { limit: 5, ttl: 60_000 } })
+  @ApiOperation({ summary: 'Request assisted password recovery' })
+  @ApiBody({ type: RequestPasswordRecoveryDto })
+  @ApiAcceptedResponse({ description: 'Password recovery request accepted' })
+  @ApiBadRequestResponse({ type: ErrorResponseDto })
+  @ApiTooManyRequestsResponse({ type: ErrorResponseDto })
+  requestPasswordRecovery(
+    @Body() dto: RequestPasswordRecoveryDto,
+    @Req() req: Request,
+  ) {
+    return this.authService.requestPasswordRecovery(
+      dto,
+      this.extractClientInfo(req),
+    );
+  }
+
   @UseGuards(JwtAuthGuard)
   @ApiBearerAuth()
   @Post('reauth/confirm')
@@ -155,6 +184,43 @@ export class AuthController {
   @ApiUnauthorizedResponse({ type: ErrorResponseDto })
   logoutAll(@Req() req: AuthenticatedRequest) {
     return this.authService.logoutAll(req.user.sub);
+  }
+
+  @Get('password-recovery/requests')
+  @UseGuards(JwtAuthGuard, AccessPolicyGuard)
+  @ApiBearerAuth()
+  @ApiOperation({ summary: 'List assisted password recovery requests' })
+  @ApiOkResponse({ description: 'Paginated password recovery requests' })
+  @ApiUnauthorizedResponse({ type: ErrorResponseDto })
+  @ApiForbiddenResponse({ type: ErrorResponseDto })
+  @RequireAppRoles('admin', 'ops_admin', 'support_admin', 'super_admin')
+  listPasswordRecoveryRequests(
+    @Query() query: ListPasswordRecoveryRequestsQueryDto,
+  ) {
+    return this.authService.listPasswordRecoveryRequests(query);
+  }
+
+  @Post('password-recovery/requests/:id')
+  @UseGuards(JwtAuthGuard, AccessPolicyGuard)
+  @ApiBearerAuth()
+  @ApiOperation({ summary: 'Update one password recovery request status' })
+  @ApiParam({ name: 'id', type: String })
+  @ApiBody({ type: UpdatePasswordRecoveryRequestDto })
+  @ApiOkResponse({ description: 'Password recovery request updated' })
+  @ApiUnauthorizedResponse({ type: ErrorResponseDto })
+  @ApiForbiddenResponse({ type: ErrorResponseDto })
+  @ApiBadRequestResponse({ type: ErrorResponseDto })
+  @RequireAppRoles('admin', 'ops_admin', 'support_admin', 'super_admin')
+  updatePasswordRecoveryRequest(
+    @Req() req: AuthenticatedRequest,
+    @Param('id') id: string,
+    @Body() dto: UpdatePasswordRecoveryRequestDto,
+  ) {
+    return this.authService.updatePasswordRecoveryRequest(id, dto, {
+      userId: req.user.sub,
+      role: req.authz?.role ?? 'admin',
+      clientInfo: this.extractClientInfo(req as unknown as Request),
+    });
   }
 
   @UseGuards(JwtAuthGuard)

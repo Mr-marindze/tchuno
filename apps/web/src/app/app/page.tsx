@@ -1,5 +1,14 @@
-import { redirect } from "next/navigation";
+'use client';
 
-export default function CustomerAppHomePage() {
-  redirect("/app/pedidos");
+import { useRouter } from 'next/navigation';
+import { useEffect } from 'react';
+
+export default function Page() {
+  const router = useRouter();
+
+  useEffect(() => {
+    router.replace('/app/pedidos');
+  }, [router]);
+
+  return null;
 }

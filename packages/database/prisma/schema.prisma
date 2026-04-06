@@ -8,35 +8,37 @@ datasource db {
 }
 
 model User {
-  id                      String              @id @default(cuid())
-  email                   String              @unique
-  name                    String?
-  passwordHash            String
-  role                    UserRole            @default(USER)
-  adminSubrole            AdminSubrole?
-  isActive                Boolean             @default(true)
-  createdAt               DateTime            @default(now())
-  updatedAt               DateTime            @updatedAt
-  sessions                Session[]
-  workerProfile           WorkerProfile?
-  jobsAsClient            Job[]               @relation("ClientJobs")
-  reviewsGiven            Review[]
-  auditLogs               AuditLog[]
-  reauthChallenges        ReauthChallenge[]
-  updatedPlatformSettings PlatformSetting[]   @relation("PlatformSettingUpdatedBy")
-  customerPaymentIntents  PaymentIntent[]     @relation("PaymentIntentCustomer")
-  providerPaymentIntents  PaymentIntent[]     @relation("PaymentIntentProvider")
-  customerServiceRequests ServiceRequest[]    @relation("CustomerServiceRequests")
-  providerProposals       Proposal[]          @relation("ProviderProposals")
-  requestInvitations      RequestInvitation[] @relation("RequestInvitationProvider")
-  jobsAsCustomer          Job[]               @relation("JobCustomer")
-  jobsAsProvider          Job[]               @relation("JobProvider")
-  createdLedgerEntries    LedgerEntry[]       @relation("LedgerEntryCreatedBy")
-  providerPayouts         Payout[]            @relation("PayoutProviderUser")
-  requestedPayouts        Payout[]            @relation("PayoutRequestedBy")
-  approvedPayouts         Payout[]            @relation("PayoutApprovedBy")
-  requestedRefunds        RefundRequest[]     @relation("RefundRequestedBy")
-  approvedRefunds         RefundRequest[]     @relation("RefundApprovedBy")
+  id                               String                    @id @default(cuid())
+  email                            String                    @unique
+  name                             String?
+  passwordHash                     String
+  role                             UserRole                  @default(USER)
+  adminSubrole                     AdminSubrole?
+  isActive                         Boolean                   @default(true)
+  createdAt                        DateTime                  @default(now())
+  updatedAt                        DateTime                  @updatedAt
+  sessions                         Session[]
+  workerProfile                    WorkerProfile?
+  jobsAsClient                     Job[]                     @relation("ClientJobs")
+  reviewsGiven                     Review[]
+  auditLogs                        AuditLog[]
+  reauthChallenges                 ReauthChallenge[]
+  updatedPlatformSettings          PlatformSetting[]         @relation("PlatformSettingUpdatedBy")
+  customerPaymentIntents           PaymentIntent[]           @relation("PaymentIntentCustomer")
+  providerPaymentIntents           PaymentIntent[]           @relation("PaymentIntentProvider")
+  customerServiceRequests          ServiceRequest[]          @relation("CustomerServiceRequests")
+  providerProposals                Proposal[]                @relation("ProviderProposals")
+  requestInvitations               RequestInvitation[]       @relation("RequestInvitationProvider")
+  jobsAsCustomer                   Job[]                     @relation("JobCustomer")
+  jobsAsProvider                   Job[]                     @relation("JobProvider")
+  createdLedgerEntries             LedgerEntry[]             @relation("LedgerEntryCreatedBy")
+  providerPayouts                  Payout[]                  @relation("PayoutProviderUser")
+  requestedPayouts                 Payout[]                  @relation("PayoutRequestedBy")
+  approvedPayouts                  Payout[]                  @relation("PayoutApprovedBy")
+  requestedRefunds                 RefundRequest[]           @relation("RefundRequestedBy")
+  approvedRefunds                  RefundRequest[]           @relation("RefundApprovedBy")
+  passwordRecoveryRequests         PasswordRecoveryRequest[] @relation("PasswordRecoveryTargetUser")
+  resolvedPasswordRecoveryRequests PasswordRecoveryRequest[] @relation("PasswordRecoveryResolvedBy")
 }
 
 model Category {
@@ -441,6 +443,13 @@ enum AdminSubrole {
   SUPER_ADMIN
 }
 
+enum PasswordRecoveryRequestStatus {
+  OPEN
+  IN_PROGRESS
+  RESOLVED
+  CANCELED
+}
+
 enum PaymentProvider {
   INTERNAL
   MPESA
@@ -551,6 +560,28 @@ model Session {
   @@index([deviceId])
   @@index([userId, revokedAt])
   @@index([userId, lastUsedAt])
+}
+
+model PasswordRecoveryRequest {
+  id               String                        @id @default(cuid())
+  email            String
+  userId           String?
+  status           PasswordRecoveryRequestStatus @default(OPEN)
+  note             String?
+  requestedAt      DateTime                      @default(now())
+  startedAt        DateTime?
+  resolvedAt       DateTime?
+  resolvedByUserId String?
+  createdAt        DateTime                      @default(now())
+  updatedAt        DateTime                      @updatedAt
+
+  user       User? @relation("PasswordRecoveryTargetUser", fields: [userId], references: [id], onDelete: SetNull)
+  resolvedBy User? @relation("PasswordRecoveryResolvedBy", fields: [resolvedByUserId], references: [id], onDelete: SetNull)
+
+  @@index([email, status, requestedAt])
+  @@index([userId, status, requestedAt])
+  @@index([status, requestedAt])
+  @@index([resolvedByUserId, updatedAt])
 }
 
 model AuditLog {

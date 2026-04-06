@@ -14,6 +14,7 @@ export default function AdminLayout({
         { href: '/admin', label: 'Overview' },
         { href: '/admin/payments', label: 'Pagamentos' },
         { href: '/admin/users', label: 'Utilizadores' },
+        { href: '/admin/support', label: 'Suporte' },
         { href: '/admin/audit', label: 'Auditoria' },
       ]}
     >

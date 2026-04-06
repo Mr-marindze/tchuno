@@ -272,3 +272,16 @@ export function consumeAuthIntent(): AuthIntent | null {
   }
   return payload;
 }
+
+export function clearAuthIntent(): void {
+  const browserWindow = getBrowserWindow();
+  if (!browserWindow) {
+    return;
+  }
+
+  try {
+    browserWindow.sessionStorage.removeItem(AUTH_INTENT_KEY);
+  } catch {
+    // ignore storage failures
+  }
+}
