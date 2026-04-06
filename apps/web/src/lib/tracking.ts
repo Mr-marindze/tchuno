@@ -20,7 +20,7 @@ export type WorkerRankingDebugItem = {
 
 export type TrackingEventMap = {
   "marketplace.cta.click": {
-    source: "landing.hero" | "landing.worker_card";
+    source: "landing.hero" | "landing.final_cta" | "landing.worker_card";
     view: "landing";
     label: string;
     ctaType: "primary" | "secondary";
@@ -785,7 +785,10 @@ function summarizeEventInto(
 ) {
   switch (event.name) {
     case "marketplace.cta.click": {
-      if (event.metadata.source === "landing.hero") {
+      if (
+        event.metadata.source === "landing.hero" ||
+        event.metadata.source === "landing.final_cta"
+      ) {
         summary.heroCtaClicks += 1;
       }
       break;

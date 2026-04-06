@@ -119,22 +119,22 @@ function getDistanceLabel(
   proximityScore: number,
 ): string {
   if (!requestLocation || !workerLocation) {
-    return "A confirmar";
+    return "Distância a confirmar";
   }
 
   if (proximityScore >= 3) {
-    return "Mesma zona";
+    return "0-2 km (estimado)";
   }
 
   if (proximityScore >= 2) {
-    return "Zona próxima";
+    return "2-5 km (estimado)";
   }
 
   if (proximityScore >= 1) {
-    return "Raio expandido";
+    return "5-12 km (estimado)";
   }
 
-  return "Mais amplo";
+  return "Mais de 12 km (estimado)";
 }
 
 function getShortComment(worker: WorkerProfile): string {
@@ -167,11 +167,11 @@ function buildStatusMessage(input: {
   stage: RecommendationStage;
 }): string {
   if (!input.request.location) {
-    return "Sem localização definida no pedido. Mostramos profissionais desta área por reputação e disponibilidade.";
+    return "Sem localização definida no pedido. Mostramos profissionais relevantes desta área por reputação e disponibilidade.";
   }
 
   if (input.stage === "nearby") {
-    return "Mostramos primeiro profissionais na mesma zona ou em zonas muito próximas do pedido.";
+    return "Mostramos primeiro profissionais na tua zona com melhor encaixe para este pedido.";
   }
 
   if (input.stage === "expanded") {
@@ -179,10 +179,10 @@ function buildStatusMessage(input: {
   }
 
   if (input.scope === "category-available") {
-    return "Ainda sem perfis suficientemente próximos. Mostramos opções mais amplas dentro desta área.";
+    return "Ainda não encontrámos profissionais próximos. Continuamos a procurar na tua zona.";
   }
 
-  return "Ainda sem disponibilidade suficiente nesta área. Mostramos opções mais amplas para acelerar propostas.";
+  return "Ainda não encontrámos profissionais próximos. Mostramos opções mais amplas para acelerar propostas.";
 }
 
 export function buildRequestWorkerRecommendations(

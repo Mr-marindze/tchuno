@@ -311,6 +311,48 @@ export default function OrderDetailsPage() {
   const flowState = resolveFlowVisualState(request, financial);
   const canInviteWorkers =
     request?.status === 'OPEN' && !request.selectedProposalId;
+  const primaryActionCopy = useMemo(() => {
+    if (!request) {
+      return null;
+    }
+
+    if (jobDetails?.contactUnlocked) {
+      return {
+        title: 'Contacto desbloqueado',
+        description:
+          'Já podes combinar os próximos passos da execução com o prestador selecionado.',
+      };
+    }
+
+    if (payableIntent) {
+      return {
+        title: 'Pagar sinal',
+        description:
+          'Confirma o pagamento do sinal para desbloquear o contacto e iniciar a execução.',
+      };
+    }
+
+    if ((request.proposals?.length ?? 0) > 0) {
+      return {
+        title: 'Selecionar proposta',
+        description:
+          'Escolhe uma das propostas acima para criar o job e avançar para o pagamento do sinal.',
+      };
+    }
+
+    if (canInviteWorkers) {
+      return {
+        title: 'Aguardar propostas',
+        description:
+          'Enquanto esperas, podes priorizar profissionais próximos para acelerar respostas.',
+      };
+    }
+
+    return {
+      title: 'Aguardar atualização',
+      description: 'O pedido continua a avançar dentro do fluxo oficial do Tchuno.',
+    };
+  }, [canInviteWorkers, jobDetails?.contactUnlocked, payableIntent, request]);
 
   useEffect(() => {
     let active = true;
@@ -390,7 +432,7 @@ export default function OrderDetailsPage() {
       writeInvitedWorkerIds(requestId, nextWorkerIds);
       return nextWorkerIds;
     });
-    setInviteFeedback(`${workerName} ficou marcado para convite neste pedido.`);
+    setInviteFeedback(`${workerName} ficou priorizado para convite neste pedido.`);
   }
 
   async function handleSelectProposal(proposalId: string) {
@@ -522,148 +564,148 @@ export default function OrderDetailsPage() {
             </article>
           </section>
 
-          <section className='rounded-2xl border border-slate-200 bg-white p-4 shadow-sm sm:p-5'>
-            <div className='flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between'>
-              <div>
-                <p className='text-xs font-semibold uppercase tracking-wide text-slate-500'>
-                  Profissionais próximos de ti
-                </p>
-                <h2 className='mt-2 text-lg font-semibold text-slate-900'>
-                  Perfis sugeridos para acelerar propostas
-                </h2>
-                <p className='mt-1 text-sm text-slate-600'>
-                  Priorizamos proximidade, rating e disponibilidade para
-                  reduzires o tempo até receber propostas.
-                </p>
+          {canInviteWorkers ? (
+            <section className='rounded-2xl border border-slate-200 bg-white p-4 shadow-sm sm:p-5'>
+              <div className='flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between'>
+                <div>
+                  <p className='text-xs font-semibold uppercase tracking-wide text-slate-500'>
+                    Sugestões
+                  </p>
+                  <h2 className='mt-2 text-lg font-semibold text-slate-900'>
+                    Profissionais próximos de ti
+                  </h2>
+                  <p className='mt-1 max-w-3xl text-sm text-slate-600'>
+                    Com base na localização do teu pedido, mostramos primeiro
+                    profissionais mais próximos, disponíveis e com melhor
+                    avaliação.
+                  </p>
+                </div>
+
+                <div className='rounded-xl border border-slate-200 bg-slate-50 px-3 py-2 text-sm text-slate-600'>
+                  {recommendedWorkers.length} sugestão(ões)
+                </div>
               </div>
 
-              <div className='rounded-xl border border-slate-200 bg-slate-50 px-3 py-2 text-sm text-slate-600'>
-                {recommendedWorkers.length} sugestão(ões)
+              <p
+                className={`mt-4 text-sm ${
+                  recommendationLoading ? 'text-blue-700' : 'text-slate-600'
+                }`}
+              >
+                {recommendationStatus}
+              </p>
+
+              {inviteFeedback ? (
+                <p className='mt-2 text-sm text-blue-700'>{inviteFeedback}</p>
+              ) : null}
+
+              <div className='mt-3 rounded-xl border border-blue-100 bg-blue-50 p-3 text-sm text-blue-800'>
+                Esta lista serve para acelerar propostas. Não mostra contacto
+                direto nem cria contratação fora do fluxo oficial.
               </div>
-            </div>
 
-            <p
-              className={`mt-4 text-sm ${
-                recommendationLoading ? 'text-blue-700' : 'text-slate-600'
-              }`}
-            >
-              {recommendationStatus}
-            </p>
-
-            {inviteFeedback ? (
-              <p className='mt-2 text-sm text-blue-700'>{inviteFeedback}</p>
-            ) : null}
-
-            <div className='mt-3 rounded-xl border border-blue-100 bg-blue-50 p-3 text-sm text-blue-800'>
-              O convite não cria contratação direta. Serve apenas para priorizar
-              quem queres chamar para enviar proposta.
-            </div>
-
-            {canInviteWorkers ? (
-              request.proposals && request.proposals.length > 0 ? (
+              {request.proposals && request.proposals.length > 0 ? (
                 <p className='mt-3 text-xs text-slate-500'>
                   Perfis que já enviaram proposta ficam fora desta lista para
                   evitar repetição.
                 </p>
-              ) : null
-            ) : (
-              <div className='mt-4 rounded-xl border border-slate-200 bg-slate-50 p-4 text-sm text-slate-600'>
-                Convites encerrados para este pedido depois da seleção da
-                proposta.
-              </div>
-            )}
+              ) : null}
 
-            {canInviteWorkers && !recommendationLoading ? (
-              recommendedWorkers.length === 0 ? (
-                <div className='mt-4 rounded-xl border border-dashed border-slate-300 bg-slate-50 p-4 text-sm text-slate-600'>
-                  Ainda não encontrámos profissionais relevantes para convidar.
-                </div>
-              ) : (
-                <div className='mt-4 grid gap-3 xl:grid-cols-2'>
-                  {recommendedWorkers.map((item) => {
-                    const worker = item.worker;
-                    const displayName = resolveWorkerDisplayName(worker);
-                    const specialty =
-                      worker.categories[0]?.name ??
-                      request.category?.name ??
-                      'Serviço local';
-                    const availabilityLabel = worker.isAvailable
-                      ? 'Disponível'
-                      : 'Agenda limitada';
-                    const ratingLabel =
-                      worker.ratingCount > 0
-                        ? `${formatRatingValue(worker.ratingAvg)}/5`
-                        : 'Novo';
-                    const isInvited = invitedWorkerIds.includes(worker.userId);
+              {!recommendationLoading ? (
+                recommendedWorkers.length === 0 ? (
+                  <div className='mt-4 rounded-2xl border border-dashed border-slate-300 bg-slate-50 p-4 text-sm text-slate-600'>
+                    {request.location
+                      ? 'Ainda não encontrámos profissionais próximos. Continuamos a procurar na tua zona.'
+                      : 'Ainda não encontrámos profissionais relevantes para este pedido.'}
+                  </div>
+                ) : (
+                  <div className='mt-4 grid gap-3 xl:grid-cols-2'>
+                    {recommendedWorkers.map((item) => {
+                      const worker = item.worker;
+                      const displayName = resolveWorkerDisplayName(worker);
+                      const specialty =
+                        worker.categories[0]?.name ??
+                        request.category?.name ??
+                        'Serviço local';
+                      const availabilityLabel = worker.isAvailable
+                        ? 'Disponível agora'
+                        : 'Agenda limitada';
+                      const ratingLabel =
+                        worker.ratingCount > 0
+                          ? `⭐ ${formatRatingValue(worker.ratingAvg)} (${worker.ratingCount})`
+                          : '⭐ Novo';
+                      const isInvited = invitedWorkerIds.includes(worker.userId);
 
-                    return (
-                      <article
-                        key={worker.id}
-                        className='rounded-xl border border-slate-200 bg-slate-50 p-4'
-                      >
-                        <div className='flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between'>
-                          <div>
-                            <h3 className='text-base font-semibold text-slate-900'>
-                              {displayName}
-                            </h3>
-                            <p className='mt-1 text-sm text-slate-600'>
-                              {specialty}
-                            </p>
-                          </div>
-
-                          <span
-                            className={`rounded-full px-2.5 py-1 text-xs font-semibold ${
-                              worker.isAvailable
-                                ? 'bg-emerald-100 text-emerald-700'
-                                : 'bg-slate-200 text-slate-700'
-                            }`}
-                          >
-                            {availabilityLabel}
-                          </span>
-                        </div>
-
-                        <div className='mt-4 grid gap-3 sm:grid-cols-3'>
-                          <div className='rounded-lg border border-slate-200 bg-white p-3'>
-                            <p className='text-xs text-slate-500'>Rating</p>
-                            <p className='mt-1 text-sm font-semibold text-slate-900'>
-                              {ratingLabel}
-                            </p>
-                          </div>
-                          <div className='rounded-lg border border-slate-200 bg-white p-3'>
-                            <p className='text-xs text-slate-500'>Distância</p>
-                            <p className='mt-1 text-sm font-semibold text-slate-900'>
-                              {item.distanceLabel}
-                            </p>
-                          </div>
-                          <div className='rounded-lg border border-slate-200 bg-white p-3'>
-                            <p className='text-xs text-slate-500'>Disponibilidade</p>
-                            <p className='mt-1 text-sm font-semibold text-slate-900'>
-                              {availabilityLabel}
-                            </p>
-                          </div>
-                        </div>
-
-                        <p className='mt-4 text-sm text-slate-600'>
-                          {item.shortComment}
-                        </p>
-
-                        <button
-                          type='button'
-                          className='mt-4 inline-flex items-center rounded-lg bg-blue-600 px-4 py-2 text-sm font-semibold text-white hover:bg-blue-700 disabled:cursor-not-allowed disabled:opacity-60'
-                          onClick={() =>
-                            handleInviteWorker(worker.userId, displayName)
-                          }
-                          disabled={isInvited}
+                      return (
+                        <article
+                          key={worker.id}
+                          className='rounded-2xl border border-slate-200 bg-slate-50 p-4 shadow-sm transition-shadow hover:shadow-md'
                         >
-                          {isInvited ? 'Convite marcado' : 'Convidar para proposta'}
-                        </button>
-                      </article>
-                    );
-                  })}
-                </div>
-              )
-            ) : null}
-          </section>
+                          <div className='flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between'>
+                            <div>
+                              <h3 className='text-base font-semibold text-slate-900'>
+                                {displayName}
+                              </h3>
+                              <p className='mt-1 text-sm text-slate-600'>
+                                {specialty}
+                              </p>
+                            </div>
+
+                            <span
+                              className={`rounded-full px-2.5 py-1 text-xs font-semibold ${
+                                worker.isAvailable
+                                  ? 'bg-emerald-100 text-emerald-700'
+                                  : 'bg-slate-200 text-slate-700'
+                              }`}
+                            >
+                              {availabilityLabel}
+                            </span>
+                          </div>
+
+                          <div className='mt-4 grid gap-3 sm:grid-cols-3'>
+                            <div className='rounded-xl border border-slate-200 bg-white p-3'>
+                              <p className='text-xs text-slate-500'>Rating</p>
+                              <p className='mt-1 text-sm font-semibold text-slate-900'>
+                                {ratingLabel}
+                              </p>
+                            </div>
+                            <div className='rounded-xl border border-slate-200 bg-white p-3'>
+                              <p className='text-xs text-slate-500'>Distância</p>
+                              <p className='mt-1 text-sm font-semibold text-slate-900'>
+                                {item.distanceLabel}
+                              </p>
+                            </div>
+                            <div className='rounded-xl border border-slate-200 bg-white p-3'>
+                              <p className='text-xs text-slate-500'>Disponibilidade</p>
+                              <p className='mt-1 text-sm font-semibold text-slate-900'>
+                                {availabilityLabel}
+                              </p>
+                            </div>
+                          </div>
+
+                          <p className='mt-4 text-sm text-slate-600'>
+                            {item.shortComment}
+                          </p>
+
+                          <button
+                            type='button'
+                            className='mt-4 inline-flex items-center rounded-lg bg-blue-600 px-4 py-2 text-sm font-semibold text-white hover:bg-blue-700 disabled:cursor-not-allowed disabled:opacity-60'
+                            onClick={() =>
+                              handleInviteWorker(worker.userId, displayName)
+                            }
+                            disabled={isInvited}
+                          >
+                            {isInvited
+                              ? 'Convite preparado'
+                              : 'Convidar para proposta'}
+                          </button>
+                        </article>
+                      );
+                    })}
+                  </div>
+                )
+              ) : null}
+            </section>
+          ) : null}
 
           <section className='rounded-2xl border border-slate-200 bg-white p-4 shadow-sm sm:p-5'>
             <p className='text-xs font-semibold uppercase tracking-wide text-slate-500'>
@@ -740,34 +782,42 @@ export default function OrderDetailsPage() {
             )}
           </section>
 
-          <section className='grid gap-4 lg:grid-cols-2'>
-            <article className='rounded-2xl border border-slate-200 bg-white p-4 shadow-sm sm:p-5'>
-              <p className='text-xs font-semibold uppercase tracking-wide text-slate-500'>
-                Informação financeira
-              </p>
-              <div className='mt-3 space-y-2 text-sm text-slate-700'>
-                <p>
-                  <strong>Proposta selecionada:</strong>{' '}
-                  {selectedProposal
-                    ? formatCurrencyMzn(selectedProposal.price)
-                    : 'Ainda não selecionada'}
+          <section className='rounded-2xl border border-slate-200 bg-white p-4 shadow-sm sm:p-5'>
+            <p className='text-xs font-semibold uppercase tracking-wide text-slate-500'>
+              Ação principal
+            </p>
+            <h2 className='mt-2 text-lg font-semibold text-slate-900'>
+              {primaryActionCopy?.title ?? 'Próximo passo'}
+            </h2>
+            <p className='mt-2 text-sm text-slate-600'>
+              {primaryActionCopy?.description}
+            </p>
+
+            {jobDetails?.contactUnlocked ? (
+              <div className='mt-4 rounded-2xl border border-emerald-200 bg-emerald-50 p-4 text-sm text-emerald-800'>
+                <p className='font-semibold'>Contacto desbloqueado</p>
+                <p className='mt-1'>
+                  {jobDetails.providerContact?.name ?? 'Prestador selecionado'}
                 </p>
-                <p>
-                  <strong>Valor do sinal:</strong>{' '}
-                  {latestIntent ? formatCurrencyMzn(latestIntent.amount) : 'n/d'}
-                </p>
-                <p>
-                  <strong>Estado do pagamento:</strong>{' '}
-                  {latestIntent
-                    ? paymentStatusLabel[latestIntent.status] ?? latestIntent.status
-                    : 'Não iniciado'}
+                <p>{jobDetails.providerContact?.email ?? 'Email indisponível'}</p>
+                <p className='mt-2 text-emerald-700'>
+                  Job em estado: {request.job?.status ?? 'n/d'}
                 </p>
               </div>
+            ) : (
+              <div className='mt-4 rounded-2xl border border-orange-200 bg-orange-50 p-4 text-sm text-orange-800'>
+                <p className='font-semibold'>Contacto bloqueado até pagamento</p>
+                <p className='mt-1'>
+                  O contacto direto só fica disponível após confirmação do sinal.
+                </p>
+              </div>
+            )}
 
-              {payableIntent ? (
+            {payableIntent ? (
+              <div className='mt-4 flex flex-wrap items-center gap-3'>
                 <button
                   type='button'
-                  className='mt-4 inline-flex items-center rounded-lg bg-orange-600 px-4 py-2 text-sm font-semibold text-white hover:bg-orange-700 disabled:opacity-60'
+                  className='inline-flex items-center rounded-lg bg-orange-600 px-4 py-2 text-sm font-semibold text-white hover:bg-orange-700 disabled:opacity-60'
                   onClick={() => {
                     void handlePayDeposit();
                   }}
@@ -775,9 +825,7 @@ export default function OrderDetailsPage() {
                 >
                   {runningAction ? 'A processar...' : 'Pagar sinal'}
                 </button>
-              ) : null}
 
-              <div className='mt-4'>
                 <Link
                   href='/app/pagamentos'
                   className='inline-flex items-center rounded-lg border border-slate-300 px-3 py-2 text-sm font-medium text-slate-700 hover:bg-slate-100'
@@ -785,48 +833,44 @@ export default function OrderDetailsPage() {
                   Ver histórico de pagamentos
                 </Link>
               </div>
-            </article>
-
-            <article className='rounded-2xl border border-slate-200 bg-white p-4 shadow-sm sm:p-5'>
-              <p className='text-xs font-semibold uppercase tracking-wide text-slate-500'>
-                Contacto e execução
-              </p>
-
-              {jobDetails?.contactUnlocked ? (
-                <div className='mt-3 rounded-xl border border-emerald-200 bg-emerald-50 p-3 text-sm text-emerald-800'>
-                  <p className='font-semibold'>Contacto desbloqueado</p>
-                  <p className='mt-1'>
-                    {jobDetails.providerContact?.name ?? 'Prestador selecionado'}
-                  </p>
-                  <p>{jobDetails.providerContact?.email ?? 'Email indisponível'}</p>
-                  <p className='mt-2 text-emerald-700'>
-                    Job em estado: {request.job?.status ?? 'n/d'}
-                  </p>
-                </div>
-              ) : (
-                <div className='mt-3 rounded-xl border border-orange-200 bg-orange-50 p-3 text-sm text-orange-800'>
-                  <p className='font-semibold'>Contacto bloqueado até pagamento</p>
-                  <p className='mt-1'>
-                    O contacto direto só fica disponível após confirmação do sinal.
-                  </p>
-                </div>
-              )}
-
-              {request.job ? (
-                <div className='mt-4 text-sm text-slate-600'>
-                  <p>
-                    <strong>Job:</strong> {request.job.id.slice(0, 10)}
-                  </p>
-                  <p>
-                    <strong>Estado:</strong> {request.job.status}
-                  </p>
-                </div>
-              ) : (
-                <p className='mt-4 text-sm text-slate-600'>
-                  O job será criado automaticamente após selecionar uma proposta.
+            ) : request.job ? (
+              <div className='mt-4 text-sm text-slate-600'>
+                <p>
+                  <strong>Job:</strong> {request.job.id.slice(0, 10)}
                 </p>
-              )}
-            </article>
+                <p>
+                  <strong>Estado:</strong> {request.job.status}
+                </p>
+              </div>
+            ) : (
+              <p className='mt-4 text-sm text-slate-600'>
+                O job será criado automaticamente após selecionar uma proposta.
+              </p>
+            )}
+          </section>
+
+          <section className='rounded-2xl border border-slate-200 bg-white p-4 shadow-sm sm:p-5'>
+            <p className='text-xs font-semibold uppercase tracking-wide text-slate-500'>
+              Informação financeira
+            </p>
+            <div className='mt-3 space-y-2 text-sm text-slate-700'>
+              <p>
+                <strong>Proposta selecionada:</strong>{' '}
+                {selectedProposal
+                  ? formatCurrencyMzn(selectedProposal.price)
+                  : 'Ainda não selecionada'}
+              </p>
+              <p>
+                <strong>Valor do sinal:</strong>{' '}
+                {latestIntent ? formatCurrencyMzn(latestIntent.amount) : 'n/d'}
+              </p>
+              <p>
+                <strong>Estado do pagamento:</strong>{' '}
+                {latestIntent
+                  ? paymentStatusLabel[latestIntent.status] ?? latestIntent.status
+                  : 'Não iniciado'}
+              </p>
+            </div>
           </section>
         </>
       )}
