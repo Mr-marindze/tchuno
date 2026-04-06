@@ -48,6 +48,7 @@ export type ProviderRequestInvitation = {
     location: string | null;
     status: ServiceRequestStatus;
     selectedProposalId: string | null;
+    expiresAt: string;
     createdAt: string;
     updatedAt: string;
     category?: {
@@ -81,6 +82,7 @@ export type ServiceRequest = {
   location: string | null;
   status: ServiceRequestStatus;
   selectedProposalId: string | null;
+  expiresAt: string;
   createdAt: string;
   updatedAt: string;
   proposals?: Array<{
@@ -255,6 +257,27 @@ export async function getServiceRequestById(
       Authorization: `Bearer ${accessToken}`,
     },
   });
+
+  if (!response.ok) {
+    throw new Error(await readApiError(response));
+  }
+
+  return (await response.json()) as ServiceRequest;
+}
+
+export async function recreateServiceRequest(
+  accessToken: string,
+  requestId: string,
+): Promise<ServiceRequest> {
+  const response = await fetch(
+    `${API_URL}/service-requests/${requestId}/recreate`,
+    {
+      method: 'POST',
+      headers: {
+        Authorization: `Bearer ${accessToken}`,
+      },
+    },
+  );
 
   if (!response.ok) {
     throw new Error(await readApiError(response));

@@ -64,6 +64,19 @@ export class ServiceRequestsController {
     return this.serviceRequestsService.create(req.user.sub, dto);
   }
 
+  @Post(':id/recreate')
+  @ApiOperation({ summary: 'Recreate one expired service request (customer)' })
+  @ApiParam({ name: 'id', type: String })
+  @ApiOkResponse({ description: 'Expired service request recreated' })
+  @ApiUnauthorizedResponse({ type: ErrorResponseDto })
+  @ApiForbiddenResponse({ type: ErrorResponseDto })
+  @ApiConflictResponse({ type: ErrorResponseDto })
+  @ApiNotFoundResponse({ type: ErrorResponseDto })
+  @RequirePermissions('customer.requests.create')
+  recreate(@Req() req: AuthenticatedRequest, @Param('id') id: string) {
+    return this.serviceRequestsService.recreate(req.user.sub, id);
+  }
+
   @Get('me')
   @ApiOperation({ summary: 'List own service requests (customer)' })
   @ApiOkResponse({ description: 'Paginated list of own service requests' })

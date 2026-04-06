@@ -1857,4 +1857,171 @@ describe('Auth and Sessions (e2e)', () => {
       .send({ status: 'COMPLETED' })
       .expect(200);
   });
+
+  it('expires stale service requests and allows recreating an expired request', async () => {
+    const base = Date.now();
+    const password = 'abc12345';
+    const passwordHash = await bcrypt.hash(password, 12);
+
+    const customerUser = await prisma.user.create({
+      data: {
+        email: `sr_exp_customer_${base}@tchuno.local`,
+        name: 'SR Exp Customer',
+        passwordHash,
+        role: 'USER',
+        isActive: true,
+      },
+      select: {
+        id: true,
+        email: true,
+      },
+    });
+
+    const providerUser = await prisma.user.create({
+      data: {
+        email: `sr_exp_provider_${base}@tchuno.local`,
+        name: 'SR Exp Provider',
+        passwordHash,
+        role: 'USER',
+        isActive: true,
+      },
+      select: {
+        id: true,
+        email: true,
+      },
+    });
+
+    const jwtService = app.get(JwtService);
+    const secret = process.env.JWT_ACCESS_SECRET ?? 'change-me-access';
+    const customerAccessToken = jwtService.sign(
+      { sub: customerUser.id, email: customerUser.email },
+      { secret, expiresIn: '15m' },
+    );
+    const providerAccessToken = jwtService.sign(
+      { sub: providerUser.id, email: providerUser.email },
+      { secret, expiresIn: '15m' },
+    );
+
+    const category = await prisma.category.create({
+      data: {
+        name: `Service Request Expiration ${base}`,
+        slug: `service-request-expiration-${base}`,
+        description: 'Categoria de teste para expiração de pedido',
+        sortOrder: 90,
+      },
+      select: {
+        id: true,
+      },
+    });
+
+    await request(app.getHttpServer())
+      .put('/worker-profile/me')
+      .set('Authorization', `Bearer ${providerAccessToken}`)
+      .send({
+        bio: 'Prestador para testar expiração de pedidos',
+        location: 'Maputo',
+        hourlyRate: 900,
+        experienceYears: 3,
+        isAvailable: true,
+        categoryIds: [category.id],
+      })
+      .expect(200);
+
+    const createRequestResponse = await request(app.getHttpServer())
+      .post('/service-requests')
+      .set('Authorization', `Bearer ${customerAccessToken}`)
+      .send({
+        categoryId: category.id,
+        title: 'Reparação urgente de canalização',
+        description: 'Preciso de resposta rápida para fuga de água na cozinha.',
+        location: 'Bairro Central',
+      })
+      .expect(201);
+    const createdRequest = createRequestResponse.body as {
+      id: string;
+      status: string;
+      expiresAt: string;
+    };
+
+    expect(createdRequest.status).toBe('OPEN');
+
+    await prisma.serviceRequest.update({
+      where: { id: createdRequest.id },
+      data: {
+        expiresAt: new Date(Date.now() - 60_000),
+      },
+    });
+
+    const customerOpenList = await request(app.getHttpServer())
+      .get('/service-requests/me?status=OPEN')
+      .set('Authorization', `Bearer ${customerAccessToken}`)
+      .expect(200);
+    const customerOpenBody = customerOpenList.body as PaginatedResponse<{
+      id: string;
+    }>;
+    expect(customerOpenBody.data.map((item) => item.id)).not.toContain(
+      createdRequest.id,
+    );
+
+    const expiredRequestResponse = await request(app.getHttpServer())
+      .get(`/service-requests/${createdRequest.id}`)
+      .set('Authorization', `Bearer ${customerAccessToken}`)
+      .expect(200);
+    const expiredRequest = expiredRequestResponse.body as {
+      id: string;
+      status: string;
+      expiresAt: string;
+    };
+    expect(expiredRequest.status).toBe('EXPIRED');
+
+    const providerOpenList = await request(app.getHttpServer())
+      .get('/service-requests/open?status=OPEN')
+      .set('Authorization', `Bearer ${providerAccessToken}`)
+      .expect(200);
+    const providerOpenBody = providerOpenList.body as PaginatedResponse<{
+      id: string;
+    }>;
+    expect(providerOpenBody.data.map((item) => item.id)).not.toContain(
+      createdRequest.id,
+    );
+
+    const providerExpiredList = await request(app.getHttpServer())
+      .get('/service-requests/open?status=EXPIRED')
+      .set('Authorization', `Bearer ${providerAccessToken}`)
+      .expect(200);
+    const providerExpiredBody = providerExpiredList.body as PaginatedResponse<{
+      id: string;
+    }>;
+    expect(providerExpiredBody.data.map((item) => item.id)).toContain(
+      createdRequest.id,
+    );
+
+    await request(app.getHttpServer())
+      .post(`/service-requests/${createdRequest.id}/proposals`)
+      .set('Authorization', `Bearer ${providerAccessToken}`)
+      .send({
+        price: 7_500,
+        comment: 'Ainda consigo responder hoje.',
+      })
+      .expect(409);
+
+    const recreateResponse = await request(app.getHttpServer())
+      .post(`/service-requests/${createdRequest.id}/recreate`)
+      .set('Authorization', `Bearer ${customerAccessToken}`)
+      .send({})
+      .expect(201);
+    const recreatedRequest = recreateResponse.body as {
+      id: string;
+      status: string;
+      expiresAt: string;
+      title: string;
+    };
+
+    expect(recreatedRequest.id).not.toBe(createdRequest.id);
+    expect(recreatedRequest.status).toBe('OPEN');
+    expect(recreatedRequest.title).toBe('Reparação urgente de canalização');
+    expect(new Date(recreatedRequest.expiresAt).getTime()).toBeGreaterThan(
+      Date.now(),
+    );
+  });
 });

@@ -3,7 +3,10 @@ import {
   ConflictException,
   ForbiddenException,
   Injectable,
+  Logger,
   NotFoundException,
+  OnModuleDestroy,
+  OnModuleInit,
 } from '@nestjs/common';
 import {
   PaymentProvider,
@@ -36,6 +39,9 @@ const adminRoles = new Set<AppRole>([
   'super_admin',
 ]);
 
+const defaultServiceRequestExpiryHours = 72;
+const defaultServiceRequestExpirySweepMs = 60_000;
+
 const invitationProviderUserSelect = {
   id: true,
   name: true,
@@ -54,12 +60,105 @@ const requestInvitationInclude = {
   },
 } satisfies Prisma.RequestInvitationInclude;
 
+const customerRequestDetailInclude = {
+  category: {
+    select: {
+      id: true,
+      name: true,
+      slug: true,
+    },
+  },
+  proposals: {
+    include: {
+      provider: {
+        select: {
+          id: true,
+          name: true,
+          workerProfile: {
+            select: {
+              ratingAvg: true,
+              ratingCount: true,
+              location: true,
+            },
+          },
+        },
+      },
+    },
+    orderBy: [{ createdAt: 'asc' }, { id: 'asc' }],
+  },
+  invitations: {
+    include: requestInvitationInclude,
+    orderBy: [{ createdAt: 'desc' }, { id: 'desc' }],
+  },
+  job: {
+    select: {
+      id: true,
+      status: true,
+      requestId: true,
+      proposalId: true,
+      agreedPrice: true,
+      contactUnlockedAt: true,
+      createdAt: true,
+      paymentIntents: {
+        select: {
+          id: true,
+          amount: true,
+          status: true,
+          provider: true,
+          createdAt: true,
+          updatedAt: true,
+        },
+        orderBy: [{ createdAt: 'desc' }, { id: 'desc' }],
+      },
+    },
+  },
+} satisfies Prisma.ServiceRequestInclude;
+
+type ExpirableRequestSnapshot = {
+  id: string;
+  status: ServiceRequestStatus;
+  expiresAt: Date;
+  selectedProposalId: string | null;
+};
+
 @Injectable()
-export class ServiceRequestsService {
+export class ServiceRequestsService implements OnModuleInit, OnModuleDestroy {
+  private readonly logger = new Logger(ServiceRequestsService.name);
+  private expirySweepTimer: NodeJS.Timeout | null = null;
+
   constructor(
     private readonly prisma: PrismaService,
     private readonly metricsService: MetricsService,
   ) {}
+
+  onModuleInit() {
+    void this.expireStaleOpenRequests();
+
+    const sweepIntervalMs = this.resolveRequestExpirySweepIntervalMs();
+    if (sweepIntervalMs <= 0) {
+      return;
+    }
+
+    this.expirySweepTimer = setInterval(() => {
+      void this.expireStaleOpenRequests().catch((error) => {
+        this.logger.error(
+          'Failed to expire stale service requests',
+          error instanceof Error ? error.stack : undefined,
+        );
+      });
+    }, sweepIntervalMs);
+
+    this.expirySweepTimer.unref?.();
+  }
+
+  onModuleDestroy() {
+    if (!this.expirySweepTimer) {
+      return;
+    }
+
+    clearInterval(this.expirySweepTimer);
+    this.expirySweepTimer = null;
+  }
 
   async create(actorUserId: string, dto: CreateServiceRequestDto) {
     const category = await this.prisma.category.findUnique({
@@ -79,6 +178,7 @@ export class ServiceRequestsService {
         description: dto.description.trim(),
         location: dto.location?.trim() || null,
         status: 'OPEN',
+        expiresAt: this.buildRequestExpiryDate(),
       },
     });
 
@@ -91,7 +191,81 @@ export class ServiceRequestsService {
     return created;
   }
 
+  async recreate(actorUserId: string, requestId: string) {
+    const request = await this.prisma.serviceRequest.findUnique({
+      where: { id: requestId },
+      select: {
+        id: true,
+        customerId: true,
+        categoryId: true,
+        title: true,
+        description: true,
+        location: true,
+        status: true,
+        selectedProposalId: true,
+        expiresAt: true,
+        job: {
+          select: {
+            id: true,
+          },
+        },
+      },
+    });
+
+    if (!request) {
+      throw new NotFoundException('Service request not found');
+    }
+
+    if (request.customerId !== actorUserId) {
+      throw new ForbiddenException(
+        'Only request owner can recreate this request',
+      );
+    }
+
+    const currentStatus = await this.refreshRequestStatusIfExpired(request);
+    if (
+      currentStatus !== 'EXPIRED' ||
+      request.selectedProposalId ||
+      request.job
+    ) {
+      throw new ConflictException(
+        'Only expired requests without selected proposal can be recreated',
+      );
+    }
+
+    const category = await this.prisma.category.findUnique({
+      where: { id: request.categoryId },
+      select: { id: true, isActive: true },
+    });
+
+    if (!category || !category.isActive) {
+      throw new NotFoundException('Category not found');
+    }
+
+    const recreated = await this.prisma.serviceRequest.create({
+      data: {
+        customerId: actorUserId,
+        categoryId: request.categoryId,
+        title: request.title,
+        description: request.description,
+        location: request.location,
+        status: 'OPEN',
+        expiresAt: this.buildRequestExpiryDate(),
+      },
+    });
+
+    this.metricsService.recordBusinessEvent({
+      domain: 'jobs',
+      event: 'service_request_recreated',
+      result: 'success',
+    });
+
+    return recreated;
+  }
+
   async listMine(actorUserId: string, query: ListServiceRequestsQueryDto) {
+    await this.expireStaleOpenRequests();
+
     const { page, limit, skip } = resolvePagination(query);
 
     const where: Prisma.ServiceRequestWhereInput = {
@@ -163,6 +337,8 @@ export class ServiceRequestsService {
     actorUserId: string,
     query: ListServiceRequestsQueryDto,
   ) {
+    await this.expireStaleOpenRequests();
+
     const profile = await this.prisma.workerProfile.findUnique({
       where: { userId: actorUserId },
       select: { id: true, isAvailable: true },
@@ -238,59 +414,7 @@ export class ServiceRequestsService {
   async getMineById(actorUserId: string, requestId: string) {
     const request = await this.prisma.serviceRequest.findUnique({
       where: { id: requestId },
-      include: {
-        category: {
-          select: {
-            id: true,
-            name: true,
-            slug: true,
-          },
-        },
-        proposals: {
-          include: {
-            provider: {
-              select: {
-                id: true,
-                name: true,
-                workerProfile: {
-                  select: {
-                    ratingAvg: true,
-                    ratingCount: true,
-                    location: true,
-                  },
-                },
-              },
-            },
-          },
-          orderBy: [{ createdAt: 'asc' }, { id: 'asc' }],
-        },
-        invitations: {
-          include: requestInvitationInclude,
-          orderBy: [{ createdAt: 'desc' }, { id: 'desc' }],
-        },
-        job: {
-          select: {
-            id: true,
-            status: true,
-            requestId: true,
-            proposalId: true,
-            agreedPrice: true,
-            contactUnlockedAt: true,
-            createdAt: true,
-            paymentIntents: {
-              select: {
-                id: true,
-                amount: true,
-                status: true,
-                provider: true,
-                createdAt: true,
-                updatedAt: true,
-              },
-              orderBy: [{ createdAt: 'desc' }, { id: 'desc' }],
-            },
-          },
-        },
-      },
+      include: customerRequestDetailInclude,
     });
 
     if (!request) {
@@ -299,6 +423,14 @@ export class ServiceRequestsService {
 
     if (request.customerId !== actorUserId) {
       throw new ForbiddenException('Only request owner can read this request');
+    }
+
+    const currentStatus = await this.refreshRequestStatusIfExpired(request);
+    if (currentStatus === 'EXPIRED') {
+      return this.prisma.serviceRequest.findUniqueOrThrow({
+        where: { id: requestId },
+        include: customerRequestDetailInclude,
+      });
     }
 
     return request;
@@ -311,6 +443,8 @@ export class ServiceRequestsService {
         id: true,
         customerId: true,
         status: true,
+        selectedProposalId: true,
+        expiresAt: true,
       },
     });
 
@@ -322,7 +456,8 @@ export class ServiceRequestsService {
       throw new ForbiddenException('Only request owner can read invitations');
     }
 
-    await this.expirePendingInvitationsForRequest(request.id, request.status);
+    const currentStatus = await this.refreshRequestStatusIfExpired(request);
+    await this.expirePendingInvitationsForRequest(request.id, currentStatus);
 
     return this.prisma.requestInvitation.findMany({
       where: {
@@ -353,6 +488,7 @@ export class ServiceRequestsService {
             customerId: true,
             status: true,
             selectedProposalId: true,
+            expiresAt: true,
           },
         }),
         this.prisma.workerProfile.findUnique({
@@ -397,7 +533,9 @@ export class ServiceRequestsService {
       );
     }
 
-    if (request.status !== 'OPEN' || request.selectedProposalId) {
+    const currentStatus = await this.refreshRequestStatusIfExpired(request);
+
+    if (currentStatus !== 'OPEN' || request.selectedProposalId) {
       throw new ConflictException(
         'Service request is no longer open for invitations',
       );
@@ -444,6 +582,7 @@ export class ServiceRequestsService {
   }
 
   async listMineInvitations(actorUserId: string) {
+    await this.expireStaleOpenRequests();
     await this.expirePendingInvitationsForProvider(actorUserId);
 
     return this.prisma.requestInvitation.findMany({
@@ -461,6 +600,7 @@ export class ServiceRequestsService {
             location: true,
             status: true,
             selectedProposalId: true,
+            expiresAt: true,
             createdAt: true,
             updatedAt: true,
             category: {
@@ -502,6 +642,7 @@ export class ServiceRequestsService {
             id: true,
             status: true,
             selectedProposalId: true,
+            expiresAt: true,
           },
         },
       },
@@ -525,9 +666,13 @@ export class ServiceRequestsService {
       return invitation;
     }
 
+    const currentRequestStatus = await this.refreshRequestStatusIfExpired(
+      invitation.request,
+    );
+
     if (
       invitation.status === 'EXPIRED' ||
-      invitation.request.status !== 'OPEN' ||
+      currentRequestStatus !== 'OPEN' ||
       invitation.request.selectedProposalId
     ) {
       if (invitation.status === 'EXPIRED') {
@@ -574,6 +719,7 @@ export class ServiceRequestsService {
           customerId: true,
           status: true,
           selectedProposalId: true,
+          expiresAt: true,
         },
       }),
       this.prisma.workerProfile.findUnique({
@@ -605,7 +751,9 @@ export class ServiceRequestsService {
       );
     }
 
-    if (request.status !== 'OPEN' || request.selectedProposalId) {
+    const currentStatus = await this.refreshRequestStatusIfExpired(request);
+
+    if (currentStatus !== 'OPEN' || request.selectedProposalId) {
       throw new ConflictException(
         'Service request is no longer open for proposals',
       );
@@ -655,12 +803,17 @@ export class ServiceRequestsService {
       select: {
         id: true,
         customerId: true,
+        status: true,
+        selectedProposalId: true,
+        expiresAt: true,
       },
     });
 
     if (!request) {
       throw new NotFoundException('Service request not found');
     }
+
+    await this.refreshRequestStatusIfExpired(request);
 
     const isAdmin = adminRoles.has(actor.role ?? 'customer');
     const isCustomerOwner = request.customerId === actor.userId;
@@ -711,6 +864,13 @@ export class ServiceRequestsService {
     const request = await this.prisma.serviceRequest.findUnique({
       where: { id: requestId },
       include: {
+        category: {
+          select: {
+            id: true,
+            name: true,
+            slug: true,
+          },
+        },
         job: {
           include: {
             paymentIntents: {
@@ -729,6 +889,8 @@ export class ServiceRequestsService {
     if (request.customerId !== actorUserId) {
       throw new ForbiddenException('Only request owner can select a proposal');
     }
+
+    const currentStatus = await this.refreshRequestStatusIfExpired(request);
 
     if (
       request.selectedProposalId &&
@@ -749,7 +911,7 @@ export class ServiceRequestsService {
       };
     }
 
-    if (request.status !== 'OPEN') {
+    if (currentStatus !== 'OPEN') {
       throw new ConflictException('Service request is not open anymore');
     }
 
@@ -925,6 +1087,28 @@ export class ServiceRequestsService {
     return result;
   }
 
+  private async expireStaleOpenRequests() {
+    const staleRequests = await this.prisma.serviceRequest.findMany({
+      where: {
+        status: 'OPEN',
+        selectedProposalId: null,
+        expiresAt: {
+          lte: new Date(),
+        },
+      },
+      select: {
+        id: true,
+      },
+    });
+
+    if (staleRequests.length === 0) {
+      return 0;
+    }
+
+    await this.expireRequestsByIds(staleRequests.map((request) => request.id));
+    return staleRequests.length;
+  }
+
   private async expirePendingInvitationsForRequest(
     requestId: string,
     requestStatus?: ServiceRequestStatus,
@@ -959,6 +1143,68 @@ export class ServiceRequestsService {
         expiresAt: new Date(),
       },
     });
+  }
+
+  private async expireRequestsByIds(requestIds: string[]) {
+    if (requestIds.length === 0) {
+      return;
+    }
+
+    const now = new Date();
+
+    await this.prisma.$transaction([
+      this.prisma.serviceRequest.updateMany({
+        where: {
+          id: {
+            in: requestIds,
+          },
+          status: 'OPEN',
+        },
+        data: {
+          status: 'EXPIRED',
+        },
+      }),
+      this.prisma.requestInvitation.updateMany({
+        where: {
+          requestId: {
+            in: requestIds,
+          },
+          status: 'SENT',
+        },
+        data: {
+          status: 'EXPIRED',
+          respondedAt: now,
+          expiresAt: now,
+        },
+      }),
+    ]);
+
+    requestIds.forEach(() => {
+      this.metricsService.recordBusinessEvent({
+        domain: 'jobs',
+        event: 'service_request_expired',
+        result: 'success',
+      });
+    });
+  }
+
+  private async refreshRequestStatusIfExpired(
+    request: ExpirableRequestSnapshot,
+  ): Promise<ServiceRequestStatus> {
+    if (!this.isRequestPastExpiry(request)) {
+      return request.status;
+    }
+
+    await this.expireRequestsByIds([request.id]);
+    return 'EXPIRED';
+  }
+
+  private isRequestPastExpiry(request: ExpirableRequestSnapshot) {
+    return (
+      request.status === 'OPEN' &&
+      !request.selectedProposalId &&
+      request.expiresAt.getTime() <= Date.now()
+    );
   }
 
   private async expirePendingInvitationsForProvider(actorUserId: string) {
@@ -1098,5 +1344,30 @@ export class ServiceRequestsService {
     }
 
     return PaymentProvider.INTERNAL;
+  }
+
+  private buildRequestExpiryDate(baseDate = new Date()) {
+    return new Date(
+      baseDate.getTime() +
+        this.resolveRequestExpiryHoursFromEnv() * 60 * 60 * 1000,
+    );
+  }
+
+  private resolveRequestExpiryHoursFromEnv() {
+    const parsed = Number(process.env.SERVICE_REQUEST_EXPIRY_HOURS);
+    if (!Number.isFinite(parsed)) {
+      return defaultServiceRequestExpiryHours;
+    }
+
+    return Math.min(168, Math.max(1, Math.trunc(parsed)));
+  }
+
+  private resolveRequestExpirySweepIntervalMs() {
+    const parsed = Number(process.env.SERVICE_REQUEST_EXPIRY_SWEEP_MS);
+    if (!Number.isFinite(parsed)) {
+      return defaultServiceRequestExpirySweepMs;
+    }
+
+    return Math.max(5_000, Math.trunc(parsed));
   }
 }

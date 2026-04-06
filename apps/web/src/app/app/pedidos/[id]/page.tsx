@@ -1,7 +1,7 @@
 'use client';
 
 import Link from 'next/link';
-import { useParams } from 'next/navigation';
+import { useParams, useRouter } from 'next/navigation';
 import { useEffect, useMemo, useState } from 'react';
 import { formatRatingValue } from '@/components/dashboard/dashboard-formatters';
 import { ensureSession } from '@/lib/auth';
@@ -15,6 +15,7 @@ import {
 import {
   createRequestInvitation,
   getServiceRequestById,
+  recreateServiceRequest,
   selectProposal,
   ServiceRequest,
 } from '@/lib/service-requests';
@@ -62,6 +63,20 @@ function formatCurrencyMzn(value: number): string {
   }).format(value);
 }
 
+function formatRequestExpiryText(request: ServiceRequest): string {
+  const formattedDate = new Date(request.expiresAt).toLocaleString('pt-PT');
+
+  if (request.status === 'EXPIRED') {
+    return `Expirou em ${formattedDate}`;
+  }
+
+  if (request.status === 'OPEN') {
+    return `Expira em ${formattedDate}`;
+  }
+
+  return `Validade inicial: ${formattedDate}`;
+}
+
 function resolveFlowVisualState(
   request: ServiceRequest | null,
   financial: JobFinancialState | null,
@@ -74,7 +89,15 @@ function resolveFlowVisualState(
     };
   }
 
-  if (request.status === 'EXPIRED' || request.job?.status === 'CANCELED') {
+  if (request.status === 'EXPIRED') {
+    return {
+      label: 'Expirado',
+      description: 'Pedido expirado sem seleção. Cria um novo pedido para voltar a receber propostas.',
+      className: 'bg-slate-200 text-slate-700 ring-slate-300',
+    };
+  }
+
+  if (request.job?.status === 'CANCELED') {
     return {
       label: 'Cancelado',
       description: 'Fluxo encerrado sem conclusão.',
@@ -176,6 +199,7 @@ async function loadCandidateWorkersForRequest(request: ServiceRequest): Promise<
 }
 
 export default function OrderDetailsPage() {
+  const router = useRouter();
   const params = useParams<{ id: string }>();
   const requestId = Array.isArray(params.id) ? params.id[0] : params.id;
 
@@ -192,6 +216,7 @@ export default function OrderDetailsPage() {
   );
   const [inviteFeedback, setInviteFeedback] = useState('');
   const [invitingWorkerId, setInvitingWorkerId] = useState<string | null>(null);
+  const [recreatingRequest, setRecreatingRequest] = useState(false);
   const [loading, setLoading] = useState(true);
   const [runningAction, setRunningAction] = useState(false);
   const [status, setStatus] = useState('A carregar detalhes do pedido...');
@@ -309,6 +334,14 @@ export default function OrderDetailsPage() {
   const primaryActionCopy = useMemo(() => {
     if (!request) {
       return null;
+    }
+
+    if (request.status === 'EXPIRED') {
+      return {
+        title: 'Criar novo pedido',
+        description:
+          'Este pedido expirou sem seleção. Cria um novo pedido com os mesmos dados para voltar a receber propostas.',
+      };
     }
 
     if (jobDetails?.contactUnlocked) {
@@ -481,6 +514,26 @@ export default function OrderDetailsPage() {
     }
   }
 
+  async function handleRecreateRequest() {
+    if (!accessToken || !request) {
+      setStatus('Sessão inválida. Faz login novamente.');
+      return;
+    }
+
+    setRecreatingRequest(true);
+    setStatus('A criar um novo pedido a partir deste pedido expirado...');
+
+    try {
+      const recreated = await recreateServiceRequest(accessToken, request.id);
+      setStatus('Novo pedido criado a partir do pedido expirado.');
+      router.push(`/app/pedidos/${recreated.id}`);
+    } catch (error) {
+      setStatus(humanizeUnknownError(error, 'Falha ao recriar pedido.'));
+    } finally {
+      setRecreatingRequest(false);
+    }
+  }
+
   return (
     <main className='space-y-4'>
       <section className='rounded-2xl border border-slate-200 bg-white p-4 shadow-sm sm:p-6'>
@@ -533,6 +586,10 @@ export default function OrderDetailsPage() {
                   <dd className='inline'>
                     {new Date(request.createdAt).toLocaleString('pt-PT')}
                   </dd>
+                </div>
+                <div>
+                  <dt className='inline font-medium text-slate-700'>Validade:</dt>{' '}
+                  <dd className='inline'>{formatRequestExpiryText(request)}</dd>
                 </div>
               </dl>
             </article>
@@ -859,7 +916,15 @@ export default function OrderDetailsPage() {
               {primaryActionCopy?.description}
             </p>
 
-            {jobDetails?.contactUnlocked ? (
+            {request.status === 'EXPIRED' ? (
+              <div className='mt-4 rounded-2xl border border-slate-300 bg-slate-50 p-4 text-sm text-slate-700'>
+                <p className='font-semibold'>Pedido expirado</p>
+                <p className='mt-1'>
+                  O pedido deixou de aceitar propostas dentro do SLA atual. Para
+                  continuar, cria um novo pedido com os mesmos dados.
+                </p>
+              </div>
+            ) : jobDetails?.contactUnlocked ? (
               <div className='mt-4 rounded-2xl border border-emerald-200 bg-emerald-50 p-4 text-sm text-emerald-800'>
                 <p className='font-semibold'>Contacto desbloqueado</p>
                 <p className='mt-1'>
@@ -879,7 +944,27 @@ export default function OrderDetailsPage() {
               </div>
             )}
 
-            {payableIntent ? (
+            {request.status === 'EXPIRED' ? (
+              <div className='mt-4 flex flex-wrap items-center gap-3'>
+                <button
+                  type='button'
+                  className='inline-flex items-center rounded-lg bg-blue-600 px-4 py-2 text-sm font-semibold text-white hover:bg-blue-700 disabled:opacity-60'
+                  onClick={() => {
+                    void handleRecreateRequest();
+                  }}
+                  disabled={recreatingRequest}
+                >
+                  {recreatingRequest ? 'A criar...' : 'Criar novo pedido igual'}
+                </button>
+
+                <Link
+                  href='/app/pedidos'
+                  className='inline-flex items-center rounded-lg border border-slate-300 px-3 py-2 text-sm font-medium text-slate-700 hover:bg-slate-100'
+                >
+                  Voltar aos pedidos
+                </Link>
+              </div>
+            ) : payableIntent ? (
               <div className='mt-4 flex flex-wrap items-center gap-3'>
                 <button
                   type='button'

@@ -9,6 +9,7 @@ import { humanizeUnknownError } from '@/lib/http-errors';
 import {
   createServiceRequest,
   listMyServiceRequests,
+  recreateServiceRequest,
   ServiceRequest,
 } from '@/lib/service-requests';
 
@@ -18,6 +19,7 @@ type FlowStateKey =
   | 'payment_pending'
   | 'in_progress'
   | 'completed'
+  | 'expired'
   | 'canceled';
 
 type FlowState = {
@@ -35,7 +37,16 @@ const pendingIntentStatuses = new Set([
 ]);
 
 function getRequestFlowState(request: ServiceRequest): FlowState {
-  if (request.status === 'EXPIRED' || request.job?.status === 'CANCELED') {
+  if (request.status === 'EXPIRED') {
+    return {
+      key: 'expired',
+      label: 'Expirado',
+      hint: 'Pedido expirado sem seleção. Cria um novo pedido para voltar a receber propostas.',
+      badgeClass: 'bg-slate-200 text-slate-700 ring-1 ring-inset ring-slate-300',
+    };
+  }
+
+  if (request.job?.status === 'CANCELED') {
     return {
       key: 'canceled',
       label: 'Cancelado',
@@ -102,6 +113,20 @@ function getRequestFlowState(request: ServiceRequest): FlowState {
   };
 }
 
+function formatRequestExpiryText(request: ServiceRequest): string {
+  const formattedDate = new Date(request.expiresAt).toLocaleString('pt-PT');
+
+  if (request.status === 'EXPIRED') {
+    return `Expirou em ${formattedDate}`;
+  }
+
+  if (request.status === 'OPEN') {
+    return `Expira em ${formattedDate}`;
+  }
+
+  return `Validade inicial: ${formattedDate}`;
+}
+
 export default function CustomerOrdersPage() {
   const router = useRouter();
   const [accessToken, setAccessToken] = useState<string | null>(null);
@@ -109,6 +134,7 @@ export default function CustomerOrdersPage() {
   const [requests, setRequests] = useState<ServiceRequest[]>([]);
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
+  const [recreatingRequestId, setRecreatingRequestId] = useState<string | null>(null);
   const [showCreateForm, setShowCreateForm] = useState(false);
   const [status, setStatus] = useState('A carregar pedidos...');
 
@@ -215,6 +241,26 @@ export default function CustomerOrdersPage() {
       setStatus(humanizeUnknownError(error, 'Falha ao criar pedido.'));
     } finally {
       setSaving(false);
+    }
+  }
+
+  async function handleRecreateRequest(requestId: string) {
+    if (!accessToken) {
+      setStatus('Sessão inválida. Faz login novamente.');
+      return;
+    }
+
+    setRecreatingRequestId(requestId);
+    setStatus('A criar um novo pedido a partir do pedido expirado...');
+
+    try {
+      const recreated = await recreateServiceRequest(accessToken, requestId);
+      setStatus('Novo pedido criado a partir do pedido expirado.');
+      router.push(`/app/pedidos/${recreated.id}`);
+    } catch (error) {
+      setStatus(humanizeUnknownError(error, 'Falha ao recriar pedido.'));
+    } finally {
+      setRecreatingRequestId(null);
     }
   }
 
@@ -405,15 +451,35 @@ export default function CustomerOrdersPage() {
                     <p className='text-xs text-slate-500'>
                       {request.location ? `Local: ${request.location}` : 'Local não definido'}
                     </p>
+                    <p className='text-xs text-slate-500'>
+                      {formatRequestExpiryText(request)}
+                    </p>
                     <p className='text-xs text-slate-500'>{state.hint}</p>
                   </div>
 
-                  <Link
-                    href={`/app/pedidos/${request.id}`}
-                    className='inline-flex shrink-0 items-center justify-center rounded-lg border border-slate-300 px-3 py-2 text-sm font-medium text-slate-700 hover:bg-slate-100'
-                  >
-                    Ver detalhe
-                  </Link>
+                  <div className='flex shrink-0 flex-wrap items-center gap-2'>
+                    {state.key === 'expired' ? (
+                      <button
+                        type='button'
+                        className='inline-flex items-center justify-center rounded-lg bg-blue-600 px-3 py-2 text-sm font-semibold text-white hover:bg-blue-700 disabled:opacity-60'
+                        onClick={() => {
+                          void handleRecreateRequest(request.id);
+                        }}
+                        disabled={recreatingRequestId === request.id}
+                      >
+                        {recreatingRequestId === request.id
+                          ? 'A criar...'
+                          : 'Criar novo pedido igual'}
+                      </button>
+                    ) : null}
+
+                    <Link
+                      href={`/app/pedidos/${request.id}`}
+                      className='inline-flex items-center justify-center rounded-lg border border-slate-300 px-3 py-2 text-sm font-medium text-slate-700 hover:bg-slate-100'
+                    >
+                      Ver detalhe
+                    </Link>
+                  </div>
                 </div>
               </article>
             );

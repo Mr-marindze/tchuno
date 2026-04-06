@@ -95,6 +95,7 @@ model ServiceRequest {
   location           String?
   status             ServiceRequestStatus @default(OPEN)
   selectedProposalId String?              @unique
+  expiresAt          DateTime
   createdAt          DateTime             @default(now())
   updatedAt          DateTime             @updatedAt
   customer           User                 @relation("CustomerServiceRequests", fields: [customerId], references: [id], onDelete: Cascade)
@@ -107,6 +108,7 @@ model ServiceRequest {
   @@index([customerId, status, createdAt])
   @@index([categoryId, status, createdAt])
   @@index([status, createdAt])
+  @@index([status, expiresAt])
 }
 
 model RequestInvitation {
