@@ -110,6 +110,18 @@ const customerRequestDetailInclude = {
         },
         orderBy: [{ createdAt: 'desc' }, { id: 'desc' }],
       },
+      review: {
+        select: {
+          id: true,
+          jobId: true,
+          workerProfileId: true,
+          reviewerId: true,
+          rating: true,
+          comment: true,
+          createdAt: true,
+          updatedAt: true,
+        },
+      },
     },
   },
 } satisfies Prisma.ServiceRequestInclude;
@@ -316,6 +328,18 @@ export class ServiceRequestsService implements OnModuleInit, OnModuleDestroy {
               status: true,
               contactUnlockedAt: true,
               agreedPrice: true,
+              review: {
+                select: {
+                  id: true,
+                  jobId: true,
+                  workerProfileId: true,
+                  reviewerId: true,
+                  rating: true,
+                  comment: true,
+                  createdAt: true,
+                  updatedAt: true,
+                },
+              },
             },
           },
         },

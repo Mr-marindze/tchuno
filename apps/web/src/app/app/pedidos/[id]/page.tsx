@@ -24,6 +24,7 @@ import {
   RecommendationPoolScope,
   RequestWorkerRecommendation,
 } from '@/lib/request-worker-recommendations';
+import { createReview } from '@/lib/reviews';
 import {
   listWorkerProfiles,
   resolveWorkerDisplayName,
@@ -217,6 +218,9 @@ export default function OrderDetailsPage() {
   const [inviteFeedback, setInviteFeedback] = useState('');
   const [invitingWorkerId, setInvitingWorkerId] = useState<string | null>(null);
   const [recreatingRequest, setRecreatingRequest] = useState(false);
+  const [reviewRating, setReviewRating] = useState(5);
+  const [reviewComment, setReviewComment] = useState('');
+  const [submittingReview, setSubmittingReview] = useState(false);
   const [loading, setLoading] = useState(true);
   const [runningAction, setRunningAction] = useState(false);
   const [status, setStatus] = useState('A carregar detalhes do pedido...');
@@ -321,6 +325,9 @@ export default function OrderDetailsPage() {
   const flowState = resolveFlowVisualState(request, financial);
   const canInviteWorkers =
     request?.status === 'OPEN' && !request.selectedProposalId;
+  const existingReview = request?.job?.review ?? null;
+  const canReviewRequest =
+    request?.job?.status === 'COMPLETED' && !existingReview;
   const invitationByProviderUserId = useMemo(
     () =>
       new Map(
@@ -334,6 +341,22 @@ export default function OrderDetailsPage() {
   const primaryActionCopy = useMemo(() => {
     if (!request) {
       return null;
+    }
+
+    if (canReviewRequest) {
+      return {
+        title: 'Avaliar serviço',
+        description:
+          'O trabalho foi concluído. Deixa a tua avaliação para fechar o ciclo e atualizar a reputação do prestador.',
+      };
+    }
+
+    if (existingReview) {
+      return {
+        title: 'Avaliação enviada',
+        description:
+          'A tua avaliação já foi registada e conta para a reputação pública do prestador.',
+      };
     }
 
     if (request.status === 'EXPIRED') {
@@ -380,7 +403,19 @@ export default function OrderDetailsPage() {
       title: 'Aguardar atualização',
       description: 'O pedido continua a avançar dentro do fluxo oficial do Tchuno.',
     };
-  }, [canInviteWorkers, jobDetails?.contactUnlocked, payableIntent, request]);
+  }, [
+    canInviteWorkers,
+    canReviewRequest,
+    existingReview,
+    jobDetails?.contactUnlocked,
+    payableIntent,
+    request,
+  ]);
+
+  useEffect(() => {
+    setReviewRating(5);
+    setReviewComment('');
+  }, [requestId, existingReview?.id]);
 
   useEffect(() => {
     let active = true;
@@ -531,6 +566,30 @@ export default function OrderDetailsPage() {
       setStatus(humanizeUnknownError(error, 'Falha ao recriar pedido.'));
     } finally {
       setRecreatingRequest(false);
+    }
+  }
+
+  async function handleCreateReview() {
+    if (!accessToken || !request?.job) {
+      setStatus('Sessão inválida. Faz login novamente.');
+      return;
+    }
+
+    setSubmittingReview(true);
+    setStatus('A enviar avaliação...');
+
+    try {
+      await createReview(accessToken, {
+        jobId: request.job.id,
+        rating: reviewRating,
+        comment: reviewComment.trim() || undefined,
+      });
+      await loadDetails(accessToken);
+      setStatus('Avaliação enviada com sucesso.');
+    } catch (error) {
+      setStatus(humanizeUnknownError(error, 'Falha ao enviar avaliação.'));
+    } finally {
+      setSubmittingReview(false);
     }
   }
 
@@ -924,6 +983,26 @@ export default function OrderDetailsPage() {
                   continuar, cria um novo pedido com os mesmos dados.
                 </p>
               </div>
+            ) : canReviewRequest ? (
+              <div className='mt-4 rounded-2xl border border-blue-200 bg-blue-50 p-4 text-sm text-blue-800'>
+                <p className='font-semibold'>Avaliação pendente</p>
+                <p className='mt-1'>
+                  {selectedProposal?.provider?.name ?? 'O prestador selecionado'}{' '}
+                  concluiu o trabalho. A tua avaliação fecha o ciclo do pedido e
+                  atualiza a reputação pública do perfil.
+                </p>
+              </div>
+            ) : existingReview ? (
+              <div className='mt-4 rounded-2xl border border-emerald-200 bg-emerald-50 p-4 text-sm text-emerald-800'>
+                <p className='font-semibold'>Avaliação registada</p>
+                <p className='mt-1'>
+                  Deste {existingReview.rating}/5 a{' '}
+                  {selectedProposal?.provider?.name ?? 'este prestador'}.
+                </p>
+                <p className='mt-2 text-emerald-700'>
+                  Enviada em {new Date(existingReview.createdAt).toLocaleString('pt-PT')}
+                </p>
+              </div>
             ) : jobDetails?.contactUnlocked ? (
               <div className='mt-4 rounded-2xl border border-emerald-200 bg-emerald-50 p-4 text-sm text-emerald-800'>
                 <p className='font-semibold'>Contacto desbloqueado</p>
@@ -963,6 +1042,15 @@ export default function OrderDetailsPage() {
                 >
                   Voltar aos pedidos
                 </Link>
+              </div>
+            ) : canReviewRequest ? (
+              <div className='mt-4 flex flex-wrap items-center gap-3'>
+                <a
+                  href='#avaliacao'
+                  className='inline-flex items-center rounded-lg bg-blue-600 px-4 py-2 text-sm font-semibold text-white hover:bg-blue-700'
+                >
+                  Avaliar agora
+                </a>
               </div>
             ) : payableIntent ? (
               <div className='mt-4 flex flex-wrap items-center gap-3'>
@@ -1023,6 +1111,98 @@ export default function OrderDetailsPage() {
               </p>
             </div>
           </section>
+
+          {request.job?.status === 'COMPLETED' ? (
+            <section
+              id='avaliacao'
+              className='rounded-2xl border border-slate-200 bg-white p-4 shadow-sm sm:p-5'
+            >
+              <p className='text-xs font-semibold uppercase tracking-wide text-slate-500'>
+                Avaliação
+              </p>
+              <h2 className='mt-2 text-lg font-semibold text-slate-900'>
+                {existingReview ? 'Avaliação enviada' : 'Como correu o serviço?'}
+              </h2>
+              <p className='mt-2 text-sm text-slate-600'>
+                {existingReview
+                  ? 'A tua avaliação já foi registada e já conta para a reputação do prestador.'
+                  : 'Partilha a tua experiência com um rating simples e, se quiseres, um comentário curto.'}
+              </p>
+
+              {existingReview ? (
+                <div className='mt-4 grid gap-3 sm:grid-cols-3'>
+                  <div className='rounded-xl border border-slate-200 bg-slate-50 p-3'>
+                    <p className='text-xs text-slate-500'>Rating enviado</p>
+                    <p className='mt-1 text-sm font-semibold text-slate-900'>
+                      {existingReview.rating}/5
+                    </p>
+                  </div>
+                  <div className='rounded-xl border border-slate-200 bg-slate-50 p-3 sm:col-span-2'>
+                    <p className='text-xs text-slate-500'>Comentário</p>
+                    <p className='mt-1 text-sm text-slate-700'>
+                      {existingReview.comment ?? 'Sem comentário adicional.'}
+                    </p>
+                  </div>
+                </div>
+              ) : (
+                <form
+                  className='mt-4 space-y-4'
+                  onSubmit={(event) => {
+                    event.preventDefault();
+                    void handleCreateReview();
+                  }}
+                >
+                  <div>
+                    <p className='text-sm font-medium text-slate-700'>Rating</p>
+                    <div className='mt-2 flex flex-wrap gap-2'>
+                      {[1, 2, 3, 4, 5].map((value) => {
+                        const isSelected = reviewRating === value;
+
+                        return (
+                          <button
+                            key={value}
+                            type='button'
+                            className={`rounded-full px-3 py-2 text-sm font-semibold transition-colors ${
+                              isSelected
+                                ? 'bg-blue-600 text-white'
+                                : 'border border-slate-300 bg-white text-slate-700 hover:bg-slate-100'
+                            }`}
+                            onClick={() => setReviewRating(value)}
+                          >
+                            {value}/5
+                          </button>
+                        );
+                      })}
+                    </div>
+                  </div>
+
+                  <label className='block space-y-2 text-sm text-slate-700'>
+                    <span>Comentário (opcional)</span>
+                    <textarea
+                      value={reviewComment}
+                      onChange={(event) => setReviewComment(event.target.value)}
+                      maxLength={1000}
+                      className='min-h-28 w-full rounded-xl border border-slate-300 px-3 py-2 outline-none focus:border-blue-500'
+                      placeholder='Ex.: comunicação clara, chegou a horas e resolveu o problema.'
+                    />
+                  </label>
+
+                  <div className='flex flex-wrap items-center gap-3'>
+                    <button
+                      type='submit'
+                      className='inline-flex items-center rounded-lg bg-blue-600 px-4 py-2 text-sm font-semibold text-white hover:bg-blue-700 disabled:opacity-60'
+                      disabled={submittingReview}
+                    >
+                      {submittingReview ? 'A enviar...' : 'Enviar avaliação'}
+                    </button>
+                    <p className='text-sm text-slate-500'>
+                      Esta avaliação só pode ser enviada uma vez.
+                    </p>
+                  </div>
+                </form>
+              )}
+            </section>
+          ) : null}
         </>
       )}
     </main>

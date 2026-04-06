@@ -1519,6 +1519,48 @@ describe('Auth and Sessions (e2e)', () => {
       workerReviewsResponse.body as PaginatedResponse<ReviewPayload>;
     expect(workerReviews.data.length).toBeGreaterThanOrEqual(1);
     expect(workerReviews.data[0]?.jobId).toBe(selection.job.id);
+
+    const requestDetailResponse = await request(app.getHttpServer())
+      .get(`/service-requests/${createdRequest.id}`)
+      .set('Authorization', `Bearer ${clientAuth.accessToken}`)
+      .expect(200);
+    const requestDetail = requestDetailResponse.body as {
+      selectedProposalId: string | null;
+      proposals: Array<{
+        id: string;
+        provider?: {
+          workerProfile: {
+            ratingAvg: string;
+            ratingCount: number;
+          } | null;
+        } | null;
+      }>;
+      job: {
+        id: string;
+        review: {
+          id: string;
+          rating: number;
+          comment: string | null;
+        } | null;
+      } | null;
+    };
+
+    expect(requestDetail.job?.review?.rating).toBe(5);
+    expect(requestDetail.job?.review?.comment).toBe(
+      'Servico excelente, dentro do prazo.',
+    );
+
+    const selectedProposalInDetail = requestDetail.proposals.find(
+      (item) => item.id === requestDetail.selectedProposalId,
+    );
+    expect(selectedProposalInDetail?.provider?.workerProfile?.ratingCount).toBe(
+      1,
+    );
+    expect(
+      Number.parseFloat(
+        selectedProposalInDetail?.provider?.workerProfile?.ratingAvg ?? '0',
+      ),
+    ).toBeCloseTo(5, 2);
   });
 
   it('enforces review permissions and duplicate protection on completed jobs', async () => {

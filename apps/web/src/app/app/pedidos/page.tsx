@@ -59,7 +59,9 @@ function getRequestFlowState(request: ServiceRequest): FlowState {
     return {
       key: 'completed',
       label: 'Concluído',
-      hint: 'Serviço finalizado com sucesso.',
+      hint: request.job.review
+        ? 'Serviço finalizado e já avaliado.'
+        : 'Serviço finalizado. Falta a tua avaliação.',
       badgeClass: 'bg-emerald-800 text-white ring-1 ring-inset ring-emerald-700',
     };
   }
@@ -423,6 +425,8 @@ export default function CustomerOrdersPage() {
         ) : (
           requests.map((request) => {
             const state = getRequestFlowState(request);
+            const canReview =
+              request.job?.status === 'COMPLETED' && !request.job.review;
 
             return (
               <article
@@ -454,10 +458,24 @@ export default function CustomerOrdersPage() {
                     <p className='text-xs text-slate-500'>
                       {formatRequestExpiryText(request)}
                     </p>
+                    {request.job?.review ? (
+                      <p className='text-xs text-slate-500'>
+                        Avaliação enviada: {request.job.review.rating}/5
+                      </p>
+                    ) : null}
                     <p className='text-xs text-slate-500'>{state.hint}</p>
                   </div>
 
                   <div className='flex shrink-0 flex-wrap items-center gap-2'>
+                    {canReview ? (
+                      <Link
+                        href={`/app/pedidos/${request.id}#avaliacao`}
+                        className='inline-flex items-center justify-center rounded-lg bg-blue-600 px-3 py-2 text-sm font-semibold text-white hover:bg-blue-700'
+                      >
+                        Avaliar agora
+                      </Link>
+                    ) : null}
+
                     {state.key === 'expired' ? (
                       <button
                         type='button'

@@ -112,6 +112,16 @@ export type ServiceRequest = {
     contactUnlockedAt: string | null;
     agreedPrice: number | null;
     createdAt?: string;
+    review?: {
+      id: string;
+      jobId: string;
+      workerProfileId: string;
+      reviewerId: string;
+      rating: number;
+      comment: string | null;
+      createdAt: string;
+      updatedAt: string;
+    } | null;
     paymentIntents?: Array<{
       id: string;
       amount: number;
