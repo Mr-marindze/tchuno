@@ -633,6 +633,75 @@ export class ServiceRequestsService implements OnModuleInit, OnModuleDestroy {
     });
   }
 
+  async listMineProposals(actorUserId: string) {
+    await this.expireStaleOpenRequests();
+
+    const profile = await this.prisma.workerProfile.findUnique({
+      where: { userId: actorUserId },
+      select: { id: true },
+    });
+
+    if (!profile) {
+      throw new NotFoundException('Worker profile not found');
+    }
+
+    const proposals = await this.prisma.proposal.findMany({
+      where: {
+        providerId: actorUserId,
+      },
+      include: {
+        request: {
+          select: {
+            id: true,
+            customerId: true,
+            categoryId: true,
+            title: true,
+            description: true,
+            location: true,
+            status: true,
+            selectedProposalId: true,
+            expiresAt: true,
+            createdAt: true,
+            updatedAt: true,
+            category: {
+              select: {
+                id: true,
+                name: true,
+                slug: true,
+              },
+            },
+            invitations: {
+              where: {
+                providerUserId: actorUserId,
+              },
+              select: {
+                id: true,
+                requestId: true,
+                providerUserId: true,
+                status: true,
+                respondedAt: true,
+                expiresAt: true,
+                createdAt: true,
+                updatedAt: true,
+              },
+              orderBy: [{ createdAt: 'desc' }, { id: 'desc' }],
+              take: 1,
+            },
+          },
+        },
+      },
+      orderBy: [{ updatedAt: 'desc' }, { id: 'desc' }],
+    });
+
+    return proposals.map((proposal) => ({
+      ...proposal,
+      request: {
+        ...proposal.request,
+        invitation: proposal.request.invitations[0] ?? null,
+      },
+    }));
+  }
+
   async declineInvitation(invitationId: string, actorUserId: string) {
     const invitation = await this.prisma.requestInvitation.findUnique({
       where: { id: invitationId },

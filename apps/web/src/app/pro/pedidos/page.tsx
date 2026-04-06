@@ -2,12 +2,16 @@
 
 import Link from 'next/link';
 import { useEffect, useMemo, useState } from 'react';
+import { ProviderInboxNotifications } from '@/components/provider/provider-inbox-notifications';
 import { ensureSession } from '@/lib/auth';
 import { humanizeUnknownError } from '@/lib/http-errors';
+import { buildProviderInboxModel } from '@/lib/provider-inbox';
 import {
   declineRequestInvitation,
-  listOpenServiceRequests,
   listMyRequestInvitations,
+  listMyProviderProposals,
+  listOpenServiceRequests,
+  ProviderProposalFeedItem,
   ProviderRequestInvitation,
   ServiceRequest,
   submitProposal,
@@ -48,6 +52,7 @@ export default function ProviderRequestsPage() {
   const [accessToken, setAccessToken] = useState<string | null>(null);
   const [requests, setRequests] = useState<ServiceRequest[]>([]);
   const [invitations, setInvitations] = useState<ProviderRequestInvitation[]>([]);
+  const [proposals, setProposals] = useState<ProviderProposalFeedItem[]>([]);
   const [expandedRequestId, setExpandedRequestId] = useState<string | null>(null);
   const [priceInputByRequest, setPriceInputByRequest] = useState<
     Record<string, string>
@@ -81,32 +86,41 @@ export default function ProviderRequestsPage() {
         }
 
         const token = session.auth.accessToken;
-        const [response, nextInvitations] = await Promise.all([
+        const [response, nextInvitations, nextProposals] = await Promise.all([
           listOpenServiceRequests(token, {
             status: 'OPEN',
             page: 1,
             limit: 30,
           }),
           listMyRequestInvitations(token),
+          listMyProviderProposals(token),
         ]);
 
         if (!active) {
           return;
         }
 
+        const inbox = buildProviderInboxModel({
+          requests: response.data,
+          invitations: nextInvitations,
+          proposals: nextProposals,
+        });
+
         setAccessToken(token);
         setRequests(response.data);
         setInvitations(nextInvitations);
+        setProposals(nextProposals);
         setStatus(
-          response.data.length > 0
-            ? `Encontrados ${response.data.length} pedido(s) aberto(s).`
-            : 'Sem pedidos abertos neste momento.',
+          inbox.pendingInvitations.length > 0 || inbox.openMarketRequests.length > 0
+            ? `${inbox.pendingInvitations.length} convite(s) e ${inbox.openMarketRequests.length} pedido(s) no mercado aberto.`
+            : 'Sem novas oportunidades neste momento.',
         );
       } catch (error) {
         if (active) {
           setStatus(humanizeUnknownError(error, 'Falha ao carregar pedidos.'));
           setRequests([]);
           setInvitations([]);
+          setProposals([]);
         }
       } finally {
         if (active) {
@@ -127,17 +141,19 @@ export default function ProviderRequestsPage() {
       return;
     }
 
-    const [response, nextInvitations] = await Promise.all([
+    const [response, nextInvitations, nextProposals] = await Promise.all([
       listOpenServiceRequests(accessToken, {
         status: 'OPEN',
         page: 1,
         limit: 30,
       }),
       listMyRequestInvitations(accessToken),
+      listMyProviderProposals(accessToken),
     ]);
 
     setRequests(response.data);
     setInvitations(nextInvitations);
+    setProposals(nextProposals);
   }
 
   async function handleSubmitProposal(requestId: string) {
@@ -191,46 +207,75 @@ export default function ProviderRequestsPage() {
     }
   }
 
-  function focusRequestComposer(requestId: string) {
-    setExpandedRequestId(requestId);
-
-    if (typeof window === 'undefined') {
-      return;
-    }
-
-    window.requestAnimationFrame(() => {
-      document.getElementById(`provider-request-${requestId}`)?.scrollIntoView({
-        behavior: 'smooth',
-        block: 'start',
-      });
-    });
-  }
-
-  const requestsWithoutProposal = useMemo(
-    () => requests.filter((request) => (request.proposals?.length ?? 0) === 0).length,
-    [requests],
-  );
-  const pendingInvitations = useMemo(
-    () => invitations.filter((invitation) => invitation.status === 'SENT'),
-    [invitations],
-  );
-  const invitationByRequestId = useMemo(
+  const inbox = useMemo(
     () =>
-      new Map(
-        invitations.map((invitation) => [invitation.request.id, invitation]),
-      ),
-    [invitations],
+      buildProviderInboxModel({
+        requests,
+        invitations,
+        proposals,
+      }),
+    [invitations, proposals, requests],
   );
+
+  function renderProposalComposer(requestId: string) {
+    return (
+      <div className='mt-4 space-y-3 rounded-xl border border-slate-200 bg-slate-50 p-3'>
+        <label className='block space-y-1 text-sm text-slate-700'>
+          <span>Preço (MZN)</span>
+          <input
+            type='number'
+            min={1}
+            value={priceInputByRequest[requestId] ?? ''}
+            onChange={(event) =>
+              setPriceInputByRequest((current) => ({
+                ...current,
+                [requestId]: event.target.value,
+              }))
+            }
+            className='w-full rounded-lg border border-slate-300 px-3 py-2 outline-none focus:border-blue-500'
+          />
+        </label>
+
+        <label className='block space-y-1 text-sm text-slate-700'>
+          <span>Comentário</span>
+          <textarea
+            value={commentInputByRequest[requestId] ?? ''}
+            onChange={(event) =>
+              setCommentInputByRequest((current) => ({
+                ...current,
+                [requestId]: event.target.value,
+              }))
+            }
+            maxLength={320}
+            className='min-h-24 w-full rounded-lg border border-slate-300 px-3 py-2 outline-none focus:border-blue-500'
+          />
+        </label>
+
+        <button
+          type='button'
+          className='inline-flex items-center rounded-lg bg-slate-900 px-4 py-2 text-sm font-semibold text-white hover:bg-black disabled:opacity-60'
+          onClick={() => {
+            void handleSubmitProposal(requestId);
+          }}
+          disabled={saving}
+        >
+          {saving ? 'A enviar...' : 'Confirmar proposta'}
+        </button>
+      </div>
+    );
+  }
 
   return (
     <main className='space-y-4'>
       <section className='rounded-2xl border border-slate-200 bg-white p-4 shadow-sm sm:p-6'>
         <div className='flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between'>
           <div>
-            <h1 className='text-2xl font-semibold text-slate-900'>Pedidos</h1>
+            <h1 className='text-2xl font-semibold text-slate-900'>
+              Inbox do prestador
+            </h1>
             <p className='mt-1 text-sm text-slate-600'>
-              Escolhe pedidos abertos e envia proposta para entrar na seleção do
-              cliente.
+              Vê primeiro convites diretos, depois pedidos do mercado aberto e o
+              estado das tuas propostas.
             </p>
           </div>
           <Link
@@ -244,10 +289,10 @@ export default function ProviderRequestsPage() {
         <div className='mt-4 grid gap-3 sm:grid-cols-3'>
           <article className='rounded-xl border border-slate-200 bg-slate-50 p-3'>
             <p className='text-xs font-medium uppercase tracking-wide text-slate-500'>
-              Pedidos abertos
+              Mercado aberto
             </p>
             <p className='mt-1 text-lg font-semibold text-slate-900'>
-              {requests.length}
+              {inbox.openMarketRequests.length}
             </p>
           </article>
           <article className='rounded-xl border border-emerald-200 bg-emerald-50 p-3'>
@@ -255,15 +300,23 @@ export default function ProviderRequestsPage() {
               Convites pendentes
             </p>
             <p className='mt-1 text-lg font-semibold text-emerald-700'>
-              {pendingInvitations.length}
+              {inbox.pendingInvitations.length}
             </p>
           </article>
           <article className='rounded-xl border border-blue-200 bg-blue-50 p-3'>
             <p className='text-xs font-medium uppercase tracking-wide text-blue-700'>
-              Sem tua proposta
+              Em análise
             </p>
             <p className='mt-1 text-lg font-semibold text-blue-700'>
-              {requestsWithoutProposal}
+              {inbox.awaitingProposals.length}
+            </p>
+          </article>
+          <article className='rounded-xl border border-purple-200 bg-purple-50 p-3'>
+            <p className='text-xs font-medium uppercase tracking-wide text-purple-700'>
+              Selecionadas
+            </p>
+            <p className='mt-1 text-lg font-semibold text-purple-700'>
+              {inbox.selectedProposals.length}
             </p>
           </article>
         </div>
@@ -273,15 +326,28 @@ export default function ProviderRequestsPage() {
         </p>
       </section>
 
+      <ProviderInboxNotifications
+        title='Atualizações importantes'
+        subtitle='Eventos que pedem atenção agora e oportunidades que merecem resposta.'
+        items={inbox.notifications.filter(
+          (item) => item.kind !== 'rejected_proposals',
+        )}
+        emptyLabel='Sem alertas novos. Quando houver convites, propostas selecionadas ou pedidos relevantes, eles aparecem aqui.'
+      />
+
       {invitations.length > 0 ? (
-        <section className='rounded-2xl border border-slate-200 bg-white p-4 shadow-sm sm:p-5'>
+        <section
+          id='convites'
+          className='rounded-2xl border border-slate-200 bg-white p-4 shadow-sm sm:p-5'
+        >
           <div className='flex flex-col gap-2 sm:flex-row sm:items-start sm:justify-between'>
             <div>
               <h2 className='text-lg font-semibold text-slate-900'>
                 Convites para proposta
               </h2>
               <p className='mt-1 text-sm text-slate-600'>
-                Pedidos em que o cliente pediu diretamente a tua proposta.
+                Pedidos em que o cliente pediu diretamente a tua proposta, separados
+                do mercado aberto.
               </p>
             </div>
             <span className='rounded-full bg-slate-100 px-3 py-1 text-xs font-semibold text-slate-700'>
@@ -341,9 +407,15 @@ export default function ProviderRequestsPage() {
                         <button
                           type='button'
                           className='inline-flex items-center rounded-lg bg-blue-600 px-3 py-2 text-sm font-semibold text-white hover:bg-blue-700 disabled:opacity-60'
-                          onClick={() => focusRequestComposer(invitation.request.id)}
+                          onClick={() =>
+                            setExpandedRequestId((current) =>
+                              current === invitation.request.id
+                                ? null
+                                : invitation.request.id,
+                            )
+                          }
                         >
-                          {ownProposal ? 'Ver pedido' : 'Enviar proposta'}
+                          {ownProposal ? 'Atualizar proposta' : 'Enviar proposta'}
                         </button>
                       ) : (
                         <span className='text-xs text-slate-500'>
@@ -366,6 +438,10 @@ export default function ProviderRequestsPage() {
                       ) : null}
                     </div>
                   </div>
+
+                  {requestStillOpen && expandedRequestId === invitation.request.id
+                    ? renderProposalComposer(invitation.request.id)
+                    : null}
                 </article>
               );
             })}
@@ -373,121 +449,79 @@ export default function ProviderRequestsPage() {
         </section>
       ) : null}
 
-      {requests.length === 0 ? (
-        <section className='rounded-2xl border border-dashed border-slate-300 bg-white p-6 text-sm text-slate-600'>
-          Sem pedidos abertos para proposta neste momento.
-        </section>
-      ) : (
-        <section className='space-y-3'>
-          {requests.map((request) => {
-            const ownProposal = request.proposals?.[0] ?? null;
-            const isExpanded = expandedRequestId === request.id;
-            const requestInvitation = invitationByRequestId.get(request.id);
+      <section
+        id='mercado'
+        className='rounded-2xl border border-slate-200 bg-white p-4 shadow-sm sm:p-5'
+      >
+        <div className='flex flex-col gap-2 sm:flex-row sm:items-start sm:justify-between'>
+          <div>
+            <h2 className='text-lg font-semibold text-slate-900'>Mercado aberto</h2>
+            <p className='mt-1 text-sm text-slate-600'>
+              Pedidos públicos sem convite direto e ainda sem tua proposta.
+            </p>
+          </div>
+          <span className='rounded-full bg-slate-100 px-3 py-1 text-xs font-semibold text-slate-700'>
+            {inbox.openMarketRequests.length} pedido(s)
+          </span>
+        </div>
 
-            return (
-              <article
-                key={request.id}
-                id={`provider-request-${request.id}`}
-                className='rounded-2xl border border-slate-200 bg-white p-4 shadow-sm sm:p-5'
-              >
-                <div className='flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between'>
-                  <div className='space-y-2'>
-                    <div className='flex flex-wrap items-center gap-2'>
-                      <h2 className='text-base font-semibold text-slate-900'>
-                        {request.title}
-                      </h2>
-                      {requestInvitation ? (
-                        <span
-                          className={`rounded-full border px-2.5 py-1 text-xs font-semibold ${getInvitationTone(requestInvitation.status)}`}
-                        >
-                          {invitationStatusLabel[requestInvitation.status] ??
-                            requestInvitation.status}
+        {inbox.openMarketRequests.length === 0 ? (
+          <div className='mt-4 rounded-2xl border border-dashed border-slate-300 bg-slate-50 p-6 text-sm text-slate-600'>
+            Sem pedidos novos no mercado aberto neste momento.
+          </div>
+        ) : (
+          <div className='mt-4 space-y-3'>
+            {inbox.openMarketRequests.map((request) => {
+              const isExpanded = expandedRequestId === request.id;
+
+              return (
+                <article
+                  key={request.id}
+                  id={`provider-request-${request.id}`}
+                  className='rounded-2xl border border-slate-200 bg-slate-50 p-4'
+                >
+                  <div className='flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between'>
+                    <div className='space-y-2'>
+                      <div className='flex flex-wrap items-center gap-2'>
+                        <h3 className='text-base font-semibold text-slate-900'>
+                          {request.title}
+                        </h3>
+                        <span className='rounded-full border border-blue-200 bg-blue-100 px-2.5 py-1 text-xs font-semibold text-blue-700'>
+                          Mercado aberto
                         </span>
-                      ) : null}
-                    </div>
-                    <p className='text-sm text-slate-600'>
-                      {request.description.length > 180
-                        ? `${request.description.slice(0, 180)}...`
-                        : request.description}
-                    </p>
-                    <div className='text-xs text-slate-500'>
-                      <p>Local: {request.location ?? 'n/d'}</p>
-                      <p>Categoria: {request.category?.name ?? request.categoryId}</p>
-                    </div>
-
-                    {ownProposal ? (
-                      <p className='text-xs text-amber-700'>
-                        Última proposta: {formatCurrencyMzn(ownProposal.price)} (
-                        {ownProposal.status})
+                      </div>
+                      <p className='text-sm text-slate-600'>
+                        {request.description.length > 180
+                          ? `${request.description.slice(0, 180)}...`
+                          : request.description}
                       </p>
-                    ) : (
+                      <div className='text-xs text-slate-500'>
+                        <p>Local: {request.location ?? 'n/d'}</p>
+                        <p>Categoria: {request.category?.name ?? request.categoryId}</p>
+                      </div>
                       <p className='text-xs text-blue-700'>Ainda sem tua proposta.</p>
-                    )}
-                  </div>
-
-                  <button
-                    type='button'
-                    className='inline-flex shrink-0 items-center rounded-lg bg-blue-600 px-3 py-2 text-sm font-semibold text-white hover:bg-blue-700'
-                    onClick={() =>
-                      setExpandedRequestId((current) =>
-                        current === request.id ? null : request.id,
-                      )
-                    }
-                  >
-                    {isExpanded ? 'Fechar' : 'Enviar proposta'}
-                  </button>
-                </div>
-
-                {isExpanded ? (
-                  <div className='mt-4 space-y-3 rounded-xl border border-slate-200 bg-slate-50 p-3'>
-                    <label className='block space-y-1 text-sm text-slate-700'>
-                      <span>Preço (MZN)</span>
-                      <input
-                        type='number'
-                        min={1}
-                        value={priceInputByRequest[request.id] ?? ''}
-                        onChange={(event) =>
-                          setPriceInputByRequest((current) => ({
-                            ...current,
-                            [request.id]: event.target.value,
-                          }))
-                        }
-                        className='w-full rounded-lg border border-slate-300 px-3 py-2 outline-none focus:border-blue-500'
-                      />
-                    </label>
-
-                    <label className='block space-y-1 text-sm text-slate-700'>
-                      <span>Comentário</span>
-                      <textarea
-                        value={commentInputByRequest[request.id] ?? ''}
-                        onChange={(event) =>
-                          setCommentInputByRequest((current) => ({
-                            ...current,
-                            [request.id]: event.target.value,
-                          }))
-                        }
-                        maxLength={320}
-                        className='min-h-24 w-full rounded-lg border border-slate-300 px-3 py-2 outline-none focus:border-blue-500'
-                      />
-                    </label>
+                    </div>
 
                     <button
                       type='button'
-                      className='inline-flex items-center rounded-lg bg-slate-900 px-4 py-2 text-sm font-semibold text-white hover:bg-black disabled:opacity-60'
-                      onClick={() => {
-                        void handleSubmitProposal(request.id);
-                      }}
-                      disabled={saving}
+                      className='inline-flex shrink-0 items-center rounded-lg bg-blue-600 px-3 py-2 text-sm font-semibold text-white hover:bg-blue-700'
+                      onClick={() =>
+                        setExpandedRequestId((current) =>
+                          current === request.id ? null : request.id,
+                        )
+                      }
                     >
-                      {saving ? 'A enviar...' : 'Confirmar proposta'}
+                      {isExpanded ? 'Fechar' : 'Enviar proposta'}
                     </button>
                   </div>
-                ) : null}
-              </article>
-            );
-          })}
-        </section>
-      )}
+
+                  {isExpanded ? renderProposalComposer(request.id) : null}
+                </article>
+              );
+            })}
+          </div>
+        )}
+      </section>
     </main>
   );
 }

@@ -143,6 +143,37 @@ export type Proposal = {
   };
 };
 
+export type ProviderProposalFeedItem = Proposal & {
+  request: {
+    id: string;
+    customerId: string;
+    categoryId: string;
+    title: string;
+    description: string;
+    location: string | null;
+    status: ServiceRequestStatus;
+    selectedProposalId: string | null;
+    expiresAt: string;
+    createdAt: string;
+    updatedAt: string;
+    category?: {
+      id: string;
+      name: string;
+      slug: string;
+    };
+    invitation?: {
+      id: string;
+      requestId: string;
+      providerUserId: string;
+      status: RequestInvitationStatus;
+      respondedAt: string | null;
+      expiresAt: string | null;
+      createdAt: string;
+      updatedAt: string;
+    } | null;
+  };
+};
+
 export type CreateServiceRequestInput = {
   categoryId: string;
   title: string;
@@ -322,6 +353,22 @@ export async function listRequestProposals(
   }
 
   return (await response.json()) as Proposal[];
+}
+
+export async function listMyProviderProposals(
+  accessToken: string,
+): Promise<ProviderProposalFeedItem[]> {
+  const response = await fetch(`${API_URL}/service-requests/proposals/mine`, {
+    headers: {
+      Authorization: `Bearer ${accessToken}`,
+    },
+  });
+
+  if (!response.ok) {
+    throw new Error(await readApiError(response));
+  }
+
+  return (await response.json()) as ProviderProposalFeedItem[];
 }
 
 export async function selectProposal(

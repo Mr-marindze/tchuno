@@ -2,32 +2,14 @@
 
 import Link from 'next/link';
 import { useEffect, useMemo, useState } from 'react';
+import { ProviderInboxNotifications } from '@/components/provider/provider-inbox-notifications';
 import { ensureSession } from '@/lib/auth';
 import { humanizeUnknownError } from '@/lib/http-errors';
-import { listMyWorkerJobs } from '@/lib/jobs';
+import { buildProviderInboxModel } from '@/lib/provider-inbox';
 import {
-  listOpenServiceRequests,
-  listRequestProposals,
-  ServiceRequest,
+  listMyProviderProposals,
+  ProviderProposalFeedItem,
 } from '@/lib/service-requests';
-
-type ProposalCard = {
-  proposalId: string;
-  requestId: string;
-  requestTitle: string;
-  requestLocation: string | null;
-  requestCategory: string | null;
-  price: number;
-  comment: string | null;
-  status: string;
-  updatedAt: string;
-};
-
-type ProposalGroups = {
-  awaiting: ProposalCard[];
-  selected: ProposalCard[];
-  rejected: ProposalCard[];
-};
 
 function formatCurrencyMzn(value: number): string {
   return new Intl.NumberFormat('pt-PT', {
@@ -37,19 +19,42 @@ function formatCurrencyMzn(value: number): string {
   }).format(value);
 }
 
-function sortByDateDesc(items: ProposalCard[]): ProposalCard[] {
-  return [...items].sort(
-    (left, right) =>
-      new Date(right.updatedAt).getTime() - new Date(left.updatedAt).getTime(),
-  );
+function proposalStatusLabel(status: string): string {
+  if (status === 'SELECTED') {
+    return 'Selecionada';
+  }
+
+  if (status === 'REJECTED') {
+    return 'Não selecionada';
+  }
+
+  return 'Em análise';
+}
+
+function proposalStatusClass(status: string): string {
+  if (status === 'SELECTED') {
+    return 'bg-emerald-100 text-emerald-700';
+  }
+
+  if (status === 'REJECTED') {
+    return 'bg-rose-100 text-rose-700';
+  }
+
+  return 'bg-blue-100 text-blue-700';
+}
+
+function proposalOriginLabel(item: ProviderProposalFeedItem): string {
+  return item.request.invitation ? 'Convite direto' : 'Mercado aberto';
+}
+
+function proposalOriginClass(item: ProviderProposalFeedItem): string {
+  return item.request.invitation
+    ? 'border-emerald-200 bg-emerald-100 text-emerald-700'
+    : 'border-slate-200 bg-slate-100 text-slate-700';
 }
 
 export default function ProviderProposalsPage() {
-  const [groups, setGroups] = useState<ProposalGroups>({
-    awaiting: [],
-    selected: [],
-    rejected: [],
-  });
+  const [proposals, setProposals] = useState<ProviderProposalFeedItem[]>([]);
   const [loading, setLoading] = useState(true);
   const [status, setStatus] = useState('A carregar propostas...');
 
@@ -65,122 +70,28 @@ export default function ProviderProposalsPage() {
         if (!session?.auth.accessToken) {
           if (active) {
             setStatus('Sessão inválida. Faz login novamente.');
-            setGroups({ awaiting: [], selected: [], rejected: [] });
+            setProposals([]);
           }
           return;
         }
 
         const token = session.auth.accessToken;
-        const providerUserId = session.auth.user.id;
-
-        const [open, closed, expired, jobsResponse] = await Promise.all([
-          listOpenServiceRequests(token, {
-            status: 'OPEN',
-            page: 1,
-            limit: 50,
-          }),
-          listOpenServiceRequests(token, {
-            status: 'CLOSED',
-            page: 1,
-            limit: 50,
-          }),
-          listOpenServiceRequests(token, {
-            status: 'EXPIRED',
-            page: 1,
-            limit: 50,
-          }),
-          listMyWorkerJobs(token, {
-            page: 1,
-            limit: 50,
-          }),
-        ]);
+        const nextProposals = await listMyProviderProposals(token);
 
         if (!active) {
           return;
         }
 
-        const requestsById = new Map<string, ServiceRequest>();
-        [...open.data, ...closed.data, ...expired.data].forEach((request) => {
-          requestsById.set(request.id, request);
+        setProposals(nextProposals);
+        const inbox = buildProviderInboxModel({
+          requests: [],
+          invitations: [],
+          proposals: nextProposals,
         });
-
-        const requestEntries = Array.from(requestsById.values());
-        const requestProposals = await Promise.all(
-          requestEntries.map(async (request) => {
-            try {
-              const proposals = await listRequestProposals(token, request.id);
-              return {
-                request,
-                proposals: proposals.filter(
-                  (proposal) => proposal.providerId === providerUserId,
-                ),
-              };
-            } catch {
-              return {
-                request,
-                proposals: [],
-              };
-            }
-          }),
-        );
-
-        if (!active) {
-          return;
-        }
-
-        const cardsByProposalId = new Map<string, ProposalCard>();
-        requestProposals.forEach(({ request, proposals }) => {
-          proposals.forEach((proposal) => {
-            cardsByProposalId.set(proposal.id, {
-              proposalId: proposal.id,
-              requestId: request.id,
-              requestTitle: request.title,
-              requestLocation: request.location,
-              requestCategory: request.category?.name ?? null,
-              price: proposal.price,
-              comment: proposal.comment ?? null,
-              status: proposal.status,
-              updatedAt: proposal.updatedAt ?? proposal.createdAt,
-            });
-          });
-        });
-
-        jobsResponse.data.forEach((job) => {
-          if (!job.proposalId || cardsByProposalId.has(job.proposalId)) {
-            return;
-          }
-
-          cardsByProposalId.set(job.proposalId, {
-            proposalId: job.proposalId,
-            requestId: job.requestId ?? 'n/d',
-            requestTitle: job.title,
-            requestLocation: null,
-            requestCategory: null,
-            price: job.agreedPrice ?? job.budget ?? 0,
-            comment: 'Proposta já convertida em job.',
-            status: 'SELECTED',
-            updatedAt: job.updatedAt,
-          });
-        });
-
-        const allCards = Array.from(cardsByProposalId.values());
-        const nextGroups: ProposalGroups = {
-          awaiting: sortByDateDesc(
-            allCards.filter((card) => card.status === 'SUBMITTED'),
-          ),
-          selected: sortByDateDesc(
-            allCards.filter((card) => card.status === 'SELECTED'),
-          ),
-          rejected: sortByDateDesc(
-            allCards.filter((card) => card.status === 'REJECTED'),
-          ),
-        };
-
-        setGroups(nextGroups);
         const total =
-          nextGroups.awaiting.length +
-          nextGroups.selected.length +
-          nextGroups.rejected.length;
+          inbox.awaitingProposals.length +
+          inbox.selectedProposals.length +
+          inbox.rejectedProposals.length;
 
         setStatus(
           total > 0
@@ -190,7 +101,7 @@ export default function ProviderProposalsPage() {
       } catch (error) {
         if (active) {
           setStatus(humanizeUnknownError(error, 'Falha ao carregar propostas.'));
-          setGroups({ awaiting: [], selected: [], rejected: [] });
+          setProposals([]);
         }
       } finally {
         if (active) {
@@ -206,19 +117,28 @@ export default function ProviderProposalsPage() {
     };
   }, []);
 
-  const total = useMemo(
-    () => groups.awaiting.length + groups.selected.length + groups.rejected.length,
-    [groups],
+  const inbox = useMemo(
+    () =>
+      buildProviderInboxModel({
+        requests: [],
+        invitations: [],
+        proposals,
+      }),
+    [proposals],
   );
+  const total = useMemo(() => proposals.length, [proposals]);
 
   return (
     <main className='space-y-4'>
       <section className='rounded-2xl border border-slate-200 bg-white p-4 shadow-sm sm:p-6'>
         <div className='flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between'>
           <div>
-            <h1 className='text-2xl font-semibold text-slate-900'>Propostas</h1>
+            <h1 className='text-2xl font-semibold text-slate-900'>
+              Propostas enviadas
+            </h1>
             <p className='mt-1 text-sm text-slate-600'>
-              Acompanha as propostas em espera, selecionadas e rejeitadas.
+              Acompanha o que foi enviado por convite direto e por mercado aberto,
+              e vê rapidamente o que mudou.
             </p>
           </div>
           <Link
@@ -229,13 +149,13 @@ export default function ProviderProposalsPage() {
           </Link>
         </div>
 
-        <div className='mt-4 grid gap-3 sm:grid-cols-3'>
+        <div className='mt-4 grid gap-3 sm:grid-cols-2 xl:grid-cols-4'>
           <article className='rounded-xl border border-blue-200 bg-blue-50 p-3'>
             <p className='text-xs font-medium uppercase tracking-wide text-blue-700'>
-              Aguardando
+              Em análise
             </p>
             <p className='mt-1 text-lg font-semibold text-blue-700'>
-              {groups.awaiting.length}
+              {inbox.awaitingProposals.length}
             </p>
           </article>
           <article className='rounded-xl border border-emerald-200 bg-emerald-50 p-3'>
@@ -243,15 +163,23 @@ export default function ProviderProposalsPage() {
               Selecionadas
             </p>
             <p className='mt-1 text-lg font-semibold text-emerald-700'>
-              {groups.selected.length}
+              {inbox.selectedProposals.length}
             </p>
           </article>
           <article className='rounded-xl border border-rose-200 bg-rose-50 p-3'>
             <p className='text-xs font-medium uppercase tracking-wide text-rose-700'>
-              Rejeitadas
+              Não selecionadas
             </p>
             <p className='mt-1 text-lg font-semibold text-rose-700'>
-              {groups.rejected.length}
+              {inbox.rejectedProposals.length}
+            </p>
+          </article>
+          <article className='rounded-xl border border-slate-200 bg-slate-50 p-3'>
+            <p className='text-xs font-medium uppercase tracking-wide text-slate-500'>
+              Via convite
+            </p>
+            <p className='mt-1 text-lg font-semibold text-slate-900'>
+              {inbox.directInviteProposals.length}
             </p>
           </article>
         </div>
@@ -262,42 +190,56 @@ export default function ProviderProposalsPage() {
         </p>
       </section>
 
-      <ProposalSection
-        title='Aguardando'
-        subtitle='Propostas em análise pelo cliente.'
-        emptyLabel='Sem propostas aguardando.'
-        items={groups.awaiting}
-        badgeClass='bg-blue-100 text-blue-700'
+      <ProviderInboxNotifications
+        title='Notificações simples'
+        subtitle='Estados importantes das tuas propostas dentro do fluxo atual.'
+        items={inbox.notifications.filter((item) =>
+          ['selected_proposals', 'awaiting_proposals', 'rejected_proposals'].includes(
+            item.kind,
+          ),
+        )}
+        emptyLabel='Sem atualizações novas nas tuas propostas.'
       />
 
       <ProposalSection
+        id='aguardando'
+        title='Em análise'
+        subtitle='Propostas em análise pelo cliente.'
+        emptyLabel='Sem propostas aguardando.'
+        items={inbox.awaitingProposals}
+      />
+
+      <ProposalSection
+        id='selecionadas'
         title='Selecionadas'
         subtitle='Propostas escolhidas e potencialmente já convertidas em job.'
         emptyLabel='Sem propostas selecionadas.'
-        items={groups.selected}
-        badgeClass='bg-emerald-100 text-emerald-700'
+        items={inbox.selectedProposals}
       />
 
       <ProposalSection
-        title='Rejeitadas'
+        id='nao-selecionadas'
+        title='Não selecionadas'
         subtitle='Propostas não selecionadas.'
         emptyLabel='Sem propostas rejeitadas.'
-        items={groups.rejected}
-        badgeClass='bg-rose-100 text-rose-700'
+        items={inbox.rejectedProposals}
       />
     </main>
   );
 }
 
 function ProposalSection(input: {
+  id: string;
   title: string;
   subtitle: string;
   emptyLabel: string;
-  items: ProposalCard[];
-  badgeClass: string;
+  items: ProviderProposalFeedItem[];
 }) {
   return (
-    <section className='rounded-2xl border border-slate-200 bg-white p-4 shadow-sm sm:p-5'>
+    <section
+      id={input.id}
+      className='rounded-2xl border border-slate-200 bg-white p-4 shadow-sm sm:p-5'
+    >
       <h2 className='text-lg font-semibold text-slate-900'>{input.title}</h2>
       <p className='mt-1 text-sm text-slate-600'>{input.subtitle}</p>
 
@@ -307,12 +249,19 @@ function ProposalSection(input: {
         <div className='mt-3 space-y-3'>
           {input.items.map((item) => (
             <article
-              key={item.proposalId}
+              key={item.id}
               className='rounded-xl border border-slate-200 bg-slate-50 p-3'
             >
               <div className='flex flex-col gap-2 sm:flex-row sm:items-start sm:justify-between'>
                 <div className='space-y-1 text-sm text-slate-700'>
-                  <p className='font-semibold text-slate-900'>{item.requestTitle}</p>
+                  <div className='flex flex-wrap items-center gap-2'>
+                    <p className='font-semibold text-slate-900'>{item.request.title}</p>
+                    <span
+                      className={`rounded-full border px-2.5 py-1 text-xs font-semibold ${proposalOriginClass(item)}`}
+                    >
+                      {proposalOriginLabel(item)}
+                    </span>
+                  </div>
                   <p>
                     <strong>Preço:</strong> {formatCurrencyMzn(item.price)}
                   </p>
@@ -320,17 +269,24 @@ function ProposalSection(input: {
                     <strong>Comentário:</strong> {item.comment ?? 'Sem comentário'}
                   </p>
                   <p className='text-xs text-slate-500'>
-                    {item.requestCategory ? `${item.requestCategory} · ` : ''}
-                    {item.requestLocation ?? 'Local n/d'}
+                    {item.request.category?.name
+                      ? `${item.request.category.name} · `
+                      : ''}
+                    {item.request.location ?? 'Local n/d'}
+                  </p>
+                  <p className='text-xs text-slate-500'>
+                    Pedido: {item.request.status}
                   </p>
                   <p className='text-xs text-slate-500'>
                     Atualizada em {new Date(item.updatedAt).toLocaleString('pt-PT')}
                   </p>
                 </div>
                 <span
-                  className={`inline-flex w-fit rounded-full px-2.5 py-1 text-xs font-semibold ${input.badgeClass}`}
+                  className={`inline-flex w-fit rounded-full px-2.5 py-1 text-xs font-semibold ${proposalStatusClass(
+                    item.status,
+                  )}`}
                 >
-                  {item.status}
+                  {proposalStatusLabel(item.status)}
                 </span>
               </div>
             </article>

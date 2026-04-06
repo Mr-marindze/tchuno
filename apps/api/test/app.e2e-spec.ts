@@ -904,6 +904,207 @@ describe('Auth and Sessions (e2e)', () => {
     ).toBe(true);
   });
 
+  it('lists provider proposal feed with invite origin and selection status', async () => {
+    const base = Date.now();
+    const password = 'abc12345';
+    const passwordHash = await bcrypt.hash(password, 12);
+
+    const customerUser = await prisma.user.create({
+      data: {
+        email: `provider_feed_customer_${base}@tchuno.local`,
+        name: 'Feed Customer',
+        passwordHash,
+        role: 'USER',
+        isActive: true,
+      },
+      select: {
+        id: true,
+        email: true,
+      },
+    });
+
+    const invitedProviderUser = await prisma.user.create({
+      data: {
+        email: `provider_feed_invited_${base}@tchuno.local`,
+        name: 'Feed Invited Provider',
+        passwordHash,
+        role: 'USER',
+        isActive: true,
+      },
+      select: {
+        id: true,
+        email: true,
+      },
+    });
+
+    const openMarketProviderUser = await prisma.user.create({
+      data: {
+        email: `provider_feed_open_${base}@tchuno.local`,
+        name: 'Feed Open Provider',
+        passwordHash,
+        role: 'USER',
+        isActive: true,
+      },
+      select: {
+        id: true,
+        email: true,
+      },
+    });
+
+    const jwtService = app.get(JwtService);
+    const secret = process.env.JWT_ACCESS_SECRET ?? 'change-me-access';
+    const customerAccessToken = jwtService.sign(
+      { sub: customerUser.id, email: customerUser.email },
+      { secret, expiresIn: '15m' },
+    );
+    const invitedProviderAccessToken = jwtService.sign(
+      { sub: invitedProviderUser.id, email: invitedProviderUser.email },
+      { secret, expiresIn: '15m' },
+    );
+    const openMarketProviderAccessToken = jwtService.sign(
+      { sub: openMarketProviderUser.id, email: openMarketProviderUser.email },
+      { secret, expiresIn: '15m' },
+    );
+
+    const category = await prisma.category.create({
+      data: {
+        name: `Provider Feed Categoria ${base}`,
+        slug: `provider-feed-categoria-${base}`,
+        description: 'Categoria para testar inbox do prestador',
+        sortOrder: 77,
+      },
+      select: {
+        id: true,
+      },
+    });
+
+    await request(app.getHttpServer())
+      .put('/worker-profile/me')
+      .set('Authorization', `Bearer ${invitedProviderAccessToken}`)
+      .send({
+        bio: 'Prestador convidado',
+        location: 'Maputo',
+        hourlyRate: 900,
+        experienceYears: 3,
+        isAvailable: true,
+        categoryIds: [category.id],
+      })
+      .expect(200);
+
+    await request(app.getHttpServer())
+      .put('/worker-profile/me')
+      .set('Authorization', `Bearer ${openMarketProviderAccessToken}`)
+      .send({
+        bio: 'Prestador de mercado aberto',
+        location: 'Maputo',
+        hourlyRate: 950,
+        experienceYears: 4,
+        isAvailable: true,
+        categoryIds: [category.id],
+      })
+      .expect(200);
+
+    const createRequestResponse = await request(app.getHttpServer())
+      .post('/service-requests')
+      .set('Authorization', `Bearer ${customerAccessToken}`)
+      .send({
+        categoryId: category.id,
+        title: 'Pintura de apartamento',
+        description: 'Preciso de orçamento rápido para pintura interior.',
+        location: 'Maputo',
+      })
+      .expect(201);
+    const createdRequest = createRequestResponse.body as { id: string };
+
+    await request(app.getHttpServer())
+      .post(`/service-requests/${createdRequest.id}/invitations`)
+      .set('Authorization', `Bearer ${customerAccessToken}`)
+      .send({
+        providerUserId: invitedProviderUser.id,
+      })
+      .expect(201);
+
+    const invitedProposalResponse = await request(app.getHttpServer())
+      .post(`/service-requests/${createdRequest.id}/proposals`)
+      .set('Authorization', `Bearer ${invitedProviderAccessToken}`)
+      .send({
+        price: 8000,
+        comment: 'Consigo começar amanhã.',
+      })
+      .expect(201);
+    const invitedProposal = invitedProposalResponse.body as { id: string };
+
+    await request(app.getHttpServer())
+      .post(`/service-requests/${createdRequest.id}/proposals`)
+      .set('Authorization', `Bearer ${openMarketProviderAccessToken}`)
+      .send({
+        price: 7800,
+        comment: 'Proposta enviada pelo mercado aberto.',
+      })
+      .expect(201);
+
+    const invitedFeedBeforeSelect = await request(app.getHttpServer())
+      .get('/service-requests/proposals/mine')
+      .set('Authorization', `Bearer ${invitedProviderAccessToken}`)
+      .expect(200);
+    const invitedItemsBeforeSelect = invitedFeedBeforeSelect.body as Array<{
+      id: string;
+      status: string;
+      request: {
+        invitation: {
+          status: string;
+        } | null;
+      };
+    }>;
+    expect(invitedItemsBeforeSelect[0]?.id).toBe(invitedProposal.id);
+    expect(invitedItemsBeforeSelect[0]?.status).toBe('SUBMITTED');
+    expect(invitedItemsBeforeSelect[0]?.request.invitation?.status).toBe(
+      'ACCEPTED',
+    );
+
+    const openMarketFeedBeforeSelect = await request(app.getHttpServer())
+      .get('/service-requests/proposals/mine')
+      .set('Authorization', `Bearer ${openMarketProviderAccessToken}`)
+      .expect(200);
+    const openMarketItemsBeforeSelect =
+      openMarketFeedBeforeSelect.body as Array<{
+        status: string;
+        request: {
+          invitation: {
+            status: string;
+          } | null;
+        };
+      }>;
+    expect(openMarketItemsBeforeSelect[0]?.status).toBe('SUBMITTED');
+    expect(openMarketItemsBeforeSelect[0]?.request.invitation).toBeNull();
+
+    await request(app.getHttpServer())
+      .post(
+        `/service-requests/${createdRequest.id}/select/${invitedProposal.id}`,
+      )
+      .set('Authorization', `Bearer ${customerAccessToken}`)
+      .send({ depositPercent: 30 })
+      .expect(201);
+
+    const invitedFeedAfterSelect = await request(app.getHttpServer())
+      .get('/service-requests/proposals/mine')
+      .set('Authorization', `Bearer ${invitedProviderAccessToken}`)
+      .expect(200);
+    const invitedItemsAfterSelect = invitedFeedAfterSelect.body as Array<{
+      status: string;
+    }>;
+    expect(invitedItemsAfterSelect[0]?.status).toBe('SELECTED');
+
+    const openMarketFeedAfterSelect = await request(app.getHttpServer())
+      .get('/service-requests/proposals/mine')
+      .set('Authorization', `Bearer ${openMarketProviderAccessToken}`)
+      .expect(200);
+    const openMarketItemsAfterSelect = openMarketFeedAfterSelect.body as Array<{
+      status: string;
+    }>;
+    expect(openMarketItemsAfterSelect[0]?.status).toBe('REJECTED');
+  });
+
   it('service request -> proposal -> payment -> execution -> review flow', async () => {
     const workerEmail = `flow_worker_${Date.now()}@tchuno.local`;
     const clientEmail = `flow_client_${Date.now()}@tchuno.local`;

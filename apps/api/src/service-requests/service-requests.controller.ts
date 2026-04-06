@@ -165,6 +165,17 @@ export class ServiceRequestsController {
     return this.serviceRequestsService.createInvitation(id, req.user.sub, dto);
   }
 
+  @Get('proposals/mine')
+  @ApiOperation({ summary: 'List proposals sent by current provider' })
+  @ApiOkResponse({ description: 'List of own proposals with request snapshot' })
+  @ApiUnauthorizedResponse({ type: ErrorResponseDto })
+  @ApiForbiddenResponse({ type: ErrorResponseDto })
+  @ApiNotFoundResponse({ type: ErrorResponseDto })
+  @RequirePermissions('provider.requests.read.open')
+  listMineProposals(@Req() req: AuthenticatedRequest) {
+    return this.serviceRequestsService.listMineProposals(req.user.sub);
+  }
+
   @Get(':id')
   @ApiOperation({ summary: 'Get one own service request with proposals/job' })
   @ApiParam({ name: 'id', type: String })
