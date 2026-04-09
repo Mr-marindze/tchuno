@@ -39,6 +39,7 @@ model User {
   approvedRefunds                  RefundRequest[]           @relation("RefundApprovedBy")
   passwordRecoveryRequests         PasswordRecoveryRequest[] @relation("PasswordRecoveryTargetUser")
   resolvedPasswordRecoveryRequests PasswordRecoveryRequest[] @relation("PasswordRecoveryResolvedBy")
+  notifications                    UserNotification[]
 }
 
 model Category {
@@ -189,6 +190,7 @@ model Job {
   ledgerEntries     LedgerEntry[]
   payouts           Payout[]
   refundRequests    RefundRequest[]
+  messages          JobMessage[]
 
   @@index([customerId, status, createdAt])
   @@index([providerId, status, createdAt])
@@ -196,6 +198,41 @@ model Job {
   @@index([workerProfileId, status, createdAt])
   @@index([status, createdAt])
   @@index([pricingMode, status, createdAt])
+}
+
+model UserNotification {
+  id          String               @id @default(cuid())
+  userId      String
+  actorUserId String?
+  kind        UserNotificationKind
+  tone        UserNotificationTone @default(INFO)
+  title       String
+  description String
+  href        String
+  hrefLabel   String?
+  readAt      DateTime?
+  metadata    Json?
+  createdAt   DateTime             @default(now())
+  updatedAt   DateTime             @updatedAt
+  user        User                 @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId, createdAt])
+  @@index([userId, readAt, createdAt])
+}
+
+model JobMessage {
+  id              String   @id @default(cuid())
+  jobId           String
+  senderUserId    String
+  recipientUserId String
+  content         String
+  createdAt       DateTime @default(now())
+  readAt          DateTime?
+  job             Job      @relation(fields: [jobId], references: [id], onDelete: Cascade)
+
+  @@index([jobId, createdAt])
+  @@index([recipientUserId, readAt, createdAt])
+  @@index([senderUserId, createdAt])
 }
 
 model Review {
@@ -430,6 +467,25 @@ enum RequestInvitationStatus {
   ACCEPTED
   DECLINED
   EXPIRED
+}
+
+enum UserNotificationKind {
+  REQUEST_INVITATION_RECEIVED
+  REQUEST_INVITATION_DECLINED
+  PROPOSAL_SUBMITTED
+  PROPOSAL_SELECTED
+  PROPOSAL_REJECTED
+  JOB_MESSAGE_RECEIVED
+  JOB_CANCELED
+  REFUND_REQUESTED
+  REFUND_STATUS_UPDATED
+}
+
+enum UserNotificationTone {
+  ATTENTION
+  SUCCESS
+  INFO
+  MUTED
 }
 
 enum UserRole {

@@ -28,6 +28,7 @@ import { AccessPolicyGuard } from '../auth/guards/access-policy.guard';
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
 import { AppRole } from '../auth/authorization.types';
 import { CreatePaymentIntentDto } from './dto/create-payment-intent.dto';
+import { CreateJobRefundRequestDto } from './dto/create-job-refund-request.dto';
 import { ListPaymentsQueryDto } from './dto/list-payments-query.dto';
 import { PayPaymentIntentDto } from './dto/pay-payment-intent.dto';
 import { PaymentWebhookDto } from './dto/payment-webhook.dto';
@@ -97,14 +98,7 @@ export class PaymentsController {
   @ApiUnauthorizedResponse({ type: ErrorResponseDto })
   @ApiForbiddenResponse({ type: ErrorResponseDto })
   @ApiNotFoundResponse({ type: ErrorResponseDto })
-  @RequireAppRoles(
-    'customer',
-    'provider',
-    'admin',
-    'ops_admin',
-    'support_admin',
-    'super_admin',
-  )
+  @RequireAppRoles('customer', 'provider')
   getIntentById(@Req() req: AuthenticatedRequest, @Param('id') id: string) {
     return this.paymentsService.getIntentById(id, {
       userId: req.user.sub,
@@ -121,6 +115,27 @@ export class PaymentsController {
   @ApiUnauthorizedResponse({ type: ErrorResponseDto })
   @ApiForbiddenResponse({ type: ErrorResponseDto })
   @ApiNotFoundResponse({ type: ErrorResponseDto })
+  @RequireAppRoles('customer', 'provider')
+  getJobFinancialState(
+    @Req() req: AuthenticatedRequest,
+    @Param('jobId') jobId: string,
+  ) {
+    return this.paymentsService.getJobFinancialState(jobId, {
+      userId: req.user.sub,
+      role: req.authz?.role,
+    });
+  }
+
+  @Post('jobs/:jobId/refund-requests')
+  @UseGuards(JwtAuthGuard, AccessPolicyGuard)
+  @ApiBearerAuth()
+  @ApiOperation({ summary: 'Create a refund/dispute request for one job' })
+  @ApiParam({ name: 'jobId', type: String })
+  @ApiOkResponse({ description: 'Refund request created' })
+  @ApiUnauthorizedResponse({ type: ErrorResponseDto })
+  @ApiForbiddenResponse({ type: ErrorResponseDto })
+  @ApiConflictResponse({ type: ErrorResponseDto })
+  @ApiNotFoundResponse({ type: ErrorResponseDto })
   @RequireAppRoles(
     'customer',
     'provider',
@@ -129,11 +144,44 @@ export class PaymentsController {
     'support_admin',
     'super_admin',
   )
-  getJobFinancialState(
+  createJobRefundRequest(
     @Req() req: AuthenticatedRequest,
     @Param('jobId') jobId: string,
+    @Body() dto: CreateJobRefundRequestDto,
   ) {
-    return this.paymentsService.getJobFinancialState(jobId, {
+    return this.paymentsService.createJobRefundRequest(
+      jobId,
+      {
+        userId: req.user.sub,
+        role: req.authz?.role,
+      },
+      dto,
+    );
+  }
+
+  @Post('refunds/:id/cancel')
+  @UseGuards(JwtAuthGuard, AccessPolicyGuard)
+  @ApiBearerAuth()
+  @ApiOperation({ summary: 'Cancel my pending refund/dispute request' })
+  @ApiParam({ name: 'id', type: String })
+  @ApiOkResponse({ description: 'Refund request canceled' })
+  @ApiUnauthorizedResponse({ type: ErrorResponseDto })
+  @ApiForbiddenResponse({ type: ErrorResponseDto })
+  @ApiConflictResponse({ type: ErrorResponseDto })
+  @ApiNotFoundResponse({ type: ErrorResponseDto })
+  @RequireAppRoles(
+    'customer',
+    'provider',
+    'admin',
+    'ops_admin',
+    'support_admin',
+    'super_admin',
+  )
+  cancelRefundRequest(
+    @Req() req: AuthenticatedRequest,
+    @Param('id') id: string,
+  ) {
+    return this.paymentsService.cancelRefundRequest(id, {
       userId: req.user.sub,
       role: req.authz?.role,
     });

@@ -15,6 +15,8 @@ import { CategoriesModule } from './categories/categories.module';
 import { HttpLoggingInterceptor } from './common/interceptors/http-logging.interceptor';
 import { RequestIdMiddleware } from './common/middleware/request-id.middleware';
 import { JobsModule } from './jobs/jobs.module';
+import { MessagesModule } from './messages/messages.module';
+import { NotificationsModule } from './notifications/notifications.module';
 import { ObservabilityModule } from './observability/observability.module';
 import { PaymentsModule } from './payments/payments.module';
 import { PrismaModule } from './prisma/prisma.module';
@@ -51,6 +53,8 @@ const throttlerLimit = Number.isFinite(resolvedThrottleLimit)
     AuthModule,
     CategoriesModule,
     JobsModule,
+    MessagesModule,
+    NotificationsModule,
     ObservabilityModule,
     PaymentsModule,
     ReviewsModule,

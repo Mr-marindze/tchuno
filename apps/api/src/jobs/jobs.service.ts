@@ -12,6 +12,7 @@ import {
   buildPaginatedResponse,
   resolvePagination,
 } from '../common/pagination/pagination';
+import { NotificationsService } from '../notifications/notifications.service';
 import { MetricsService } from '../observability/metrics.service';
 import { PrismaService } from '../prisma/prisma.service';
 import { ListJobsQueryDto } from './dto/list-jobs-query.dto';
@@ -24,6 +25,7 @@ export class JobsService {
   constructor(
     private readonly prisma: PrismaService,
     private readonly metricsService: MetricsService,
+    private readonly notificationsService: NotificationsService,
   ) {}
 
   createDeprecated(actorUserId: string) {
@@ -204,8 +206,34 @@ export class JobsService {
     const job = await this.prisma.job.findUnique({
       where: { id: jobId },
       include: {
+        client: {
+          select: {
+            id: true,
+            name: true,
+          },
+        },
+        customer: {
+          select: {
+            id: true,
+            name: true,
+          },
+        },
+        provider: {
+          select: {
+            id: true,
+            name: true,
+          },
+        },
         workerProfile: {
-          select: { userId: true },
+          select: {
+            userId: true,
+            user: {
+              select: {
+                id: true,
+                name: true,
+              },
+            },
+          },
         },
       },
     });
@@ -290,9 +318,27 @@ export class JobsService {
       data.cancelReason = cancelReason;
     }
 
-    const updatedJob = await this.prisma.job.update({
-      where: { id: jobId },
-      data,
+    const updatedJob = await this.prisma.$transaction(async (tx) => {
+      const nextJob = await tx.job.update({
+        where: { id: jobId },
+        data,
+      });
+
+      if (next === 'CANCELED') {
+        await tx.paymentIntent.updateMany({
+          where: {
+            jobId,
+            status: {
+              in: ['CREATED', 'AWAITING_PAYMENT', 'PENDING_CONFIRMATION'],
+            },
+          },
+          data: {
+            status: 'CANCELED',
+          },
+        });
+      }
+
+      return nextJob;
     });
 
     this.metricsService.recordJobStatusTransition({
@@ -307,6 +353,35 @@ export class JobsService {
       from: current,
       to: next,
     });
+
+    if (next === 'CANCELED') {
+      const providerUser = job.provider ?? job.workerProfile.user;
+      const customerUser = job.customer ?? job.client;
+      const isRequesterCustomer = customerUser.id === requesterId;
+      const targetUser = isRequesterCustomer ? providerUser : customerUser;
+      const actorName = isRequesterCustomer
+        ? customerUser.name?.trim() || 'Cliente'
+        : providerUser.name?.trim() || 'Prestador';
+
+      await this.notificationsService.create({
+        userId: targetUser.id,
+        actorUserId: requesterId,
+        kind: 'JOB_CANCELED',
+        tone: 'ATTENTION',
+        title: `Job cancelado: "${job.title}"`,
+        description: `${actorName} cancelou o job. Motivo: ${dto.cancelReason?.trim() || 'Sem motivo indicado.'}`,
+        href: isRequesterCustomer
+          ? `/pro/mensagens?job=${job.id}`
+          : job.requestId
+            ? `/app/pedidos/${job.requestId}`
+            : `/app/mensagens?job=${job.id}`,
+        hrefLabel: 'Ver estado do job',
+        metadata: {
+          jobId: job.id,
+          status: 'CANCELED',
+        } satisfies Prisma.JsonObject,
+      });
+    }
 
     return updatedJob;
   }
@@ -380,7 +455,7 @@ export class JobsService {
       return true;
     }
 
-    if (isClient && next === 'CANCELED') {
+    if ((isClient || isWorker) && next === 'CANCELED') {
       return true;
     }
 

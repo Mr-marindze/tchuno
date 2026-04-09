@@ -22,15 +22,18 @@ import {
   buildPaginatedResponse,
   resolvePagination,
 } from '../common/pagination/pagination';
+import { NotificationsService } from '../notifications/notifications.service';
 import { MetricsService } from '../observability/metrics.service';
 import { PrismaService } from '../prisma/prisma.service';
 import { AppRole } from '../auth/authorization.types';
+import { CreateJobRefundRequestDto } from './dto/create-job-refund-request.dto';
 import { CreatePaymentIntentDto } from './dto/create-payment-intent.dto';
 import { CreatePayoutDto } from './dto/create-payout.dto';
 import { CreateRefundRequestDto } from './dto/create-refund-request.dto';
 import { ListPaymentsQueryDto } from './dto/list-payments-query.dto';
 import { PayPaymentIntentDto } from './dto/pay-payment-intent.dto';
 import { ProcessPayoutDto } from './dto/process-payout.dto';
+import { RejectRefundRequestDto } from './dto/reject-refund-request.dto';
 import { ReconcileTransactionDto } from './dto/reconcile-transaction.dto';
 import { PaymentWebhookDto } from './dto/payment-webhook.dto';
 import { PaymentPolicyService } from './payment-policy.service';
@@ -78,6 +81,80 @@ const adminRoles = new Set<AppRole>([
   'super_admin',
 ]);
 
+const jobFinancialInclude = {
+  client: {
+    select: {
+      id: true,
+      name: true,
+      email: true,
+    },
+  },
+  customer: {
+    select: {
+      id: true,
+      name: true,
+      email: true,
+    },
+  },
+  provider: {
+    select: {
+      id: true,
+      name: true,
+      email: true,
+    },
+  },
+  workerProfile: {
+    select: {
+      userId: true,
+      user: {
+        select: {
+          id: true,
+          name: true,
+          email: true,
+        },
+      },
+    },
+  },
+} satisfies Prisma.JobInclude;
+
+const refundInclude = {
+  requestedByUser: {
+    select: {
+      id: true,
+      name: true,
+    },
+  },
+  approvedByUser: {
+    select: {
+      id: true,
+      name: true,
+    },
+  },
+} satisfies Prisma.RefundRequestInclude;
+
+type JobFinancialRecord = Prisma.JobGetPayload<{
+  include: typeof jobFinancialInclude;
+}>;
+
+type RefundRecord = Prisma.RefundRequestGetPayload<{
+  include: typeof refundInclude;
+}>;
+
+type JobParticipant = {
+  id: string;
+  name: string | null;
+  email: string | null;
+};
+
+type AccessibleJobFinancialRecord = {
+  job: JobFinancialRecord;
+  customer: JobParticipant;
+  provider: JobParticipant;
+  isAdmin: boolean;
+  isCustomer: boolean;
+  isProvider: boolean;
+};
+
 @Injectable()
 export class PaymentsService {
   private readonly logger = new Logger(PaymentsService.name);
@@ -88,6 +165,7 @@ export class PaymentsService {
     private readonly paymentPolicyService: PaymentPolicyService,
     private readonly gatewayRegistry: PaymentGatewayRegistryService,
     private readonly ledgerService: LedgerService,
+    private readonly notificationsService: NotificationsService,
   ) {}
 
   async createIntent(actorUserId: string, dto: CreatePaymentIntentDto) {
@@ -375,29 +453,7 @@ export class PaymentsService {
   }
 
   async getJobFinancialState(jobId: string, actor: IntentActorInput) {
-    const job = await this.prisma.job.findUnique({
-      where: { id: jobId },
-      include: {
-        workerProfile: {
-          select: {
-            userId: true,
-          },
-        },
-      },
-    });
-
-    if (!job) {
-      throw new NotFoundException('Job not found');
-    }
-
-    const canAccess =
-      adminRoles.has(actor.role ?? 'customer') ||
-      job.clientId === actor.userId ||
-      job.workerProfile.userId === actor.userId;
-
-    if (!canAccess) {
-      throw new ForbiddenException('You are not allowed to access this job');
-    }
+    const access = await this.getAccessibleJobOrThrow(jobId, actor);
 
     const intents = await this.prisma.paymentIntent.findMany({
       where: {
@@ -411,14 +467,155 @@ export class PaymentsService {
       orderBy: [{ createdAt: 'desc' }, { id: 'desc' }],
     });
 
+    const refunds = await this.prisma.refundRequest.findMany({
+      where: {
+        jobId,
+      },
+      include: refundInclude,
+      orderBy: [{ createdAt: 'desc' }, { id: 'desc' }],
+    });
+
     const latestIntent = intents[0] ?? null;
+    const summary = this.buildRefundSummary({
+      job: access.job,
+      intents,
+      refunds,
+      actor,
+    });
 
     return {
       jobId,
-      jobStatus: job.status,
+      jobStatus: access.job.status,
       paymentState: latestIntent?.status ?? 'NOT_REQUIRED',
       intents,
+      refunds,
+      cancellation: {
+        canceledAt: access.job.canceledAt,
+        canceledBy: access.job.canceledBy,
+        cancelReason: access.job.cancelReason,
+      },
+      refundSummary: summary,
     };
+  }
+
+  async createJobRefundRequest(
+    jobId: string,
+    actor: IntentActorInput,
+    dto: CreateJobRefundRequestDto,
+  ) {
+    const access = await this.getAccessibleJobOrThrow(jobId, actor);
+    const intent = await this.getLatestPaidIntent(jobId);
+
+    if (!intent) {
+      throw new ConflictException('Only paid jobs can create refund requests');
+    }
+
+    const existingActiveRequest = await this.prisma.refundRequest.findFirst({
+      where: {
+        paymentIntentId: intent.id,
+        status: {
+          in: ['PENDING', 'APPROVED', 'PROCESSING'],
+        },
+      },
+      select: {
+        id: true,
+      },
+    });
+
+    if (existingActiveRequest) {
+      throw new ConflictException(
+        'There is already an active refund request for this job',
+      );
+    }
+
+    const remainingRefundable = await this.getRemainingRefundableAmount(
+      intent.id,
+    );
+    if (remainingRefundable <= 0) {
+      throw new ConflictException(
+        'This payment has no refundable balance left',
+      );
+    }
+
+    const requestedAmount =
+      dto.amount ??
+      this.resolveSuggestedRefundAmount(access.job, remainingRefundable) ??
+      remainingRefundable;
+
+    if (requestedAmount > remainingRefundable) {
+      throw new BadRequestException('Refund amount exceeds refundable balance');
+    }
+
+    const created = await this.prisma.refundRequest.create({
+      data: {
+        jobId: access.job.id,
+        paymentIntentId: intent.id,
+        requestedByUserId: actor.userId,
+        amount: requestedAmount,
+        currency: intent.currency,
+        reason: dto.reason.trim(),
+        status: 'PENDING',
+        provider: intent.provider,
+      },
+      include: refundInclude,
+    });
+
+    await this.notifyRefundRequested(access, created, actor.userId);
+
+    return created;
+  }
+
+  async cancelRefundRequest(refundRequestId: string, actor: IntentActorInput) {
+    const refundRequest = await this.prisma.refundRequest.findUnique({
+      where: { id: refundRequestId },
+      include: {
+        ...refundInclude,
+        paymentIntent: true,
+        job: {
+          include: jobFinancialInclude,
+        },
+      },
+    });
+
+    if (!refundRequest) {
+      throw new NotFoundException('Refund request not found');
+    }
+
+    const access = this.resolveJobAccess(refundRequest.job, actor);
+    if (!access.isAdmin && refundRequest.requestedByUserId !== actor.userId) {
+      throw new ForbiddenException(
+        'You are not allowed to cancel this refund request',
+      );
+    }
+
+    if (refundRequest.status !== 'PENDING') {
+      throw new ConflictException(
+        'Only pending refund requests can be canceled',
+      );
+    }
+
+    const updated = await this.prisma.refundRequest.update({
+      where: { id: refundRequest.id },
+      data: {
+        status: 'CANCELED',
+        processedAt: new Date(),
+        failureReason: 'Pedido cancelado pelo utilizador.',
+      },
+      include: refundInclude,
+    });
+
+    await this.notifyRefundStatusUpdate({
+      access,
+      refundRequest: updated,
+      actorUserId: actor.userId,
+      title: 'Pedido de reembolso cancelado',
+      description:
+        'O pedido de reembolso/disputa foi cancelado e já não será analisado.',
+      tone: 'MUTED',
+      audience: 'counterparty',
+    });
+
+    return updated;
   }
 
   async getProviderSummary(actorUserId: string): Promise<ProviderSummary> {
@@ -940,6 +1137,7 @@ export class PaymentsService {
       this.prisma.refundRequest.count({ where }),
       this.prisma.refundRequest.findMany({
         where,
+        include: refundInclude,
         orderBy: [{ createdAt: 'desc' }, { id: 'desc' }],
         take: limit,
         skip,
@@ -952,6 +1150,116 @@ export class PaymentsService {
       page,
       limit,
     });
+  }
+
+  async adminApproveRefund(actorUserId: string, refundRequestId: string) {
+    const refundRequest = await this.prisma.refundRequest.findUnique({
+      where: { id: refundRequestId },
+      include: {
+        paymentIntent: true,
+        job: {
+          include: jobFinancialInclude,
+        },
+      },
+    });
+
+    if (!refundRequest) {
+      throw new NotFoundException('Refund request not found');
+    }
+
+    if (refundRequest.status !== 'PENDING') {
+      throw new ConflictException(
+        'Only pending refund requests can be approved',
+      );
+    }
+
+    const processed = await this.processRefundRequest(
+      refundRequest.id,
+      actorUserId,
+    );
+    const access = this.resolveJobAccess(refundRequest.job, {
+      userId: actorUserId,
+      role: 'admin',
+    });
+
+    await this.notifyRefundStatusUpdate({
+      access,
+      refundRequest: processed,
+      actorUserId,
+      title:
+        processed.status === 'SUCCEEDED'
+          ? 'Reembolso aprovado e processado'
+          : processed.status === 'PROCESSING'
+            ? 'Reembolso aprovado e em processamento'
+            : 'Reembolso aprovado com falha de processamento',
+      description:
+        processed.status === 'SUCCEEDED'
+          ? 'A decisão foi registada e o reembolso foi iniciado com sucesso.'
+          : processed.status === 'PROCESSING'
+            ? 'A decisão foi registada e o reembolso ficou em processamento.'
+            : processed.failureReason?.trim() ||
+              'A decisão foi registada, mas houve falha ao processar o reembolso.',
+      tone:
+        processed.status === 'SUCCEEDED'
+          ? 'SUCCESS'
+          : processed.status === 'PROCESSING'
+            ? 'INFO'
+            : 'ATTENTION',
+    });
+
+    return processed;
+  }
+
+  async adminRejectRefund(
+    actorUserId: string,
+    refundRequestId: string,
+    dto: RejectRefundRequestDto,
+  ) {
+    const refundRequest = await this.prisma.refundRequest.findUnique({
+      where: { id: refundRequestId },
+      include: {
+        job: {
+          include: jobFinancialInclude,
+        },
+      },
+    });
+
+    if (!refundRequest) {
+      throw new NotFoundException('Refund request not found');
+    }
+
+    if (refundRequest.status !== 'PENDING') {
+      throw new ConflictException(
+        'Only pending refund requests can be rejected',
+      );
+    }
+
+    const updated = await this.prisma.refundRequest.update({
+      where: { id: refundRequest.id },
+      data: {
+        status: 'FAILED',
+        approvedByUserId: actorUserId,
+        processedAt: new Date(),
+        failureReason: dto.reason.trim(),
+      },
+      include: refundInclude,
+    });
+
+    const access = this.resolveJobAccess(refundRequest.job, {
+      userId: actorUserId,
+      role: 'admin',
+    });
+
+    await this.notifyRefundStatusUpdate({
+      access,
+      refundRequest: updated,
+      actorUserId,
+      title: 'Pedido de reembolso recusado',
+      description: dto.reason.trim(),
+      tone: 'ATTENTION',
+    });
+
+    return updated;
   }
 
   async adminListPayouts(query: ListPaymentsQueryDto) {
@@ -995,20 +1303,9 @@ export class PaymentsService {
       throw new ConflictException('Only paid payment intents can be refunded');
     }
 
-    const successfulRefunds = await this.prisma.refundRequest.aggregate({
-      where: {
-        paymentIntentId: intent.id,
-        status: {
-          in: ['SUCCEEDED'],
-        },
-      },
-      _sum: {
-        amount: true,
-      },
-    });
-
-    const alreadyRefunded = successfulRefunds._sum?.amount ?? 0;
-    const remainingRefundable = intent.amount - alreadyRefunded;
+    const remainingRefundable = await this.getRemainingRefundableAmount(
+      intent.id,
+    );
 
     if (remainingRefundable <= 0) {
       throw new ConflictException(
@@ -1021,93 +1318,49 @@ export class PaymentsService {
       throw new BadRequestException('Refund amount exceeds refundable balance');
     }
 
-    const platformPart =
-      intent.amount === 0
-        ? 0
-        : Math.round((amount * intent.platformFeeAmount) / intent.amount);
-    const providerPart = amount - platformPart;
-
-    return this.prisma.$transaction(async (tx) => {
-      const refundRequest = await tx.refundRequest.create({
-        data: {
-          jobId: intent.jobId,
-          paymentIntentId: intent.id,
-          requestedByUserId: actorUserId,
-          approvedByUserId: actorUserId,
-          amount,
-          currency: intent.currency,
-          reason: dto.reason.trim(),
-          status: 'APPROVED',
-          provider: intent.provider,
-        },
-      });
-
-      const gateway = this.gatewayRegistry.getAdapter(intent.provider);
-      const gatewayResult = await gateway.requestRefund({
-        idempotencyKey: `refund-${refundRequest.id}`,
+    const created = await this.prisma.refundRequest.create({
+      data: {
+        jobId: intent.jobId,
+        paymentIntentId: intent.id,
+        requestedByUserId: actorUserId,
         amount,
         currency: intent.currency,
-        providerReference: null,
-      });
-
-      const transactionStatus = this.mapGatewayToTransactionStatus(
-        gatewayResult.status,
-      );
-
-      const transaction = await tx.paymentTransaction.create({
-        data: {
-          paymentIntentId: intent.id,
-          type: 'REFUND',
-          status: transactionStatus,
-          provider: intent.provider,
-          providerReference: gatewayResult.providerReference,
-          idempotencyKey: `refund-${refundRequest.id}`,
-          requestedAmount: amount,
-          confirmedAmount: transactionStatus === 'SUCCEEDED' ? amount : null,
-          currency: intent.currency,
-          providerPayload:
-            (gatewayResult.rawPayload as Prisma.InputJsonValue | undefined) ??
-            undefined,
-          failureReason: gatewayResult.reason ?? null,
-          processedAt: gatewayResult.processedAt,
-        },
-      });
-
-      const nextRefundStatus =
-        transactionStatus === 'SUCCEEDED'
-          ? 'SUCCEEDED'
-          : transactionStatus === 'FAILED'
-            ? 'FAILED'
-            : 'PROCESSING';
-
-      await tx.refundRequest.update({
-        where: {
-          id: refundRequest.id,
-        },
-        data: {
-          status: nextRefundStatus,
-          transactionId: transaction.id,
-          providerReference: transaction.providerReference,
-          processedAt: transaction.processedAt,
-          failureReason: transaction.failureReason,
-        },
-      });
-
-      if (transaction.status === 'SUCCEEDED') {
-        await this.appendRefundLedgerEntries(tx, {
-          intent,
-          transactionId: transaction.id,
-          amount,
-          platformPart,
-          providerPart,
-          actorUserId,
-        });
-      }
-
-      return tx.refundRequest.findUniqueOrThrow({
-        where: { id: refundRequest.id },
-      });
+        reason: dto.reason.trim(),
+        status: 'PENDING',
+        provider: intent.provider,
+      },
     });
+
+    const processed = await this.processRefundRequest(created.id, actorUserId);
+    const access = await this.getAccessibleJobOrThrow(intent.jobId, {
+      userId: actorUserId,
+      role: 'admin',
+    });
+
+    await this.notifyRefundStatusUpdate({
+      access,
+      refundRequest: processed,
+      actorUserId,
+      title:
+        processed.status === 'SUCCEEDED'
+          ? 'Reembolso registado e processado'
+          : processed.status === 'PROCESSING'
+            ? 'Reembolso registado e em processamento'
+            : 'Reembolso registado com falha',
+      description:
+        processed.status === 'FAILED'
+          ? processed.failureReason?.trim() ||
+            'O reembolso falhou no processamento.'
+          : 'O estado financeiro deste job foi atualizado pela equipa Tchuno.',
+      tone:
+        processed.status === 'FAILED'
+          ? 'ATTENTION'
+          : processed.status === 'PROCESSING'
+            ? 'INFO'
+            : 'SUCCESS',
+    });
+
+    return processed;
   }
 
   async adminCreatePayout(actorUserId: string, dto: CreatePayoutDto) {
@@ -1461,6 +1714,430 @@ export class PaymentsService {
         currency: intent.currency,
       };
     });
+  }
+
+  private async getAccessibleJobOrThrow(
+    jobId: string,
+    actor: IntentActorInput,
+  ) {
+    const job = await this.prisma.job.findUnique({
+      where: { id: jobId },
+      include: jobFinancialInclude,
+    });
+
+    if (!job) {
+      throw new NotFoundException('Job not found');
+    }
+
+    return this.resolveJobAccess(job, actor);
+  }
+
+  private resolveJobAccess(
+    job: JobFinancialRecord,
+    actor: IntentActorInput,
+  ): AccessibleJobFinancialRecord {
+    const provider = job.provider ?? job.workerProfile.user;
+    const customer = job.customer ?? job.client;
+
+    if (!provider || !customer) {
+      throw new ConflictException(
+        'Conversation participants are not available',
+      );
+    }
+
+    const isAdmin = adminRoles.has(actor.role ?? 'customer');
+    const isCustomer =
+      job.clientId === actor.userId || job.customerId === actor.userId;
+    const isProvider = provider.id === actor.userId;
+
+    if (!isAdmin && !isCustomer && !isProvider) {
+      throw new ForbiddenException('You are not allowed to access this job');
+    }
+
+    return {
+      job,
+      customer,
+      provider,
+      isAdmin,
+      isCustomer,
+      isProvider,
+    };
+  }
+
+  private async getLatestPaidIntent(jobId: string) {
+    return this.prisma.paymentIntent.findFirst({
+      where: {
+        jobId,
+        status: {
+          in: ['PAID_PARTIAL', 'SUCCEEDED'],
+        },
+      },
+      orderBy: [{ createdAt: 'desc' }, { id: 'desc' }],
+    });
+  }
+
+  private async getRemainingRefundableAmount(paymentIntentId: string) {
+    const [intent, successfulRefunds] = await this.prisma.$transaction([
+      this.prisma.paymentIntent.findUnique({
+        where: { id: paymentIntentId },
+      }),
+      this.prisma.refundRequest.aggregate({
+        where: {
+          paymentIntentId,
+          status: {
+            in: ['SUCCEEDED'],
+          },
+        },
+        _sum: {
+          amount: true,
+        },
+      }),
+    ]);
+
+    if (!intent) {
+      throw new NotFoundException('Payment intent not found');
+    }
+
+    return Math.max(0, intent.amount - (successfulRefunds._sum?.amount ?? 0));
+  }
+
+  private buildRefundSummary(input: {
+    job: JobFinancialRecord;
+    intents: Array<
+      Prisma.PaymentIntentGetPayload<{
+        include: {
+          transactions: true;
+        };
+      }>
+    >;
+    refunds: RefundRecord[];
+    actor: IntentActorInput;
+  }) {
+    const latestPaidIntent =
+      input.intents.find((intent) =>
+        ['PAID_PARTIAL', 'SUCCEEDED'].includes(intent.status),
+      ) ?? null;
+    const refundedAmount = input.refunds
+      .filter((refund) => refund.status === 'SUCCEEDED')
+      .reduce((sum, refund) => sum + refund.amount, 0);
+    const remainingRefundableAmount = latestPaidIntent
+      ? Math.max(0, latestPaidIntent.amount - refundedAmount)
+      : 0;
+    const hasActiveRefund = input.refunds.some((refund) =>
+      ['PENDING', 'APPROVED', 'PROCESSING'].includes(refund.status),
+    );
+    const myPendingRefund =
+      input.refunds.find(
+        (refund) =>
+          refund.status === 'PENDING' &&
+          refund.requestedByUserId === input.actor.userId,
+      ) ?? null;
+    const stage = this.resolveRefundStage(input.job, latestPaidIntent);
+    const suggestedRefundAmount = latestPaidIntent
+      ? this.resolveSuggestedRefundAmount(input.job, remainingRefundableAmount)
+      : null;
+    const disputeWindowEndsAt = input.job.completedAt
+      ? new Date(
+          input.job.completedAt.getTime() + 24 * 60 * 60 * 1000,
+        ).toISOString()
+      : null;
+    const canCancelJob =
+      (adminRoles.has(input.actor.role ?? 'customer') ||
+        input.job.clientId === input.actor.userId ||
+        input.job.workerProfile.userId === input.actor.userId) &&
+      !['COMPLETED', 'CANCELED'].includes(input.job.status);
+
+    return {
+      stage,
+      stageLabel:
+        stage === 'BEFORE_PAYMENT'
+          ? 'Antes do pagamento'
+          : stage === 'PRE_START'
+            ? 'Antes do início'
+            : stage === 'IN_PROGRESS'
+              ? 'Durante a execução'
+              : 'Após conclusão',
+      hasPaidDeposit: Boolean(latestPaidIntent),
+      paidAmount: latestPaidIntent?.amount ?? 0,
+      refundedAmount,
+      remainingRefundableAmount,
+      hasActiveRefund,
+      canRequestRefund:
+        Boolean(latestPaidIntent) &&
+        remainingRefundableAmount > 0 &&
+        !hasActiveRefund,
+      canCancelJob,
+      suggestedRefundAmount,
+      suggestedRefundLabel:
+        suggestedRefundAmount === null
+          ? stage === 'POST_COMPLETION'
+            ? 'O caso segue para análise como disputa.'
+            : 'Ainda não existe valor sugerido para reembolso.'
+          : stage === 'PRE_START'
+            ? 'Estimativa base: refund integral do sinal.'
+            : 'Estimativa base: refund parcial sujeito a decisão da equipa.',
+      disputeWindowEndsAt,
+      withinDisputeWindow: Boolean(
+        disputeWindowEndsAt &&
+        new Date(disputeWindowEndsAt).getTime() >= Date.now(),
+      ),
+      myPendingRefundRequestId: myPendingRefund?.id ?? null,
+    };
+  }
+
+  private resolveRefundStage(
+    job: JobFinancialRecord,
+    latestPaidIntent: { id: string } | null,
+  ) {
+    if (!latestPaidIntent) {
+      return 'BEFORE_PAYMENT' as const;
+    }
+
+    if (job.status === 'COMPLETED') {
+      return 'POST_COMPLETION' as const;
+    }
+
+    if (job.startedAt || job.status === 'IN_PROGRESS') {
+      return 'IN_PROGRESS' as const;
+    }
+
+    return 'PRE_START' as const;
+  }
+
+  private resolveSuggestedRefundAmount(
+    job: JobFinancialRecord,
+    remainingRefundableAmount: number,
+  ) {
+    if (remainingRefundableAmount <= 0) {
+      return null;
+    }
+
+    if (job.status === 'COMPLETED') {
+      return null;
+    }
+
+    if (job.startedAt || job.status === 'IN_PROGRESS') {
+      return Math.max(1, Math.round(remainingRefundableAmount * 0.5));
+    }
+
+    return remainingRefundableAmount;
+  }
+
+  private async processRefundRequest(
+    refundRequestId: string,
+    actorUserId: string,
+  ): Promise<RefundRecord> {
+    const refundRequest = await this.prisma.refundRequest.findUnique({
+      where: { id: refundRequestId },
+      include: {
+        paymentIntent: true,
+      },
+    });
+
+    if (!refundRequest) {
+      throw new NotFoundException('Refund request not found');
+    }
+
+    if (refundRequest.status !== 'PENDING') {
+      throw new ConflictException(
+        'Only pending refund requests can be approved',
+      );
+    }
+
+    const intent = refundRequest.paymentIntent;
+    if (!['PAID_PARTIAL', 'SUCCEEDED'].includes(intent.status)) {
+      throw new ConflictException('Only paid payment intents can be refunded');
+    }
+
+    const remainingRefundable = await this.getRemainingRefundableAmount(
+      intent.id,
+    );
+    if (refundRequest.amount > remainingRefundable) {
+      throw new BadRequestException('Refund amount exceeds refundable balance');
+    }
+
+    const platformPart =
+      intent.amount === 0
+        ? 0
+        : Math.round(
+            (refundRequest.amount * intent.platformFeeAmount) / intent.amount,
+          );
+    const providerPart = refundRequest.amount - platformPart;
+
+    return this.prisma.$transaction(async (tx) => {
+      const record = await tx.refundRequest.findUnique({
+        where: { id: refundRequest.id },
+        include: {
+          paymentIntent: true,
+        },
+      });
+
+      if (!record) {
+        throw new NotFoundException('Refund request not found');
+      }
+
+      if (record.status !== 'PENDING') {
+        throw new ConflictException(
+          'Only pending refund requests can be approved',
+        );
+      }
+
+      await tx.refundRequest.update({
+        where: { id: record.id },
+        data: {
+          status: 'APPROVED',
+          approvedByUserId: actorUserId,
+        },
+      });
+
+      const gateway = this.gatewayRegistry.getAdapter(record.provider);
+      const gatewayResult = await gateway.requestRefund({
+        idempotencyKey: `refund-${record.id}`,
+        amount: record.amount,
+        currency: record.currency,
+        providerReference: null,
+      });
+
+      const transactionStatus = this.mapGatewayToTransactionStatus(
+        gatewayResult.status,
+      );
+
+      const transaction = await tx.paymentTransaction.create({
+        data: {
+          paymentIntentId: record.paymentIntentId,
+          type: 'REFUND',
+          status: transactionStatus,
+          provider: record.provider,
+          providerReference: gatewayResult.providerReference,
+          idempotencyKey: `refund-${record.id}`,
+          requestedAmount: record.amount,
+          confirmedAmount:
+            transactionStatus === 'SUCCEEDED' ? record.amount : null,
+          currency: record.currency,
+          providerPayload:
+            (gatewayResult.rawPayload as Prisma.InputJsonValue | undefined) ??
+            undefined,
+          failureReason: gatewayResult.reason ?? null,
+          processedAt: gatewayResult.processedAt,
+        },
+      });
+
+      const nextRefundStatus: RefundStatus =
+        transactionStatus === 'SUCCEEDED'
+          ? 'SUCCEEDED'
+          : transactionStatus === 'FAILED'
+            ? 'FAILED'
+            : 'PROCESSING';
+
+      await tx.refundRequest.update({
+        where: { id: record.id },
+        data: {
+          status: nextRefundStatus,
+          transactionId: transaction.id,
+          providerReference: transaction.providerReference,
+          processedAt: transaction.processedAt,
+          failureReason: transaction.failureReason,
+        },
+      });
+
+      if (transaction.status === 'SUCCEEDED') {
+        await this.appendRefundLedgerEntries(tx, {
+          intent,
+          transactionId: transaction.id,
+          amount: record.amount,
+          platformPart,
+          providerPart,
+          actorUserId,
+        });
+      }
+
+      return tx.refundRequest.findUniqueOrThrow({
+        where: { id: record.id },
+        include: refundInclude,
+      });
+    });
+  }
+
+  private resolveCustomerHref(job: JobFinancialRecord) {
+    return job.requestId
+      ? `/app/pedidos/${job.requestId}`
+      : `/app/mensagens?job=${job.id}`;
+  }
+
+  private resolveProviderHref(job: JobFinancialRecord) {
+    return `/pro/mensagens?job=${job.id}`;
+  }
+
+  private async notifyRefundRequested(
+    access: AccessibleJobFinancialRecord,
+    refundRequest: RefundRecord,
+    actorUserId: string,
+  ) {
+    const target = access.isCustomer ? access.provider : access.customer;
+    const actorName =
+      actorUserId === access.customer.id
+        ? access.customer.name?.trim() || 'Cliente'
+        : access.provider.name?.trim() || 'Prestador';
+
+    await this.notificationsService.create({
+      userId: target.id,
+      actorUserId,
+      kind: 'REFUND_REQUESTED',
+      tone: 'ATTENTION',
+      title: `Novo pedido de reembolso em "${access.job.title}"`,
+      description: `${actorName} abriu um pedido de reembolso/disputa no valor de ${refundRequest.amount} MZN.`,
+      href:
+        target.id === access.customer.id
+          ? this.resolveCustomerHref(access.job)
+          : this.resolveProviderHref(access.job),
+      hrefLabel: 'Abrir estado',
+      metadata: {
+        jobId: access.job.id,
+        refundRequestId: refundRequest.id,
+      } satisfies Prisma.JsonObject,
+    });
+  }
+
+  private async notifyRefundStatusUpdate(input: {
+    access: AccessibleJobFinancialRecord;
+    refundRequest: RefundRecord;
+    actorUserId: string;
+    title: string;
+    description: string;
+    tone: 'ATTENTION' | 'SUCCESS' | 'INFO' | 'MUTED';
+    audience?: 'all' | 'counterparty';
+  }) {
+    const recipients =
+      input.audience === 'counterparty'
+        ? [
+            input.actorUserId === input.access.customer.id
+              ? input.access.provider
+              : input.access.customer,
+          ]
+        : [input.access.customer, input.access.provider];
+
+    await Promise.all(
+      recipients.map((recipient) =>
+        this.notificationsService.create({
+          userId: recipient.id,
+          actorUserId: input.actorUserId,
+          kind: 'REFUND_STATUS_UPDATED',
+          tone: input.tone,
+          title: input.title,
+          description: input.description,
+          href:
+            recipient.id === input.access.customer.id
+              ? this.resolveCustomerHref(input.access.job)
+              : this.resolveProviderHref(input.access.job),
+          hrefLabel: 'Ver estado',
+          metadata: {
+            jobId: input.access.job.id,
+            refundRequestId: input.refundRequest.id,
+            refundStatus: input.refundRequest.status,
+          } satisfies Prisma.JsonObject,
+        }),
+      ),
+    );
   }
 
   private assertIntentAccess(

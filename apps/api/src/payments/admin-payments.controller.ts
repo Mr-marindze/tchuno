@@ -32,6 +32,7 @@ import { CreatePayoutDto } from './dto/create-payout.dto';
 import { CreateRefundRequestDto } from './dto/create-refund-request.dto';
 import { ListPaymentsQueryDto } from './dto/list-payments-query.dto';
 import { ProcessPayoutDto } from './dto/process-payout.dto';
+import { RejectRefundRequestDto } from './dto/reject-refund-request.dto';
 import { TriggerReconciliationDto } from './dto/trigger-reconciliation.dto';
 import { PaymentsService } from './payments.service';
 
@@ -114,6 +115,38 @@ export class AdminPaymentsController {
   @RequireReauth('admin.payments.refund')
   createRefund(@Req() req: AdminRequest, @Body() dto: CreateRefundRequestDto) {
     return this.paymentsService.adminCreateRefund(req.user.sub, dto);
+  }
+
+  @Post('refunds/:id/approve')
+  @ApiOperation({ summary: 'Approve and process a pending refund request' })
+  @ApiParam({ name: 'id', type: String })
+  @ApiOkResponse({ description: 'Refund processed' })
+  @ApiUnauthorizedResponse({ type: ErrorResponseDto })
+  @ApiForbiddenResponse({ type: ErrorResponseDto })
+  @ApiConflictResponse({ type: ErrorResponseDto })
+  @ApiNotFoundResponse({ type: ErrorResponseDto })
+  @RequirePermissions('admin.payments.manage')
+  @RequireReauth('admin.payments.refund')
+  approveRefund(@Req() req: AdminRequest, @Param('id') id: string) {
+    return this.paymentsService.adminApproveRefund(req.user.sub, id);
+  }
+
+  @Post('refunds/:id/reject')
+  @ApiOperation({ summary: 'Reject a pending refund request' })
+  @ApiParam({ name: 'id', type: String })
+  @ApiOkResponse({ description: 'Refund request rejected' })
+  @ApiUnauthorizedResponse({ type: ErrorResponseDto })
+  @ApiForbiddenResponse({ type: ErrorResponseDto })
+  @ApiConflictResponse({ type: ErrorResponseDto })
+  @ApiNotFoundResponse({ type: ErrorResponseDto })
+  @RequirePermissions('admin.payments.manage')
+  @RequireReauth('admin.payments.refund')
+  rejectRefund(
+    @Req() req: AdminRequest,
+    @Param('id') id: string,
+    @Body() dto: RejectRefundRequestDto,
+  ) {
+    return this.paymentsService.adminRejectRefund(req.user.sub, id, dto);
   }
 
   @Post('payouts')

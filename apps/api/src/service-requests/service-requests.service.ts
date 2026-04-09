@@ -19,6 +19,7 @@ import {
   resolvePagination,
 } from '../common/pagination/pagination';
 import { AppRole } from '../auth/authorization.types';
+import { NotificationsService } from '../notifications/notifications.service';
 import { MetricsService } from '../observability/metrics.service';
 import { PrismaService } from '../prisma/prisma.service';
 import { CreateRequestInvitationDto } from './dto/create-request-invitation.dto';
@@ -141,6 +142,7 @@ export class ServiceRequestsService implements OnModuleInit, OnModuleDestroy {
   constructor(
     private readonly prisma: PrismaService,
     private readonly metricsService: MetricsService,
+    private readonly notificationsService: NotificationsService,
   ) {}
 
   onModuleInit() {
@@ -510,6 +512,7 @@ export class ServiceRequestsService implements OnModuleInit, OnModuleDestroy {
           select: {
             id: true,
             customerId: true,
+            title: true,
             status: true,
             selectedProposalId: true,
             expiresAt: true,
@@ -600,6 +603,21 @@ export class ServiceRequestsService implements OnModuleInit, OnModuleDestroy {
       domain: 'jobs',
       event: 'service_request_invitation_created',
       result: 'success',
+    });
+
+    await this.notificationsService.create({
+      userId: dto.providerUserId,
+      actorUserId,
+      kind: 'REQUEST_INVITATION_RECEIVED',
+      tone: 'ATTENTION',
+      title: 'Novo convite para proposta',
+      description: `Recebeste um convite para responder ao pedido "${request.title}".`,
+      href: '/pro/pedidos#convites',
+      hrefLabel: 'Ver convites',
+      metadata: {
+        requestId: request.id,
+        invitationId: invitation.id,
+      } satisfies Prisma.JsonObject,
     });
 
     return invitation;
@@ -733,6 +751,8 @@ export class ServiceRequestsService implements OnModuleInit, OnModuleDestroy {
         request: {
           select: {
             id: true,
+            customerId: true,
+            title: true,
             status: true,
             selectedProposalId: true,
             expiresAt: true,
@@ -796,6 +816,21 @@ export class ServiceRequestsService implements OnModuleInit, OnModuleDestroy {
       result: 'success',
     });
 
+    await this.notificationsService.create({
+      userId: invitation.request.customerId,
+      actorUserId,
+      kind: 'REQUEST_INVITATION_DECLINED',
+      tone: 'MUTED',
+      title: 'Convite recusado',
+      description: `Um prestador recusou o convite do pedido "${invitation.request.title}".`,
+      href: `/app/pedidos/${invitation.request.id}`,
+      hrefLabel: 'Ver pedido',
+      metadata: {
+        requestId: invitation.request.id,
+        invitationId: invitation.id,
+      } satisfies Prisma.JsonObject,
+    });
+
     return declinedInvitation;
   }
 
@@ -810,6 +845,7 @@ export class ServiceRequestsService implements OnModuleInit, OnModuleDestroy {
         select: {
           id: true,
           customerId: true,
+          title: true,
           status: true,
           selectedProposalId: true,
           expiresAt: true,
@@ -886,6 +922,21 @@ export class ServiceRequestsService implements OnModuleInit, OnModuleDestroy {
         });
 
     await this.markInvitationAccepted(requestId, actorUserId);
+
+    await this.notificationsService.create({
+      userId: request.customerId,
+      actorUserId,
+      kind: 'PROPOSAL_SUBMITTED',
+      tone: 'INFO',
+      title: 'Nova proposta recebida',
+      description: `Recebeste uma nova proposta para o pedido "${request.title}".`,
+      href: `/app/pedidos/${request.id}`,
+      hrefLabel: 'Ver propostas',
+      metadata: {
+        requestId: request.id,
+        proposalId: proposal.id,
+      } satisfies Prisma.JsonObject,
+    });
 
     return proposal;
   }
@@ -1029,6 +1080,19 @@ export class ServiceRequestsService implements OnModuleInit, OnModuleDestroy {
         'Proposal cannot be selected in current status',
       );
     }
+
+    const rejectedProposalProviders = await this.prisma.proposal.findMany({
+      where: {
+        requestId: request.id,
+        id: {
+          not: proposal.id,
+        },
+      },
+      select: {
+        id: true,
+        providerId: true,
+      },
+    });
 
     const providerProfile = await this.prisma.workerProfile.findUnique({
       where: { userId: proposal.providerId },
@@ -1176,6 +1240,43 @@ export class ServiceRequestsService implements OnModuleInit, OnModuleDestroy {
       event: 'service_request_proposal_selected',
       result: 'success',
     });
+
+    if (!result.idempotent) {
+      await this.notificationsService.create({
+        userId: proposal.providerId,
+        actorUserId,
+        kind: 'PROPOSAL_SELECTED',
+        tone: 'SUCCESS',
+        title: 'A tua proposta foi selecionada',
+        description: `O cliente escolheu a tua proposta para o pedido "${request.title}".`,
+        href: '/pro/propostas#selecionadas',
+        hrefLabel: 'Ver proposta',
+        metadata: {
+          requestId: request.id,
+          proposalId: proposal.id,
+          jobId: result.job.id,
+        } satisfies Prisma.JsonObject,
+      });
+
+      await Promise.all(
+        rejectedProposalProviders.map((rejectedProposal) =>
+          this.notificationsService.create({
+            userId: rejectedProposal.providerId,
+            actorUserId,
+            kind: 'PROPOSAL_REJECTED',
+            tone: 'MUTED',
+            title: 'Proposta não selecionada',
+            description: `O pedido "${request.title}" avançou com outro prestador.`,
+            href: '/pro/propostas#nao-selecionadas',
+            hrefLabel: 'Ver histórico',
+            metadata: {
+              requestId: request.id,
+              proposalId: rejectedProposal.id,
+            } satisfies Prisma.JsonObject,
+          }),
+        ),
+      );
+    }
 
     return result;
   }
