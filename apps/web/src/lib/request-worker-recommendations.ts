@@ -29,11 +29,26 @@ export type RequestWorkerRecommendationResult = {
 
 type RecommendationStage = "nearby" | "expanded" | "broad" | "no-location";
 
+type ParsedLocation = {
+  normalized: string;
+  tokens: string[];
+  municipality: string | null;
+  municipalityGroup: string | null;
+  subzone: string | null;
+};
+
+type LocationMatch = {
+  score: number;
+  tier: RecommendationProximityTier;
+  label: string;
+};
+
 const locationStopwords = new Set([
   "a",
   "ao",
   "area",
   "bairro",
+  "cidade",
   "da",
   "de",
   "do",
@@ -41,11 +56,52 @@ const locationStopwords = new Set([
   "e",
   "em",
   "local",
+  "municipio",
   "na",
   "no",
   "nos",
+  "provincia",
   "rua",
   "zona",
+]);
+
+const knownMunicipalities = new Set([
+  "beira",
+  "bilene",
+  "boane",
+  "chimoio",
+  "dondo",
+  "inhambane",
+  "lichinga",
+  "manica",
+  "maputo",
+  "marracuene",
+  "matola",
+  "matutuine",
+  "maxixe",
+  "moatize",
+  "nacala",
+  "nampula",
+  "pemba",
+  "quelimane",
+  "tete",
+  "xai xai",
+]);
+
+const municipalityGroups = new Map<string, string>([
+  ["maputo", "greater-maputo"],
+  ["matola", "greater-maputo"],
+  ["boane", "greater-maputo"],
+  ["marracuene", "greater-maputo"],
+  ["matutuine", "greater-maputo"],
+  ["beira", "beira-corridor"],
+  ["dondo", "beira-corridor"],
+  ["nampula", "nampula-corridor"],
+  ["nacala", "nampula-corridor"],
+  ["inhambane", "inhambane-bay"],
+  ["maxixe", "inhambane-bay"],
+  ["xai xai", "xai-xai-coast"],
+  ["bilene", "xai-xai-coast"],
 ]);
 
 function normalizeText(value: string): string {
@@ -58,22 +114,87 @@ function normalizeText(value: string): string {
     .trim();
 }
 
-function getLocationTokens(value: string | null | undefined): string[] {
-  if (!value) {
-    return [];
-  }
-
-  return normalizeText(value)
+function getLocationTokensFromNormalized(value: string): string[] {
+  return value
     .split(" ")
     .filter((token) => token.length >= 3 && !locationStopwords.has(token));
 }
 
+function splitLocationSegments(value: string): string[] {
+  return value
+    .split(/[-,;/|]+/)
+    .map((segment) => normalizeText(segment))
+    .filter((segment) => segment.length > 0);
+}
+
+function resolveKnownMunicipality(tokens: string[]): {
+  municipality: string | null;
+  tokenCount: number;
+} {
+  const maxSpan = Math.min(tokens.length, 3);
+
+  for (let span = maxSpan; span >= 1; span -= 1) {
+    const candidate = tokens.slice(0, span).join(" ");
+    if (knownMunicipalities.has(candidate)) {
+      return {
+        municipality: candidate,
+        tokenCount: span,
+      };
+    }
+  }
+
+  return {
+    municipality: null,
+    tokenCount: 0,
+  };
+}
+
+function parseLocation(value: string | null | undefined): ParsedLocation | null {
+  if (!value) {
+    return null;
+  }
+
+  const normalized = normalizeText(value);
+  if (normalized.length === 0) {
+    return null;
+  }
+
+  const tokens = getLocationTokensFromNormalized(normalized);
+  const segments = splitLocationSegments(value);
+  const firstSegmentTokens =
+    segments.length > 0 ? getLocationTokensFromNormalized(segments[0]) : [];
+  const segmentMunicipality = resolveKnownMunicipality(firstSegmentTokens);
+  const fallbackMunicipality = resolveKnownMunicipality(tokens);
+  const municipality =
+    segmentMunicipality.municipality ?? fallbackMunicipality.municipality;
+  const municipalityTokenCount =
+    segmentMunicipality.municipality !== null
+      ? segmentMunicipality.tokenCount
+      : fallbackMunicipality.tokenCount;
+
+  let subzone: string | null = null;
+  if (segments.length > 1) {
+    const restSegments = segments.slice(1).filter((segment) => segment.length > 0);
+    subzone = restSegments.length > 0 ? restSegments.join(" ") : null;
+  } else if (municipality && tokens.length > municipalityTokenCount) {
+    subzone = tokens.slice(municipalityTokenCount).join(" ");
+  }
+
+  return {
+    normalized,
+    tokens,
+    municipality,
+    municipalityGroup: municipality ? municipalityGroups.get(municipality) ?? null : null,
+    subzone: subzone && subzone.length > 0 ? subzone : null,
+  };
+}
+
 function getSharedLocationTokenCount(
-  requestLocation: string | null | undefined,
-  workerLocation: string | null | undefined,
+  requestLocation: ParsedLocation,
+  workerLocation: ParsedLocation,
 ): number {
-  const requestTokens = new Set(getLocationTokens(requestLocation));
-  const workerTokens = new Set(getLocationTokens(workerLocation));
+  const requestTokens = new Set(requestLocation.tokens);
+  const workerTokens = new Set(workerLocation.tokens);
 
   let shared = 0;
   requestTokens.forEach((token) => {
@@ -85,90 +206,85 @@ function getSharedLocationTokenCount(
   return shared;
 }
 
-function getProximityScore(
+function buildLocationMatch(
   requestLocation: string | null | undefined,
   workerLocation: string | null | undefined,
-): number {
-  if (!requestLocation || !workerLocation) {
-    return 0;
+): LocationMatch {
+  const parsedRequest = parseLocation(requestLocation);
+  const parsedWorker = parseLocation(workerLocation);
+
+  if (!parsedRequest || !parsedWorker) {
+    return {
+      score: 0,
+      tier: "location-pending",
+      label: "Localização por confirmar",
+    };
   }
 
-  const normalizedRequest = normalizeText(requestLocation);
-  const normalizedWorker = normalizeText(workerLocation);
-
-  if (normalizedRequest.length === 0 || normalizedWorker.length === 0) {
-    return 0;
-  }
-
-  if (normalizedRequest === normalizedWorker) {
-    return 3;
+  if (parsedRequest.normalized === parsedWorker.normalized) {
+    return {
+      score: 4,
+      tier: "same-zone",
+      label: "Mesma zona",
+    };
   }
 
   if (
-    normalizedRequest.includes(normalizedWorker) ||
-    normalizedWorker.includes(normalizedRequest)
+    parsedRequest.municipality &&
+    parsedRequest.municipality === parsedWorker.municipality
   ) {
-    return 3;
+    if (
+      parsedRequest.subzone &&
+      parsedWorker.subzone &&
+      parsedRequest.subzone === parsedWorker.subzone
+    ) {
+      return {
+        score: 4,
+        tier: "same-zone",
+        label: "Mesma zona",
+      };
+    }
+
+    return {
+      score: 3,
+      tier: "nearby-zone",
+      label: "Mesma cidade",
+    };
   }
 
-  const sharedTokens = getSharedLocationTokenCount(requestLocation, workerLocation);
+  if (
+    parsedRequest.municipalityGroup &&
+    parsedRequest.municipalityGroup === parsedWorker.municipalityGroup
+  ) {
+    return {
+      score: 2,
+      tier: "nearby-area",
+      label: "Área próxima",
+    };
+  }
+
+  const sharedTokens = getSharedLocationTokenCount(parsedRequest, parsedWorker);
   if (sharedTokens >= 2) {
-    return 2;
+    return {
+      score: 2,
+      tier: "nearby-area",
+      label: "Área próxima",
+    };
   }
 
   if (sharedTokens >= 1) {
-    return 1;
+    return {
+      score: 1,
+      tier: "broader-area",
+      label: "Correspondência parcial",
+    };
   }
 
-  return 0;
-}
-
-function getProximityLabel(
-  requestLocation: string | null | undefined,
-  workerLocation: string | null | undefined,
-  proximityScore: number,
-): string {
-  if (!requestLocation || !workerLocation) {
-    return "Localização por confirmar";
-  }
-
-  if (proximityScore >= 3) {
-    return "Mesma zona";
-  }
-
-  if (proximityScore >= 2) {
-    return "Zona próxima";
-  }
-
-  if (proximityScore >= 1) {
-    return "Área próxima";
-  }
-
-  return "Mais amplo";
-}
-
-function getProximityTier(
-  requestLocation: string | null | undefined,
-  workerLocation: string | null | undefined,
-  proximityScore: number,
-): RecommendationProximityTier {
-  if (!requestLocation || !workerLocation) {
-    return "location-pending";
-  }
-
-  if (proximityScore >= 3) {
-    return "same-zone";
-  }
-
-  if (proximityScore >= 2) {
-    return "nearby-zone";
-  }
-
-  if (proximityScore >= 1) {
-    return "nearby-area";
-  }
-
-  return "broader-area";
+  return {
+    score: 0,
+    tier: "broader-area",
+    label: "Mais amplo",
+  };
 }
 
 function getShortComment(worker: WorkerProfile): string {
@@ -205,18 +321,18 @@ function buildStatusMessage(input: {
   }
 
   if (input.stage === "nearby") {
-    return "Mostramos primeiro profissionais da mesma zona do pedido, ordenados por proximidade textual, avaliação e disponibilidade.";
+    return "Mostramos primeiro profissionais da mesma cidade ou zona do pedido, ordenados por correspondência de localidade, avaliação e disponibilidade.";
   }
 
   if (input.stage === "expanded") {
-    return "Não encontrámos perfis na mesma zona. Alargámos a procura para zonas e áreas próximas.";
+    return "Não encontrámos perfis na mesma cidade ou zona. Alargámos a procura para áreas próximas.";
   }
 
   if (input.scope === "category-available") {
-    return "Ainda não encontrámos correspondência de zona suficiente. Mantemos uma procura mais ampla dentro desta área.";
+    return "Ainda não encontrámos correspondência forte de localidade. Mantemos uma procura mais ampla dentro desta área.";
   }
 
-  return "Ainda não encontrámos correspondência de zona suficiente. Mostramos opções mais amplas para acelerar propostas.";
+  return "Ainda não encontrámos correspondência forte de localidade. Mostramos opções mais amplas para acelerar propostas.";
 }
 
 export function buildRequestWorkerRecommendations(
@@ -244,30 +360,22 @@ export function buildRequestWorkerRecommendations(
   }
 
   const scoredWorkers = eligibleWorkers.map((worker) => {
-    const proximityScore = getProximityScore(request.location, worker.location);
+    const locationMatch = buildLocationMatch(request.location, worker.location);
     const categoryScore = matchesRequestCategory(request, worker) ? 1 : 0;
 
     return {
       worker,
       categoryScore,
-      proximityScore,
-      proximityTier: getProximityTier(
-        request.location,
-        worker.location,
-        proximityScore,
-      ),
-      proximityLabel: getProximityLabel(
-        request.location,
-        worker.location,
-        proximityScore,
-      ),
+      proximityScore: locationMatch.score,
+      proximityTier: locationMatch.tier,
+      proximityLabel: locationMatch.label,
       distanceMeters: null,
       shortComment: getShortComment(worker),
     };
   });
 
-  const nearbyWorkers = scoredWorkers.filter((worker) => worker.proximityScore >= 2);
-  const expandedWorkers = scoredWorkers.filter((worker) => worker.proximityScore >= 1);
+  const nearbyWorkers = scoredWorkers.filter((worker) => worker.proximityScore >= 3);
+  const expandedWorkers = scoredWorkers.filter((worker) => worker.proximityScore >= 2);
 
   let selectedWorkers = scoredWorkers;
   let stage: RecommendationStage = request.location ? "broad" : "no-location";
