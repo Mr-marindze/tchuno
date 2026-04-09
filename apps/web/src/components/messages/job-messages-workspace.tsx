@@ -7,6 +7,7 @@ import { JobProtectionPanel } from '@/components/payments/job-protection-panel';
 import { ensureSession } from '@/lib/auth';
 import { humanizeUnknownError } from '@/lib/http-errors';
 import {
+  appealTrustSafetyIntervention,
   getJobConversation,
   listMyMessageConversations,
   markJobConversationRead,
@@ -15,6 +16,7 @@ import {
 import type {
   JobConversation,
   MessageConversationSummary,
+  TrustSafetyIntervention,
 } from '@/lib/messages';
 import { getJobFinancialState, JobFinancialState } from '@/lib/payments';
 
@@ -58,6 +60,46 @@ function statusClass(status: string) {
   return 'bg-amber-100 text-amber-700';
 }
 
+function interventionStatusLabel(status: string) {
+  if (status === 'LOGGED') {
+    return 'Aviso registado';
+  }
+
+  if (status === 'OPEN') {
+    return 'Em revisão';
+  }
+
+  if (status === 'APPEALED') {
+    return 'Em apelação';
+  }
+
+  if (status === 'CLEARED') {
+    return 'Liberado';
+  }
+
+  if (status === 'ENFORCED') {
+    return 'Restrição confirmada';
+  }
+
+  return status;
+}
+
+function interventionStatusClass(status: string) {
+  if (status === 'CLEARED') {
+    return 'bg-emerald-100 text-emerald-700';
+  }
+
+  if (status === 'ENFORCED') {
+    return 'bg-rose-100 text-rose-700';
+  }
+
+  if (status === 'OPEN' || status === 'APPEALED') {
+    return 'bg-amber-100 text-amber-700';
+  }
+
+  return 'bg-slate-100 text-slate-700';
+}
+
 export function JobMessagesWorkspace(input: {
   basePath: string;
   title: string;
@@ -79,6 +121,16 @@ export function JobMessagesWorkspace(input: {
   const [thread, setThread] = useState<JobConversation | null>(null);
   const [financial, setFinancial] = useState<JobFinancialState | null>(null);
   const [messageInput, setMessageInput] = useState('');
+  const [appealReason, setAppealReason] = useState('');
+  const [appealing, setAppealing] = useState(false);
+  const [moderationNotice, setModerationNotice] = useState<{
+    title: string;
+    description: string;
+    ctaHref: string;
+    ctaLabel: string;
+    appealAllowed: boolean;
+    interventionId: string;
+  } | null>(null);
   const [loading, setLoading] = useState(true);
   const [threadLoading, setThreadLoading] = useState(false);
   const [sending, setSending] = useState(false);
@@ -143,6 +195,7 @@ export function JobMessagesWorkspace(input: {
       setSelectedJobId(null);
       setThread(null);
       setFinancial(null);
+      setModerationNotice(null);
       return;
     }
 
@@ -184,6 +237,7 @@ export function JobMessagesWorkspace(input: {
 
         setThread(nextThread);
         setFinancial(nextFinancial);
+        setModerationNotice(null);
 
         const nextConversations = await listMyMessageConversations(accessToken);
         if (!active) {
@@ -252,14 +306,59 @@ export function JobMessagesWorkspace(input: {
     setStatus('A enviar mensagem...');
 
     try {
-      await sendJobMessage(accessToken, selectedJobId, { content });
-      setMessageInput('');
+      const result = await sendJobMessage(accessToken, selectedJobId, { content });
+
+      if (result.status === 'sent') {
+        setMessageInput('');
+        setModerationNotice(null);
+        await refreshSelectedWorkspace(selectedJobId);
+        setStatus('Mensagem enviada.');
+        return;
+      }
+
+      setModerationNotice({
+        title: result.guidance.title,
+        description: result.guidance.description,
+        ctaHref: result.guidance.ctaHref,
+        ctaLabel: result.guidance.ctaLabel,
+        appealAllowed: result.guidance.appealAllowed,
+        interventionId: result.intervention.id,
+      });
       await refreshSelectedWorkspace(selectedJobId);
-      setStatus('Mensagem enviada.');
+      setStatus(result.guidance.description);
     } catch (error) {
       setStatus(humanizeUnknownError(error, 'Falha ao enviar mensagem.'));
     } finally {
       setSending(false);
+    }
+  }
+
+  async function handleAppealTrustSafety(intervention: TrustSafetyIntervention) {
+    if (!accessToken) {
+      setStatus('Sessão inválida. Faz login novamente.');
+      return;
+    }
+
+    const reason = appealReason.trim();
+    if (reason.length < 3) {
+      setStatus('Explica o motivo do pedido de revisão.');
+      return;
+    }
+
+    setAppealing(true);
+    setStatus('A pedir revisão da restrição...');
+
+    try {
+      await appealTrustSafetyIntervention(accessToken, intervention.id, { reason });
+      setAppealReason('');
+      await refreshSelectedWorkspace(intervention.jobId);
+      setStatus('Pedido de revisão enviado para Trust & Safety.');
+    } catch (error) {
+      setStatus(
+        humanizeUnknownError(error, 'Falha ao pedir revisão da restrição.'),
+      );
+    } finally {
+      setAppealing(false);
     }
   }
 
@@ -384,6 +483,19 @@ export function JobMessagesWorkspace(input: {
             <p className='text-sm text-blue-700'>A carregar conversa...</p>
           ) : (
             <div className='space-y-4'>
+              {moderationNotice ? (
+                <div className='rounded-2xl border border-amber-200 bg-amber-50 p-4 text-sm text-amber-900'>
+                  <p className='font-semibold'>{moderationNotice.title}</p>
+                  <p className='mt-1'>{moderationNotice.description}</p>
+                  <Link
+                    href={moderationNotice.ctaHref}
+                    className='mt-3 inline-flex items-center rounded-lg border border-amber-300 px-3 py-2 text-sm font-medium text-amber-900 hover:bg-amber-100'
+                  >
+                    {moderationNotice.ctaLabel}
+                  </Link>
+                </div>
+              ) : null}
+
               <div className='flex flex-col gap-3 border-b border-slate-200 pb-4 sm:flex-row sm:items-start sm:justify-between'>
                 <div>
                   <h2 className='text-lg font-semibold text-slate-900'>
@@ -415,6 +527,88 @@ export function JobMessagesWorkspace(input: {
                   {formatConversationStatus(thread.conversation.status)}
                 </span>
               </div>
+
+              {thread.trustSafety.activeIntervention ? (
+                <div className='rounded-2xl border border-slate-200 bg-slate-50 p-4'>
+                  <div className='flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between'>
+                    <div>
+                      <p className='text-sm font-semibold text-slate-900'>
+                        Proteção anti-fuga ativa
+                      </p>
+                      <p className='mt-1 text-sm text-slate-600'>
+                        {thread.trustSafety.activeIntervention.reasonSummary}
+                      </p>
+                      <p className='mt-2 text-xs text-slate-500'>
+                        Última mensagem sinalizada: &quot;
+                        {thread.trustSafety.activeIntervention.messagePreview}
+                        &quot;
+                      </p>
+                    </div>
+                    <span
+                      className={`rounded-full px-2.5 py-1 text-xs font-semibold ${interventionStatusClass(
+                        thread.trustSafety.activeIntervention.status,
+                      )}`}
+                    >
+                      {interventionStatusLabel(
+                        thread.trustSafety.activeIntervention.status,
+                      )}
+                    </span>
+                  </div>
+
+                  {thread.trustSafety.activeIntervention.isBlocking &&
+                  thread.trustSafety.activeIntervention.blockedUntil ? (
+                    <p className='mt-3 text-sm text-amber-800'>
+                      O envio de mensagens fica temporariamente restringido até{' '}
+                      {new Date(
+                        thread.trustSafety.activeIntervention.blockedUntil,
+                      ).toLocaleString('pt-PT')}
+                      .
+                    </p>
+                  ) : null}
+
+                  {thread.trustSafety.activeIntervention.appealReason ? (
+                    <p className='mt-3 text-sm text-slate-600'>
+                      Apelação enviada: {thread.trustSafety.activeIntervention.appealReason}
+                    </p>
+                  ) : null}
+
+                  {thread.trustSafety.activeIntervention.resolutionNote ? (
+                    <p className='mt-3 text-sm text-slate-600'>
+                      Nota da equipa: {thread.trustSafety.activeIntervention.resolutionNote}
+                    </p>
+                  ) : null}
+
+                  {['OPEN', 'ENFORCED'].includes(
+                    thread.trustSafety.activeIntervention.status,
+                  ) ? (
+                    <div className='mt-4 space-y-3 rounded-xl border border-slate-200 bg-white p-3'>
+                      <p className='text-sm font-medium text-slate-900'>
+                        Pedir revisão
+                      </p>
+                      <textarea
+                        value={appealReason}
+                        onChange={(event) => setAppealReason(event.target.value)}
+                        maxLength={240}
+                        className='min-h-24 w-full rounded-xl border border-slate-300 px-3 py-2 outline-none focus:border-blue-500'
+                        placeholder='Explica por que esta mensagem deve ser revista pela equipa.'
+                        disabled={appealing}
+                      />
+                      <button
+                        type='button'
+                        className='inline-flex items-center rounded-lg border border-slate-300 px-3 py-2 text-sm font-medium text-slate-700 hover:bg-slate-100 disabled:opacity-60'
+                        onClick={() => {
+                          void handleAppealTrustSafety(
+                            thread.trustSafety.activeIntervention!,
+                          );
+                        }}
+                        disabled={appealing}
+                      >
+                        {appealing ? 'A enviar revisão...' : 'Pedir revisão'}
+                      </button>
+                    </div>
+                  ) : null}
+                </div>
+              ) : null}
 
               {financial ? (
                 <JobProtectionPanel
@@ -487,14 +681,19 @@ export function JobMessagesWorkspace(input: {
                     maxLength={1000}
                     className='min-h-28 w-full rounded-xl border border-slate-300 px-3 py-2 outline-none focus:border-blue-500'
                     placeholder='Escreve uma atualização, pergunta ou combinação de próximos passos.'
-                    disabled={sending || thread.conversation.status === 'CANCELED'}
+                    disabled={
+                      sending ||
+                      thread.conversation.status === 'CANCELED' ||
+                      Boolean(thread.trustSafety.activeIntervention?.isBlocking)
+                    }
                   />
                 </label>
 
                 <div className='flex flex-wrap items-center justify-between gap-3'>
                   <p className='text-xs text-slate-500'>
-                    Esta conversa fica associada ao job e mantém o histórico dentro
-                    do Tchuno.
+                    {thread.conversation.contactUnlocked
+                      ? 'Contacto desbloqueado. O job mantém histórico e proteção dentro do Tchuno.'
+                      : 'Antes do sinal, o Tchuno bloqueia tentativas de partilha de contacto externo e mantém o histórico protegido.'}
                   </p>
                   <button
                     type='button'
@@ -505,6 +704,7 @@ export function JobMessagesWorkspace(input: {
                     disabled={
                       sending ||
                       thread.conversation.status === 'CANCELED' ||
+                      Boolean(thread.trustSafety.activeIntervention?.isBlocking) ||
                       messageInput.trim().length === 0
                     }
                   >

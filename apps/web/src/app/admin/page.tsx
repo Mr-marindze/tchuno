@@ -128,6 +128,12 @@ export default function AdminOverviewPage() {
           Utilizadores
         </Link>
         <Link
+          href='/admin/moderation'
+          className='rounded-2xl border border-slate-200 bg-white p-4 text-sm font-semibold text-slate-900 shadow-sm hover:border-blue-300'
+        >
+          Trust & Safety
+        </Link>
+        <Link
           href='/admin/audit'
           className='rounded-2xl border border-slate-200 bg-white p-4 text-sm font-semibold text-slate-900 shadow-sm hover:border-blue-300'
         >

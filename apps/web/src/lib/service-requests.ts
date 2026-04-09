@@ -15,6 +15,7 @@ export type RequestInvitation = {
   requestId: string;
   providerUserId: string;
   status: RequestInvitationStatus;
+  openedAt: string | null;
   respondedAt: string | null;
   expiresAt: string | null;
   createdAt: string;
@@ -35,6 +36,7 @@ export type ProviderRequestInvitation = {
   requestId: string;
   providerUserId: string;
   status: RequestInvitationStatus;
+  openedAt: string | null;
   respondedAt: string | null;
   expiresAt: string | null;
   createdAt: string;
@@ -80,6 +82,7 @@ export type ServiceRequest = {
   title: string;
   description: string;
   location: string | null;
+  lastCustomerEditAt?: string | null;
   status: ServiceRequestStatus;
   selectedProposalId: string | null;
   expiresAt: string;
@@ -200,6 +203,19 @@ export type CreateRequestInvitationInput = {
   providerUserId: string;
 };
 
+export type RecreateServiceRequestInput = {
+  title?: string;
+  description?: string;
+  location?: string;
+};
+
+export type UpdateServiceRequestInput = {
+  title?: string;
+  description?: string;
+  location?: string;
+  extendExpiryHours?: number;
+};
+
 export type ListServiceRequestsQuery = {
   status?: ServiceRequestStatus;
   search?: string;
@@ -309,6 +325,7 @@ export async function getServiceRequestById(
 export async function recreateServiceRequest(
   accessToken: string,
   requestId: string,
+  input?: RecreateServiceRequestInput,
 ): Promise<ServiceRequest> {
   const response = await fetch(
     `${API_URL}/service-requests/${requestId}/recreate`,
@@ -316,9 +333,32 @@ export async function recreateServiceRequest(
       method: 'POST',
       headers: {
         Authorization: `Bearer ${accessToken}`,
+        'Content-Type': 'application/json',
       },
+      body: JSON.stringify(input ?? {}),
     },
   );
+
+  if (!response.ok) {
+    throw new Error(await readApiError(response));
+  }
+
+  return (await response.json()) as ServiceRequest;
+}
+
+export async function updateServiceRequest(
+  accessToken: string,
+  requestId: string,
+  input: UpdateServiceRequestInput,
+): Promise<ServiceRequest> {
+  const response = await fetch(`${API_URL}/service-requests/${requestId}`, {
+    method: 'PATCH',
+    headers: {
+      Authorization: `Bearer ${accessToken}`,
+      'Content-Type': 'application/json',
+    },
+    body: JSON.stringify(input),
+  });
 
   if (!response.ok) {
     throw new Error(await readApiError(response));

@@ -50,8 +50,49 @@ export type JobConversation = {
     };
     createdAt: string;
   };
+  trustSafety: {
+    activeIntervention: TrustSafetyIntervention | null;
+    recentInterventions: TrustSafetyIntervention[];
+  };
   items: JobMessage[];
 };
+
+export type TrustSafetyIntervention = {
+  id: string;
+  jobId: string;
+  actorUserId: string;
+  counterpartUserId: string;
+  riskLevel: 'LOW' | 'MEDIUM' | 'HIGH';
+  action: 'WARNING' | 'TEMP_BLOCK';
+  status: 'LOGGED' | 'OPEN' | 'APPEALED' | 'CLEARED' | 'ENFORCED';
+  reasonSummary: string;
+  messagePreview: string;
+  blockedUntil: string | null;
+  appealRequestedAt: string | null;
+  appealReason: string | null;
+  reviewedAt: string | null;
+  resolutionNote: string | null;
+  createdAt: string;
+  updatedAt: string;
+  isBlocking: boolean;
+};
+
+export type SendJobMessageResult =
+  | {
+      status: 'sent';
+      message: JobMessage;
+    }
+  | {
+      status: 'warning' | 'blocked';
+      intervention: TrustSafetyIntervention;
+      guidance: {
+        title: string;
+        description: string;
+        ctaHref: string;
+        ctaLabel: string;
+        appealAllowed: boolean;
+      };
+    };
 
 export async function listMyMessageConversations(
   accessToken: string,
@@ -90,7 +131,7 @@ export async function sendJobMessage(
   accessToken: string,
   jobId: string,
   input: { content: string },
-): Promise<JobMessage> {
+): Promise<SendJobMessageResult> {
   const response = await fetch(`${API_URL}/messages/jobs/${jobId}`, {
     method: 'POST',
     headers: {
@@ -104,7 +145,7 @@ export async function sendJobMessage(
     throw new Error(await readApiError(response));
   }
 
-  return (await response.json()) as JobMessage;
+  return (await response.json()) as SendJobMessageResult;
 }
 
 export async function markJobConversationRead(
@@ -129,4 +170,28 @@ export async function markJobConversationRead(
     updatedCount: number;
     readAt: string;
   };
+}
+
+export async function appealTrustSafetyIntervention(
+  accessToken: string,
+  interventionId: string,
+  input: { reason: string },
+): Promise<TrustSafetyIntervention> {
+  const response = await fetch(
+    `${API_URL}/trust-safety/interventions/${interventionId}/appeal`,
+    {
+      method: 'POST',
+      headers: {
+        Authorization: `Bearer ${accessToken}`,
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify(input),
+    },
+  );
+
+  if (!response.ok) {
+    throw new Error(await readApiError(response));
+  }
+
+  return (await response.json()) as TrustSafetyIntervention;
 }

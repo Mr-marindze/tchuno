@@ -23,6 +23,7 @@ import { PrismaModule } from './prisma/prisma.module';
 import { ReviewsModule } from './reviews/reviews.module';
 import { ServiceRequestsModule } from './service-requests/service-requests.module';
 import { TrackingModule } from './tracking/tracking.module';
+import { TrustSafetyModule } from './trust-safety/trust-safety.module';
 import { WorkerProfileModule } from './worker-profile/worker-profile.module';
 
 const defaultThrottleTtlMs = 60_000;
@@ -60,6 +61,7 @@ const throttlerLimit = Number.isFinite(resolvedThrottleLimit)
     ReviewsModule,
     ServiceRequestsModule,
     TrackingModule,
+    TrustSafetyModule,
     WorkerProfileModule,
   ],
   controllers: [AppController],

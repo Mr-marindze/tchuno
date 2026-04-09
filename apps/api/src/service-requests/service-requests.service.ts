@@ -25,8 +25,10 @@ import { PrismaService } from '../prisma/prisma.service';
 import { CreateRequestInvitationDto } from './dto/create-request-invitation.dto';
 import { CreateServiceRequestDto } from './dto/create-service-request.dto';
 import { ListServiceRequestsQueryDto } from './dto/list-service-requests-query.dto';
+import { RecreateServiceRequestDto } from './dto/recreate-service-request.dto';
 import { SelectProposalDto } from './dto/select-proposal.dto';
 import { SubmitProposalDto } from './dto/submit-proposal.dto';
+import { UpdateServiceRequestDto } from './dto/update-service-request.dto';
 
 type Actor = {
   userId: string;
@@ -205,7 +207,11 @@ export class ServiceRequestsService implements OnModuleInit, OnModuleDestroy {
     return created;
   }
 
-  async recreate(actorUserId: string, requestId: string) {
+  async recreate(
+    actorUserId: string,
+    requestId: string,
+    dto: RecreateServiceRequestDto = {},
+  ) {
     const request = await this.prisma.serviceRequest.findUnique({
       where: { id: requestId },
       select: {
@@ -260,9 +266,12 @@ export class ServiceRequestsService implements OnModuleInit, OnModuleDestroy {
       data: {
         customerId: actorUserId,
         categoryId: request.categoryId,
-        title: request.title,
-        description: request.description,
-        location: request.location,
+        title: dto.title?.trim() || request.title,
+        description: dto.description?.trim() || request.description,
+        location:
+          dto.location !== undefined
+            ? dto.location.trim() || null
+            : request.location,
         status: 'OPEN',
         expiresAt: this.buildRequestExpiryDate(),
       },
@@ -275,6 +284,88 @@ export class ServiceRequestsService implements OnModuleInit, OnModuleDestroy {
     });
 
     return recreated;
+  }
+
+  async update(
+    actorUserId: string,
+    requestId: string,
+    dto: UpdateServiceRequestDto,
+  ) {
+    const request = await this.prisma.serviceRequest.findUnique({
+      where: { id: requestId },
+      include: customerRequestDetailInclude,
+    });
+
+    if (!request) {
+      throw new NotFoundException('Service request not found');
+    }
+
+    if (request.customerId !== actorUserId) {
+      throw new ForbiddenException(
+        'Only request owner can adjust this request',
+      );
+    }
+
+    const currentStatus = await this.refreshRequestStatusIfExpired(request);
+    if (currentStatus !== 'OPEN' || request.selectedProposalId || request.job) {
+      throw new ConflictException(
+        'Only open requests without selected proposal can be adjusted',
+      );
+    }
+
+    const data: Prisma.ServiceRequestUpdateInput = {};
+    let changed = false;
+
+    if (dto.title !== undefined) {
+      const nextTitle = dto.title.trim();
+      if (nextTitle !== request.title) {
+        data.title = nextTitle;
+        changed = true;
+      }
+    }
+
+    if (dto.description !== undefined) {
+      const nextDescription = dto.description.trim();
+      if (nextDescription !== request.description) {
+        data.description = nextDescription;
+        changed = true;
+      }
+    }
+
+    if (dto.location !== undefined) {
+      const nextLocation = dto.location.trim() || null;
+      if (nextLocation !== request.location) {
+        data.location = nextLocation;
+        changed = true;
+      }
+    }
+
+    if (dto.extendExpiryHours !== undefined) {
+      data.expiresAt = new Date(
+        request.expiresAt.getTime() + dto.extendExpiryHours * 60 * 60 * 1000,
+      );
+      changed = true;
+    }
+
+    if (!changed) {
+      return request;
+    }
+
+    data.lastCustomerEditAt = new Date();
+
+    const updated = await this.prisma.serviceRequest.update({
+      where: { id: requestId },
+      data,
+      include: customerRequestDetailInclude,
+    });
+
+    this.metricsService.recordBusinessEvent({
+      domain: 'jobs',
+      event: 'service_request_updated',
+      result: 'success',
+    });
+
+    return updated;
   }
 
   async listMine(actorUserId: string, query: ListServiceRequestsQueryDto) {
@@ -627,6 +718,21 @@ export class ServiceRequestsService implements OnModuleInit, OnModuleDestroy {
     await this.expireStaleOpenRequests();
     await this.expirePendingInvitationsForProvider(actorUserId);
 
+    await this.prisma.requestInvitation.updateMany({
+      where: {
+        providerUserId: actorUserId,
+        status: 'SENT',
+        openedAt: null,
+        request: {
+          status: 'OPEN',
+          selectedProposalId: null,
+        },
+      },
+      data: {
+        openedAt: new Date(),
+      },
+    });
+
     return this.prisma.requestInvitation.findMany({
       where: {
         providerUserId: actorUserId,
@@ -796,6 +902,7 @@ export class ServiceRequestsService implements OnModuleInit, OnModuleDestroy {
         where: { id: invitation.id },
         data: {
           status: 'EXPIRED',
+          openedAt: invitation.openedAt ?? new Date(),
           respondedAt: invitation.respondedAt ?? new Date(),
           expiresAt: invitation.expiresAt ?? new Date(),
         },
@@ -806,6 +913,7 @@ export class ServiceRequestsService implements OnModuleInit, OnModuleDestroy {
       where: { id: invitation.id },
       data: {
         status: 'DECLINED',
+        openedAt: invitation.openedAt ?? new Date(),
         respondedAt: new Date(),
       },
     });
@@ -1439,6 +1547,17 @@ export class ServiceRequestsService implements OnModuleInit, OnModuleDestroy {
     requestId: string,
     providerUserId: string,
   ) {
+    await this.prisma.requestInvitation.updateMany({
+      where: {
+        requestId,
+        providerUserId,
+        openedAt: null,
+      },
+      data: {
+        openedAt: new Date(),
+      },
+    });
+
     const result = await this.prisma.requestInvitation.updateMany({
       where: {
         requestId,

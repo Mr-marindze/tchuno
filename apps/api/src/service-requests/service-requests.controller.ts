@@ -2,6 +2,7 @@ import {
   Body,
   Controller,
   Get,
+  Patch,
   Param,
   Post,
   Query,
@@ -28,8 +29,10 @@ import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
 import { CreateServiceRequestDto } from './dto/create-service-request.dto';
 import { CreateRequestInvitationDto } from './dto/create-request-invitation.dto';
 import { ListServiceRequestsQueryDto } from './dto/list-service-requests-query.dto';
+import { RecreateServiceRequestDto } from './dto/recreate-service-request.dto';
 import { SelectProposalDto } from './dto/select-proposal.dto';
 import { SubmitProposalDto } from './dto/submit-proposal.dto';
+import { UpdateServiceRequestDto } from './dto/update-service-request.dto';
 import { ServiceRequestsService } from './service-requests.service';
 
 type AuthenticatedRequest = {
@@ -73,8 +76,29 @@ export class ServiceRequestsController {
   @ApiConflictResponse({ type: ErrorResponseDto })
   @ApiNotFoundResponse({ type: ErrorResponseDto })
   @RequirePermissions('customer.requests.create')
-  recreate(@Req() req: AuthenticatedRequest, @Param('id') id: string) {
-    return this.serviceRequestsService.recreate(req.user.sub, id);
+  recreate(
+    @Req() req: AuthenticatedRequest,
+    @Param('id') id: string,
+    @Body() dto: RecreateServiceRequestDto,
+  ) {
+    return this.serviceRequestsService.recreate(req.user.sub, id, dto);
+  }
+
+  @Patch(':id')
+  @ApiOperation({ summary: 'Adjust one open service request (customer)' })
+  @ApiParam({ name: 'id', type: String })
+  @ApiOkResponse({ description: 'Service request adjusted' })
+  @ApiUnauthorizedResponse({ type: ErrorResponseDto })
+  @ApiForbiddenResponse({ type: ErrorResponseDto })
+  @ApiConflictResponse({ type: ErrorResponseDto })
+  @ApiNotFoundResponse({ type: ErrorResponseDto })
+  @RequirePermissions('customer.requests.update')
+  update(
+    @Req() req: AuthenticatedRequest,
+    @Param('id') id: string,
+    @Body() dto: UpdateServiceRequestDto,
+  ) {
+    return this.serviceRequestsService.update(req.user.sub, id, dto);
   }
 
   @Get('me')

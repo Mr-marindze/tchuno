@@ -8,6 +8,7 @@ import {
 import { Prisma, User } from '@prisma/client';
 import { NotificationsService } from '../notifications/notifications.service';
 import { PrismaService } from '../prisma/prisma.service';
+import { TrustSafetyService } from '../trust-safety/trust-safety.service';
 import { CreateJobMessageDto } from './dto/create-job-message.dto';
 
 const messageJobInclude = {
@@ -77,6 +78,7 @@ export class MessagesService {
   constructor(
     private readonly prisma: PrismaService,
     private readonly notificationsService: NotificationsService,
+    private readonly trustSafetyService: TrustSafetyService,
   ) {}
 
   async listMine(userId: string) {
@@ -170,6 +172,10 @@ export class MessagesService {
       where: { jobId },
       orderBy: [{ createdAt: 'asc' }, { id: 'asc' }],
     });
+    const trustSafety = await this.trustSafetyService.getConversationState(
+      jobId,
+      userId,
+    );
 
     return {
       conversation: {
@@ -184,6 +190,7 @@ export class MessagesService {
         ),
         createdAt: access.job.createdAt.toISOString(),
       },
+      trustSafety,
       items: messages.map((message) => this.toMessageDto(message)),
     };
   }
@@ -221,6 +228,20 @@ export class MessagesService {
       );
     }
 
+    const moderation = await this.trustSafetyService.evaluateMessageAttempt({
+      jobId,
+      requestId: access.job.requestId,
+      actorUserId: userId,
+      counterpartUserId: access.counterpart.id,
+      actorRole: access.role,
+      contactUnlocked: access.contactUnlocked,
+      content,
+    });
+
+    if (moderation.status === 'warning' || moderation.status === 'blocked') {
+      return moderation;
+    }
+
     const created = await this.prisma.jobMessage.create({
       data: {
         jobId,
@@ -253,7 +274,10 @@ export class MessagesService {
       } satisfies Prisma.JsonObject,
     });
 
-    return this.toMessageDto(created);
+    return {
+      status: 'sent' as const,
+      message: this.toMessageDto(created),
+    };
   }
 
   private async getConversationOrThrow(jobId: string, userId: string) {

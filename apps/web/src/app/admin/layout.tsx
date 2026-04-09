@@ -13,6 +13,7 @@ export default function AdminLayout({
       items={[
         { href: '/admin', label: 'Overview' },
         { href: '/admin/payments', label: 'Pagamentos' },
+        { href: '/admin/moderation', label: 'Trust & Safety' },
         { href: '/admin/users', label: 'Utilizadores' },
         { href: '/admin/support', label: 'Suporte' },
         { href: '/admin/audit', label: 'Auditoria' },

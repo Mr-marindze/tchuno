@@ -59,6 +59,14 @@ const humanMessages: Record<string, string> = {
     "Só pedidos pendentes podem ser aprovados.",
   "Only pending refund requests can be rejected":
     "Só pedidos pendentes podem ser recusados.",
+  "Trust & Safety intervention not found":
+    "Intervenção de Trust & Safety não encontrada.",
+  "You are not allowed to appeal this intervention":
+    "Não tens permissão para pedir revisão desta intervenção.",
+  "This intervention cannot be appealed":
+    "Esta intervenção já não pode ser alvo de revisão.",
+  "This intervention is no longer reviewable":
+    "Esta intervenção já não está disponível para revisão.",
   "Unable to generate a valid slug":
     "Não foi possível gerar um slug válido para a categoria.",
   "scheduledFor must be in the future": "A data agendada deve ser futura.",

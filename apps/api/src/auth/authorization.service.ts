@@ -12,6 +12,7 @@ const rolePermissions: Record<AppRole, Permission[]> = {
     'customer.requests.invite',
     'customer.requests.read.own',
     'customer.requests.select',
+    'customer.requests.update',
     'customer.payments.create',
     'customer.payments.read.own',
     'customer.reviews.create',
