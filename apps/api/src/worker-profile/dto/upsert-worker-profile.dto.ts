@@ -5,6 +5,7 @@ import {
   IsArray,
   IsBoolean,
   IsInt,
+  IsIn,
   IsOptional,
   IsString,
   Max,
@@ -53,6 +54,30 @@ export class UpsertWorkerProfileDto {
   @IsOptional()
   @IsBoolean()
   isAvailable?: boolean;
+
+  @IsOptional()
+  @IsIn(['AVAILABLE_NOW', 'LIMITED_THIS_WEEK', 'NEXT_WEEK', 'UNAVAILABLE'])
+  availabilityStatus?:
+    | 'AVAILABLE_NOW'
+    | 'LIMITED_THIS_WEEK'
+    | 'NEXT_WEEK'
+    | 'UNAVAILABLE';
+
+  @IsOptional()
+  @Transform(({ value }: { value: unknown }) =>
+    Array.isArray(value)
+      ? (value as unknown[]).map((item: unknown) =>
+          typeof item === 'string' ? item.trim() : item,
+        )
+      : value,
+  )
+  @IsArray()
+  @ArrayUnique()
+  @ArrayMaxSize(12)
+  @IsString({ each: true })
+  @MinLength(2, { each: true })
+  @MaxLength(80, { each: true })
+  serviceAreaPreferences?: string[];
 
   @IsOptional()
   @Transform(({ value }: { value: unknown }) =>

@@ -19,9 +19,15 @@ export type WorkerProfile = {
   } | null;
   bio: string | null;
   location: string | null;
+  serviceAreaPreferences: string[];
   hourlyRate: number | null;
   experienceYears: number;
   isAvailable: boolean;
+  availabilityStatus:
+    | "AVAILABLE_NOW"
+    | "LIMITED_THIS_WEEK"
+    | "NEXT_WEEK"
+    | "UNAVAILABLE";
   ratingAvg: string;
   ratingCount: number;
   categories: WorkerProfileCategoryItem[];
@@ -48,9 +54,15 @@ export type UpsertWorkerProfileInput = {
   publicName?: string;
   bio?: string;
   location?: string;
+  serviceAreaPreferences?: string[];
   hourlyRate?: number;
   experienceYears?: number;
   isAvailable?: boolean;
+  availabilityStatus?:
+    | "AVAILABLE_NOW"
+    | "LIMITED_THIS_WEEK"
+    | "NEXT_WEEK"
+    | "UNAVAILABLE";
   categoryIds?: string[];
 };
 

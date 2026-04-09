@@ -30,6 +30,12 @@ type WorkerProfileWithRelations = Prisma.WorkerProfileGetPayload<{
   include: typeof workerProfileInclude;
 }>;
 
+type AvailabilityStatus =
+  | 'AVAILABLE_NOW'
+  | 'LIMITED_THIS_WEEK'
+  | 'NEXT_WEEK'
+  | 'UNAVAILABLE';
+
 @Injectable()
 export class WorkerProfileService {
   constructor(private readonly prisma: PrismaService) {}
@@ -161,17 +167,25 @@ export class WorkerProfileService {
           publicName: dto.publicName?.trim() || null,
           bio: dto.bio?.trim() || null,
           location: dto.location?.trim() || null,
+          serviceAreaPreferences: this.normalizeServiceAreas(
+            dto.serviceAreaPreferences,
+          ),
           hourlyRate: dto.hourlyRate ?? null,
           experienceYears: dto.experienceYears ?? 0,
-          isAvailable: dto.isAvailable ?? true,
+          isAvailable: this.resolveIsAvailable(dto),
+          availabilityStatus: this.resolveAvailabilityStatus(dto),
         },
         update: {
           publicName: dto.publicName?.trim() || null,
           bio: dto.bio?.trim() || null,
           location: dto.location?.trim() || null,
+          serviceAreaPreferences: this.normalizeServiceAreas(
+            dto.serviceAreaPreferences,
+          ),
           hourlyRate: dto.hourlyRate ?? null,
           experienceYears: dto.experienceYears ?? 0,
-          isAvailable: dto.isAvailable ?? true,
+          isAvailable: this.resolveIsAvailable(dto),
+          availabilityStatus: this.resolveAvailabilityStatus(dto),
         },
       });
 
@@ -224,14 +238,32 @@ export class WorkerProfileService {
           ...(dto.location !== undefined
             ? { location: dto.location.trim() || null }
             : {}),
+          ...(dto.serviceAreaPreferences !== undefined
+            ? {
+                serviceAreaPreferences: this.normalizeServiceAreas(
+                  dto.serviceAreaPreferences,
+                ),
+              }
+            : {}),
           ...(dto.hourlyRate !== undefined
             ? { hourlyRate: dto.hourlyRate }
             : {}),
           ...(dto.experienceYears !== undefined
             ? { experienceYears: dto.experienceYears }
             : {}),
+          ...(dto.availabilityStatus !== undefined
+            ? {
+                availabilityStatus: dto.availabilityStatus,
+                isAvailable: dto.availabilityStatus !== 'UNAVAILABLE',
+              }
+            : {}),
           ...(dto.isAvailable !== undefined
-            ? { isAvailable: dto.isAvailable }
+            ? {
+                isAvailable: dto.isAvailable,
+                availabilityStatus: dto.isAvailable
+                  ? 'AVAILABLE_NOW'
+                  : 'UNAVAILABLE',
+              }
             : {}),
         },
       });
@@ -321,9 +353,11 @@ export class WorkerProfileService {
       name: accountName,
       bio: profile.bio,
       location: profile.location,
+      serviceAreaPreferences: profile.serviceAreaPreferences,
       hourlyRate: profile.hourlyRate,
       experienceYears: profile.experienceYears,
       isAvailable: profile.isAvailable,
+      availabilityStatus: profile.availabilityStatus,
       ratingAvg: profile.ratingAvg.toString(),
       ratingCount: profile.ratingCount,
       categories: profile.categories
@@ -338,5 +372,31 @@ export class WorkerProfileService {
       createdAt: profile.createdAt,
       updatedAt: profile.updatedAt,
     };
+  }
+
+  private normalizeServiceAreas(items: string[] | undefined) {
+    return items?.map((item) => item.trim()).filter(Boolean) ?? [];
+  }
+
+  private resolveAvailabilityStatus(
+    dto: UpsertWorkerProfileDto,
+  ): AvailabilityStatus {
+    if (dto.availabilityStatus) {
+      return dto.availabilityStatus;
+    }
+
+    if (dto.isAvailable === false) {
+      return 'UNAVAILABLE';
+    }
+
+    return 'AVAILABLE_NOW';
+  }
+
+  private resolveIsAvailable(dto: UpsertWorkerProfileDto) {
+    if (dto.availabilityStatus) {
+      return dto.availabilityStatus !== 'UNAVAILABLE';
+    }
+
+    return dto.isAvailable ?? true;
   }
 }

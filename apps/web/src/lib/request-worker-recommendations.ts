@@ -37,7 +37,7 @@ type ParsedLocation = {
   subzone: string | null;
 };
 
-type LocationMatch = {
+export type LocationMatch = {
   score: number;
   tier: RecommendationProximityTier;
   label: string;
@@ -206,7 +206,7 @@ function getSharedLocationTokenCount(
   return shared;
 }
 
-function buildLocationMatch(
+export function buildLocationMatch(
   requestLocation: string | null | undefined,
   workerLocation: string | null | undefined,
 ): LocationMatch {

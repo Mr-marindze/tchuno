@@ -33,6 +33,9 @@ export class WorkerProfileDto {
   @ApiProperty({ nullable: true })
   location!: string | null;
 
+  @ApiProperty({ type: String, isArray: true })
+  serviceAreaPreferences!: string[];
+
   @ApiProperty({ nullable: true })
   hourlyRate!: number | null;
 
@@ -41,6 +44,13 @@ export class WorkerProfileDto {
 
   @ApiProperty()
   isAvailable!: boolean;
+
+  @ApiProperty()
+  availabilityStatus!:
+    | 'AVAILABLE_NOW'
+    | 'LIMITED_THIS_WEEK'
+    | 'NEXT_WEEK'
+    | 'UNAVAILABLE';
 
   @ApiProperty()
   ratingAvg!: string;

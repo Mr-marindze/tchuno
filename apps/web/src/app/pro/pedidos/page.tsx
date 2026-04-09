@@ -21,6 +21,10 @@ import {
   ServiceRequest,
   submitProposal,
 } from '@/lib/service-requests';
+import {
+  getMyWorkerProfile,
+  WorkerProfile,
+} from '@/lib/worker-profile';
 
 const invitationStatusLabel: Record<string, string> = {
   SENT: 'Convite enviado',
@@ -53,8 +57,21 @@ function formatCurrencyMzn(value: number): string {
   }).format(value);
 }
 
+function getPriorityTone(priority: 'high' | 'medium' | 'low') {
+  if (priority === 'high') {
+    return 'border-rose-200 bg-rose-50 text-rose-700';
+  }
+
+  if (priority === 'medium') {
+    return 'border-amber-200 bg-amber-50 text-amber-700';
+  }
+
+  return 'border-slate-200 bg-slate-100 text-slate-700';
+}
+
 export default function ProviderRequestsPage() {
   const [accessToken, setAccessToken] = useState<string | null>(null);
+  const [providerProfile, setProviderProfile] = useState<WorkerProfile | null>(null);
   const [requests, setRequests] = useState<ServiceRequest[]>([]);
   const [invitations, setInvitations] = useState<ProviderRequestInvitation[]>([]);
   const [proposals, setProposals] = useState<ProviderProposalFeedItem[]>([]);
@@ -94,12 +111,18 @@ export default function ProviderRequestsPage() {
         }
 
         const token = session.auth.accessToken;
-        const [response, nextInvitations, nextProposals, nextNotifications] =
+        const [
+          response,
+          nextInvitations,
+          nextProposals,
+          nextNotifications,
+          nextProfile,
+        ] =
           await Promise.all([
           listOpenServiceRequests(token, {
             status: 'OPEN',
             page: 1,
-            limit: 30,
+            limit: 80,
           }),
           listMyRequestInvitations(token),
           listMyProviderProposals(token),
@@ -107,6 +130,7 @@ export default function ProviderRequestsPage() {
             page: 1,
             limit: 12,
           }),
+          getMyWorkerProfile(token),
         ]);
 
         if (!active) {
@@ -117,9 +141,11 @@ export default function ProviderRequestsPage() {
           requests: response.data,
           invitations: nextInvitations,
           proposals: nextProposals,
+          providerProfile: nextProfile,
         });
 
         setAccessToken(token);
+        setProviderProfile(nextProfile);
         setRequests(response.data);
         setInvitations(nextInvitations);
         setProposals(nextProposals);
@@ -158,12 +184,18 @@ export default function ProviderRequestsPage() {
       return;
     }
 
-    const [response, nextInvitations, nextProposals, nextNotifications] =
+    const [
+      response,
+      nextInvitations,
+      nextProposals,
+      nextNotifications,
+      nextProfile,
+    ] =
       await Promise.all([
       listOpenServiceRequests(accessToken, {
         status: 'OPEN',
         page: 1,
-        limit: 30,
+        limit: 80,
       }),
       listMyRequestInvitations(accessToken),
       listMyProviderProposals(accessToken),
@@ -171,8 +203,10 @@ export default function ProviderRequestsPage() {
         page: 1,
         limit: 12,
       }),
+      getMyWorkerProfile(accessToken),
     ]);
 
+    setProviderProfile(nextProfile);
     setRequests(response.data);
     setInvitations(nextInvitations);
     setProposals(nextProposals);
@@ -263,8 +297,9 @@ export default function ProviderRequestsPage() {
         requests,
         invitations,
         proposals,
+        providerProfile,
       }),
-    [invitations, proposals, requests],
+    [invitations, proposals, providerProfile, requests],
   );
   const persistedNotifications = useMemo(
     () =>
@@ -277,9 +312,62 @@ export default function ProviderRequestsPage() {
     [notifications],
   );
 
+  const highPriorityCount = useMemo(
+    () =>
+      [...inbox.requestFitById.values()].filter((item) => item.priority === 'high')
+        .length,
+    [inbox.requestFitById],
+  );
+  const localPriorityCount = useMemo(
+    () =>
+      [...inbox.requestFitById.values()].filter((item) =>
+        item.geographicLabel.startsWith('Mesma'),
+      ).length,
+    [inbox.requestFitById],
+  );
+  const profileNeedsTuning = useMemo(
+    () =>
+      !providerProfile ||
+      providerProfile.categories.length === 0 ||
+      (!providerProfile.location &&
+        providerProfile.serviceAreaPreferences.length === 0),
+    [providerProfile],
+  );
+
+  function applySuggestedResponse(requestId: string) {
+    const fit = inbox.requestFitById.get(requestId);
+    if (!fit) {
+      return;
+    }
+
+    if (typeof fit.suggestionPrice === 'number') {
+      setPriceInputByRequest((current) => ({
+        ...current,
+        [requestId]: String(fit.suggestionPrice),
+      }));
+    }
+
+    setCommentInputByRequest((current) => ({
+      ...current,
+      [requestId]: fit.suggestionComment,
+    }));
+    setExpandedRequestId(requestId);
+    setStatus('Sugestao aplicada ao rascunho da proposta.');
+  }
+
   function renderProposalComposer(requestId: string) {
+    const fit = inbox.requestFitById.get(requestId) ?? null;
+
     return (
       <div className='mt-4 space-y-3 rounded-xl border border-slate-200 bg-slate-50 p-3'>
+        {fit ? (
+          <div className='rounded-xl border border-blue-100 bg-blue-50 p-3 text-sm text-blue-800'>
+            <p className='font-semibold'>Resposta assistida</p>
+            <p className='mt-1'>{fit.suggestionReason}</p>
+            <p className='mt-1'>{fit.suggestionComment}</p>
+          </div>
+        ) : null}
+
         <label className='block space-y-1 text-sm text-slate-700'>
           <span>Preço (MZN)</span>
           <input
@@ -321,6 +409,17 @@ export default function ProviderRequestsPage() {
         >
           {saving ? 'A enviar...' : 'Confirmar proposta'}
         </button>
+
+        {fit ? (
+          <button
+            type='button'
+            className='inline-flex items-center rounded-lg border border-slate-300 px-4 py-2 text-sm font-medium text-slate-700 hover:bg-slate-100'
+            onClick={() => applySuggestedResponse(requestId)}
+            disabled={saving}
+          >
+            Usar sugestao assistida
+          </button>
+        ) : null}
       </div>
     );
   }
@@ -334,8 +433,8 @@ export default function ProviderRequestsPage() {
               Inbox do prestador
             </h1>
             <p className='mt-1 text-sm text-slate-600'>
-              Vê primeiro convites diretos, depois pedidos do mercado aberto e o
-              estado das tuas propostas.
+              Vê convites e mercado aberto ordenados por fit real: categoria,
+              disponibilidade, zona e historico recente.
             </p>
           </div>
           <Link
@@ -363,23 +462,57 @@ export default function ProviderRequestsPage() {
               {inbox.pendingInvitations.length}
             </p>
           </article>
+          <article className='rounded-xl border border-rose-200 bg-rose-50 p-3'>
+            <p className='text-xs font-medium uppercase tracking-wide text-rose-700'>
+              Alta prioridade
+            </p>
+            <p className='mt-1 text-lg font-semibold text-rose-700'>
+              {highPriorityCount}
+            </p>
+          </article>
           <article className='rounded-xl border border-blue-200 bg-blue-50 p-3'>
             <p className='text-xs font-medium uppercase tracking-wide text-blue-700'>
-              Em análise
+              Correspondencia local
             </p>
             <p className='mt-1 text-lg font-semibold text-blue-700'>
+              {localPriorityCount}
+            </p>
+          </article>
+          <article className='rounded-xl border border-indigo-200 bg-indigo-50 p-3'>
+            <p className='text-xs font-medium uppercase tracking-wide text-indigo-700'>
+              Em analise
+            </p>
+            <p className='mt-1 text-lg font-semibold text-indigo-700'>
               {inbox.awaitingProposals.length}
             </p>
           </article>
-          <article className='rounded-xl border border-purple-200 bg-purple-50 p-3'>
+          <article className='rounded-xl border border-purple-200 bg-purple-50 p-3 sm:col-span-2'>
             <p className='text-xs font-medium uppercase tracking-wide text-purple-700'>
-              Selecionadas
+              Disponibilidade atual
             </p>
             <p className='mt-1 text-lg font-semibold text-purple-700'>
-              {inbox.selectedProposals.length}
+              {providerProfile
+                ? providerProfile.availabilityStatus === 'AVAILABLE_NOW'
+                  ? 'Disponivel agora'
+                  : providerProfile.availabilityStatus === 'LIMITED_THIS_WEEK'
+                    ? 'Agenda limitada esta semana'
+                    : providerProfile.availabilityStatus === 'NEXT_WEEK'
+                      ? 'Entrada na proxima semana'
+                      : 'Indisponivel'
+                : 'Perfil por completar'}
             </p>
           </article>
         </div>
+
+        {profileNeedsTuning ? (
+          <div className='mt-4 rounded-2xl border border-amber-200 bg-amber-50 p-4 text-sm text-amber-900'>
+            Completa categorias, localizacao e zonas preferidas em{' '}
+            <Link href='/pro/perfil' className='font-semibold underline'>
+              Perfil profissional
+            </Link>{' '}
+            para melhorar o ranking do feed e as sugestoes assistidas.
+          </div>
+        ) : null}
 
         <p className={`mt-4 text-sm ${loading ? 'text-blue-700' : 'text-slate-600'}`}>
           {status}
@@ -434,6 +567,7 @@ export default function ProviderRequestsPage() {
               const ownProposal = invitation.request.proposals?.[0] ?? null;
               const isPending = invitation.status === 'SENT';
               const requestStillOpen = invitation.request.status === 'OPEN';
+              const fit = inbox.requestFitById.get(invitation.request.id) ?? null;
 
               return (
                 <article
@@ -467,6 +601,21 @@ export default function ProviderRequestsPage() {
                             invitation.request.categoryId}
                         </p>
                       </div>
+
+                      {fit ? (
+                        <div className='grid gap-2 text-xs text-slate-600 sm:grid-cols-2 xl:grid-cols-4'>
+                          <span
+                            className={`inline-flex w-fit rounded-full border px-2.5 py-1 font-semibold ${getPriorityTone(
+                              fit.priority,
+                            )}`}
+                          >
+                            {fit.priorityLabel}
+                          </span>
+                          <span>{fit.categoryLabel}</span>
+                          <span>{fit.geographicLabel}</span>
+                          <span>{fit.historyLabel}</span>
+                        </div>
+                      ) : null}
 
                       {ownProposal ? (
                         <p className='text-xs text-emerald-700'>
@@ -510,8 +659,29 @@ export default function ProviderRequestsPage() {
                             : 'Recusar convite'}
                         </button>
                       ) : null}
+                      {fit ? (
+                        <button
+                          type='button'
+                          className='inline-flex items-center rounded-lg border border-blue-300 px-3 py-2 text-sm font-medium text-blue-700 hover:bg-blue-50'
+                          onClick={() => applySuggestedResponse(invitation.request.id)}
+                        >
+                          Usar sugestao
+                        </button>
+                      ) : null}
                     </div>
                   </div>
+
+                  {fit ? (
+                    <div className='mt-4 rounded-xl border border-blue-100 bg-blue-50 p-3 text-sm text-blue-800'>
+                      <p className='font-semibold'>{fit.suggestionReason}</p>
+                      <p className='mt-1'>{fit.suggestionComment}</p>
+                      {typeof fit.suggestionPrice === 'number' ? (
+                        <p className='mt-1'>
+                          Preco sugerido: {formatCurrencyMzn(fit.suggestionPrice)}
+                        </p>
+                      ) : null}
+                    </div>
+                  ) : null}
 
                   {requestStillOpen && expandedRequestId === invitation.request.id
                     ? renderProposalComposer(invitation.request.id)
@@ -547,6 +717,7 @@ export default function ProviderRequestsPage() {
           <div className='mt-4 space-y-3'>
             {inbox.openMarketRequests.map((request) => {
               const isExpanded = expandedRequestId === request.id;
+              const fit = inbox.requestFitById.get(request.id) ?? null;
 
               return (
                 <article
@@ -574,20 +745,58 @@ export default function ProviderRequestsPage() {
                         <p>Categoria: {request.category?.name ?? request.categoryId}</p>
                       </div>
                       <p className='text-xs text-blue-700'>Ainda sem tua proposta.</p>
+                      {fit ? (
+                        <div className='grid gap-2 text-xs text-slate-600 sm:grid-cols-2 xl:grid-cols-4'>
+                          <span
+                            className={`inline-flex w-fit rounded-full border px-2.5 py-1 font-semibold ${getPriorityTone(
+                              fit.priority,
+                            )}`}
+                          >
+                            {fit.priorityLabel}
+                          </span>
+                          <span>{fit.categoryLabel}</span>
+                          <span>{fit.geographicLabel}</span>
+                          <span>{fit.availabilityLabel}</span>
+                        </div>
+                      ) : null}
                     </div>
 
-                    <button
-                      type='button'
-                      className='inline-flex shrink-0 items-center rounded-lg bg-blue-600 px-3 py-2 text-sm font-semibold text-white hover:bg-blue-700'
-                      onClick={() =>
-                        setExpandedRequestId((current) =>
-                          current === request.id ? null : request.id,
-                        )
-                      }
-                    >
-                      {isExpanded ? 'Fechar' : 'Enviar proposta'}
-                    </button>
+                    <div className='flex shrink-0 flex-wrap items-center gap-2'>
+                      <button
+                        type='button'
+                        className='inline-flex items-center rounded-lg bg-blue-600 px-3 py-2 text-sm font-semibold text-white hover:bg-blue-700'
+                        onClick={() =>
+                          setExpandedRequestId((current) =>
+                            current === request.id ? null : request.id,
+                          )
+                        }
+                      >
+                        {isExpanded ? 'Fechar' : 'Enviar proposta'}
+                      </button>
+                      {fit ? (
+                        <button
+                          type='button'
+                          className='inline-flex items-center rounded-lg border border-blue-300 px-3 py-2 text-sm font-medium text-blue-700 hover:bg-blue-50'
+                          onClick={() => applySuggestedResponse(request.id)}
+                        >
+                          Usar sugestao
+                        </button>
+                      ) : null}
+                    </div>
                   </div>
+
+                  {fit ? (
+                    <div className='mt-4 rounded-xl border border-blue-100 bg-blue-50 p-3 text-sm text-blue-800'>
+                      <p className='font-semibold'>{fit.historyLabel}</p>
+                      <p className='mt-1'>{fit.suggestionReason}</p>
+                      <p className='mt-1'>{fit.suggestionComment}</p>
+                      {typeof fit.suggestionPrice === 'number' ? (
+                        <p className='mt-1'>
+                          Preco sugerido: {formatCurrencyMzn(fit.suggestionPrice)}
+                        </p>
+                      ) : null}
+                    </div>
+                  ) : null}
 
                   {isExpanded ? renderProposalComposer(request.id) : null}
                 </article>

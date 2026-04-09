@@ -67,9 +67,11 @@ model WorkerProfile {
   publicName      String?
   bio             String?
   location        String?
+  serviceAreaPreferences String[]         @default([])
   hourlyRate      Int?
   experienceYears Int                     @default(0)
   isAvailable     Boolean                 @default(true)
+  availabilityStatus WorkerAvailabilityStatus @default(AVAILABLE_NOW)
   ratingAvg       Decimal                 @default(0) @db.Decimal(3, 2)
   ratingCount     Int                     @default(0)
   createdAt       DateTime                @default(now())
@@ -522,6 +524,13 @@ enum UserNotificationTone {
   SUCCESS
   INFO
   MUTED
+}
+
+enum WorkerAvailabilityStatus {
+  AVAILABLE_NOW
+  LIMITED_THIS_WEEK
+  NEXT_WEEK
+  UNAVAILABLE
 }
 
 enum UserRole {

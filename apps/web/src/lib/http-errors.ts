@@ -99,6 +99,8 @@ const fieldLabels: Record<string, string> = {
   content: "Mensagem",
   bio: "Bio",
   location: "Localização",
+  serviceAreaPreferences: "Zonas preferidas",
+  availabilityStatus: "Disponibilidade",
   hourlyRate: "Tarifa por hora",
   experienceYears: "Anos de experiência",
   categoryIds: "Categorias",
