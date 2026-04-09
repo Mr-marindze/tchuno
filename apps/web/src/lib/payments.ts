@@ -68,6 +68,14 @@ export type RefundRequest = {
   failureReason: string | null;
   createdAt: string;
   updatedAt: string;
+  requestedByUser?: {
+    id: string;
+    name: string | null;
+  } | null;
+  approvedByUser?: {
+    id: string;
+    name: string | null;
+  } | null;
 };
 
 export type Payout = {
@@ -121,6 +129,28 @@ export type JobFinancialState = {
   jobStatus: string;
   paymentState: string;
   intents: PaymentIntent[];
+  refunds: RefundRequest[];
+  cancellation: {
+    canceledAt: string | null;
+    canceledBy: string | null;
+    cancelReason: string | null;
+  };
+  refundSummary: {
+    stage: 'BEFORE_PAYMENT' | 'PRE_START' | 'IN_PROGRESS' | 'POST_COMPLETION';
+    stageLabel: string;
+    hasPaidDeposit: boolean;
+    paidAmount: number;
+    refundedAmount: number;
+    remainingRefundableAmount: number;
+    hasActiveRefund: boolean;
+    canRequestRefund: boolean;
+    canCancelJob: boolean;
+    suggestedRefundAmount: number | null;
+    suggestedRefundLabel: string | null;
+    disputeWindowEndsAt: string | null;
+    withinDisputeWindow: boolean;
+    myPendingRefundRequestId: string | null;
+  };
 };
 
 export type AdminPaymentsOverview = {
@@ -244,6 +274,48 @@ export async function getJobFinancialState(
   }
 
   return (await response.json()) as JobFinancialState;
+}
+
+export async function createJobRefundRequest(
+  accessToken: string,
+  jobId: string,
+  input: {
+    reason: string;
+    amount?: number;
+  },
+): Promise<RefundRequest> {
+  const response = await fetch(`${API_URL}/payments/jobs/${jobId}/refund-requests`, {
+    method: 'POST',
+    headers: {
+      Authorization: `Bearer ${accessToken}`,
+      'Content-Type': 'application/json',
+    },
+    body: JSON.stringify(input),
+  });
+
+  if (!response.ok) {
+    throw new Error(await readApiError(response));
+  }
+
+  return (await response.json()) as RefundRequest;
+}
+
+export async function cancelMyRefundRequest(
+  accessToken: string,
+  refundRequestId: string,
+): Promise<RefundRequest> {
+  const response = await fetch(`${API_URL}/payments/refunds/${refundRequestId}/cancel`, {
+    method: 'POST',
+    headers: {
+      Authorization: `Bearer ${accessToken}`,
+    },
+  });
+
+  if (!response.ok) {
+    throw new Error(await readApiError(response));
+  }
+
+  return (await response.json()) as RefundRequest;
 }
 
 export async function getAdminPaymentsOverview(
@@ -419,6 +491,59 @@ export async function createAdminRefund(
   options?: AdminRequestOptions,
 ): Promise<RefundRequest> {
   const response = await fetch(`${API_URL}/admin/payments/refunds`, {
+    method: 'POST',
+    headers: {
+      Authorization: `Bearer ${accessToken}`,
+      'Content-Type': 'application/json',
+      ...(options?.reauthToken
+        ? {
+            'x-reauth-token': options.reauthToken,
+          }
+        : {}),
+    },
+    body: JSON.stringify(input),
+  });
+
+  if (!response.ok) {
+    throw toApiError(await parseApiError(response));
+  }
+
+  return (await response.json()) as RefundRequest;
+}
+
+export async function approveAdminRefund(
+  accessToken: string,
+  refundRequestId: string,
+  options?: AdminRequestOptions,
+): Promise<RefundRequest> {
+  const response = await fetch(`${API_URL}/admin/payments/refunds/${refundRequestId}/approve`, {
+    method: 'POST',
+    headers: {
+      Authorization: `Bearer ${accessToken}`,
+      ...(options?.reauthToken
+        ? {
+            'x-reauth-token': options.reauthToken,
+          }
+        : {}),
+    },
+  });
+
+  if (!response.ok) {
+    throw toApiError(await parseApiError(response));
+  }
+
+  return (await response.json()) as RefundRequest;
+}
+
+export async function rejectAdminRefund(
+  accessToken: string,
+  refundRequestId: string,
+  input: {
+    reason: string;
+  },
+  options?: AdminRequestOptions,
+): Promise<RefundRequest> {
+  const response = await fetch(`${API_URL}/admin/payments/refunds/${refundRequestId}/reject`, {
     method: 'POST',
     headers: {
       Authorization: `Bearer ${accessToken}`,

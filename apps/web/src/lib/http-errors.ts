@@ -31,6 +31,34 @@ const humanMessages: Record<string, string> = {
     "Não tens permissão para atualizar este job.",
   "You are not allowed to access this job":
     "Não tens permissão para aceder a este job.",
+  "Notification not found": "Notificação não encontrada.",
+  "You are not allowed to access this notification":
+    "Não tens permissão para aceder a esta notificação.",
+  "Conversation participants are not available":
+    "Esta conversa ainda não tem participantes válidos.",
+  "Canceled jobs are no longer open for new messages":
+    "Este job foi cancelado e já não aceita novas mensagens.",
+  "cancelReason is required when status=CANCELED":
+    "Indica o motivo do cancelamento.",
+  "cancelReason can only be provided when status=CANCELED":
+    "O motivo do cancelamento só pode ser enviado quando o estado passa para cancelado.",
+  "Only paid jobs can create refund requests":
+    "Só jobs com sinal pago podem abrir pedido de refund ou disputa.",
+  "Only paid payment intents can be refunded":
+    "Só pagamentos já confirmados podem ser reembolsados.",
+  "There is already an active refund request for this job":
+    "Já existe um pedido de refund ou disputa em aberto para este job.",
+  "This payment has no refundable balance left":
+    "Este pagamento já não tem saldo reembolsável disponível.",
+  "Refund request not found": "Pedido de refund não encontrado.",
+  "You are not allowed to cancel this refund request":
+    "Não tens permissão para cancelar este pedido de refund.",
+  "Only pending refund requests can be canceled":
+    "Só pedidos pendentes podem ser cancelados.",
+  "Only pending refund requests can be approved":
+    "Só pedidos pendentes podem ser aprovados.",
+  "Only pending refund requests can be rejected":
+    "Só pedidos pendentes podem ser recusados.",
   "Unable to generate a valid slug":
     "Não foi possível gerar um slug válido para a categoria.",
   "scheduledFor must be in the future": "A data agendada deve ser futura.",
@@ -60,6 +88,7 @@ const fieldLabels: Record<string, string> = {
   jobId: "Job",
   rating: "Rating",
   comment: "Comentário",
+  content: "Mensagem",
   bio: "Bio",
   location: "Localização",
   hourlyRate: "Tarifa por hora",

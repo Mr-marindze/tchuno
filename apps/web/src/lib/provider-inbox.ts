@@ -3,6 +3,15 @@ import {
   ProviderRequestInvitation,
   ServiceRequest,
 } from '@/lib/service-requests';
+import type {
+  InboxNotification as ProviderInboxNotification,
+  InboxNotificationTone as ProviderInboxNotificationTone,
+} from '@/lib/notifications';
+
+export type {
+  ProviderInboxNotification,
+  ProviderInboxNotificationTone,
+};
 
 export type ProviderInboxNotificationKind =
   | 'pending_invitations'
@@ -10,22 +19,6 @@ export type ProviderInboxNotificationKind =
   | 'awaiting_proposals'
   | 'open_market_requests'
   | 'rejected_proposals';
-
-export type ProviderInboxNotificationTone =
-  | 'attention'
-  | 'success'
-  | 'info'
-  | 'muted';
-
-export type ProviderInboxNotification = {
-  id: ProviderInboxNotificationKind;
-  kind: ProviderInboxNotificationKind;
-  title: string;
-  description: string;
-  href: string;
-  hrefLabel: string;
-  tone: ProviderInboxNotificationTone;
-};
 
 type ProviderInboxInput = {
   requests: ServiceRequest[];

@@ -5,6 +5,11 @@ import { useEffect, useMemo, useState } from 'react';
 import { ProviderInboxNotifications } from '@/components/provider/provider-inbox-notifications';
 import { ensureSession } from '@/lib/auth';
 import { humanizeUnknownError } from '@/lib/http-errors';
+import {
+  listMyNotifications,
+  markAllNotificationsRead,
+} from '@/lib/notifications';
+import type { InboxNotification } from '@/lib/notifications';
 import { buildProviderInboxModel } from '@/lib/provider-inbox';
 import {
   listMyProviderProposals,
@@ -55,7 +60,11 @@ function proposalOriginClass(item: ProviderProposalFeedItem): string {
 
 export default function ProviderProposalsPage() {
   const [proposals, setProposals] = useState<ProviderProposalFeedItem[]>([]);
+  const [accessToken, setAccessToken] = useState<string | null>(null);
+  const [notifications, setNotifications] = useState<InboxNotification[]>([]);
+  const [notificationUnreadCount, setNotificationUnreadCount] = useState(0);
   const [loading, setLoading] = useState(true);
+  const [markingNotificationsRead, setMarkingNotificationsRead] = useState(false);
   const [status, setStatus] = useState('A carregar propostas...');
 
   useEffect(() => {
@@ -76,13 +85,22 @@ export default function ProviderProposalsPage() {
         }
 
         const token = session.auth.accessToken;
-        const nextProposals = await listMyProviderProposals(token);
+        const [nextProposals, nextNotifications] = await Promise.all([
+          listMyProviderProposals(token),
+          listMyNotifications(token, {
+            page: 1,
+            limit: 12,
+          }),
+        ]);
 
         if (!active) {
           return;
         }
 
+        setAccessToken(token);
         setProposals(nextProposals);
+        setNotifications(nextNotifications.data);
+        setNotificationUnreadCount(nextNotifications.unreadCount);
         const inbox = buildProviderInboxModel({
           requests: [],
           invitations: [],
@@ -102,6 +120,8 @@ export default function ProviderProposalsPage() {
         if (active) {
           setStatus(humanizeUnknownError(error, 'Falha ao carregar propostas.'));
           setProposals([]);
+          setNotifications([]);
+          setNotificationUnreadCount(0);
         }
       } finally {
         if (active) {
@@ -126,7 +146,43 @@ export default function ProviderProposalsPage() {
       }),
     [proposals],
   );
+  const persistedNotifications = useMemo(
+    () =>
+      notifications.filter(
+        (item) =>
+          item.kind === 'PROPOSAL_SELECTED' ||
+          item.kind === 'PROPOSAL_REJECTED' ||
+          item.kind === 'JOB_MESSAGE_RECEIVED',
+      ),
+    [notifications],
+  );
   const total = useMemo(() => proposals.length, [proposals]);
+
+  async function handleMarkAllNotificationsRead() {
+    if (!accessToken) {
+      setStatus('Sessão inválida. Faz login novamente.');
+      return;
+    }
+
+    setMarkingNotificationsRead(true);
+
+    try {
+      await markAllNotificationsRead(accessToken);
+      const nextNotifications = await listMyNotifications(accessToken, {
+        page: 1,
+        limit: 12,
+      });
+      setNotifications(nextNotifications.data);
+      setNotificationUnreadCount(nextNotifications.unreadCount);
+      setStatus('Notificações marcadas como lidas.');
+    } catch (error) {
+      setStatus(
+        humanizeUnknownError(error, 'Falha ao atualizar notificações.'),
+      );
+    } finally {
+      setMarkingNotificationsRead(false);
+    }
+  }
 
   return (
     <main className='space-y-4'>
@@ -191,14 +247,26 @@ export default function ProviderProposalsPage() {
       </section>
 
       <ProviderInboxNotifications
-        title='Notificações simples'
-        subtitle='Estados importantes das tuas propostas dentro do fluxo atual.'
-        items={inbox.notifications.filter((item) =>
-          ['selected_proposals', 'awaiting_proposals', 'rejected_proposals'].includes(
-            item.kind,
-          ),
-        )}
-        emptyLabel='Sem atualizações novas nas tuas propostas.'
+        title='Notificações da inbox'
+        subtitle='Estas notificações já são persistidas e mantêm histórico de leitura.'
+        items={persistedNotifications}
+        emptyLabel='Sem atualizações novas na tua inbox persistida.'
+        action={
+          notificationUnreadCount > 0 ? (
+            <button
+              type='button'
+              className='inline-flex items-center rounded-lg border border-slate-300 px-3 py-2 text-sm font-medium text-slate-700 hover:bg-slate-100 disabled:opacity-60'
+              onClick={() => {
+                void handleMarkAllNotificationsRead();
+              }}
+              disabled={markingNotificationsRead}
+            >
+              {markingNotificationsRead
+                ? 'A atualizar...'
+                : `Marcar ${notificationUnreadCount} como lidas`}
+            </button>
+          ) : null
+        }
       />
 
       <ProposalSection

@@ -4,6 +4,7 @@ import Link from 'next/link';
 import { useParams, useRouter } from 'next/navigation';
 import { useEffect, useMemo, useState } from 'react';
 import { formatRatingValue } from '@/components/dashboard/dashboard-formatters';
+import { JobProtectionPanel } from '@/components/payments/job-protection-panel';
 import { ensureSession } from '@/lib/auth';
 import { humanizeUnknownError } from '@/lib/http-errors';
 import { getJobById, JobDetails } from '@/lib/jobs';
@@ -692,11 +693,11 @@ export default function OrderDetailsPage() {
                     Sugestões
                   </p>
                   <h2 className='mt-2 text-lg font-semibold text-slate-900'>
-                    Profissionais próximos de ti
+                    Profissionais sugeridos para a tua zona
                   </h2>
                   <p className='mt-1 max-w-3xl text-sm text-slate-600'>
                     {request.location
-                      ? 'Usamos a localização do teu pedido para dar prioridade a perfis da mesma zona ou de zonas próximas. Quando não há correspondência suficiente, alargamos a procura.'
+                      ? 'Usamos a localidade do teu pedido para dar prioridade a perfis da mesma cidade, zona ou áreas próximas. Quando não há correspondência suficiente, alargamos a procura.'
                       : 'O teu pedido ainda não tem localização suficiente para medir proximidade. Por agora mostramos perfis relevantes por área, reputação e disponibilidade.'}
                   </p>
                 </div>
@@ -789,7 +790,7 @@ export default function OrderDetailsPage() {
                 recommendedWorkers.length === 0 ? (
                   <div className='mt-4 rounded-2xl border border-dashed border-slate-300 bg-slate-50 p-4 text-sm text-slate-600'>
                     {request.location
-                      ? 'Ainda não encontrámos perfis da mesma zona ou de zonas próximas. Continuamos a procurar dentro desta área.'
+                      ? 'Ainda não encontrámos perfis da mesma cidade, zona ou áreas próximas. Continuamos a procurar dentro desta área.'
                       : 'Ainda não temos localização suficiente no pedido. Continuamos a mostrar perfis relevantes desta área.'}
                   </div>
                 ) : (
@@ -1111,6 +1112,27 @@ export default function OrderDetailsPage() {
               </p>
             </div>
           </section>
+
+          {request.job && financial ? (
+            <JobProtectionPanel
+              accessToken={accessToken ?? ''}
+              jobId={request.job.id}
+              financial={financial}
+              viewerRole='customer'
+              onRefresh={async () => {
+                if (!accessToken) {
+                  return;
+                }
+
+                await loadDetails(accessToken);
+              }}
+              onStatusChange={setStatus}
+              showOpenRequestLink={{
+                href: `/app/mensagens?job=${request.job.id}`,
+                label: 'Abrir mensagens do job',
+              }}
+            />
+          ) : null}
 
           {request.job?.status === 'COMPLETED' ? (
             <section

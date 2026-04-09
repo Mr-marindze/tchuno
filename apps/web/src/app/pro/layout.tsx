@@ -13,6 +13,7 @@ export default function ProviderLayout({
       items={[
         { href: '/pro/pedidos', label: 'Pedidos' },
         { href: '/pro/propostas', label: 'Propostas' },
+        { href: '/pro/mensagens', label: 'Mensagens' },
         { href: '/pro/ganhos', label: 'Ganhos' },
         { href: '/pro/perfil', label: 'Perfil' },
       ]}

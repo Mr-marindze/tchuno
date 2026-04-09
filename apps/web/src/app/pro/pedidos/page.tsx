@@ -5,6 +5,11 @@ import { useEffect, useMemo, useState } from 'react';
 import { ProviderInboxNotifications } from '@/components/provider/provider-inbox-notifications';
 import { ensureSession } from '@/lib/auth';
 import { humanizeUnknownError } from '@/lib/http-errors';
+import {
+  listMyNotifications,
+  markAllNotificationsRead,
+} from '@/lib/notifications';
+import type { InboxNotification } from '@/lib/notifications';
 import { buildProviderInboxModel } from '@/lib/provider-inbox';
 import {
   declineRequestInvitation,
@@ -53,6 +58,8 @@ export default function ProviderRequestsPage() {
   const [requests, setRequests] = useState<ServiceRequest[]>([]);
   const [invitations, setInvitations] = useState<ProviderRequestInvitation[]>([]);
   const [proposals, setProposals] = useState<ProviderProposalFeedItem[]>([]);
+  const [notifications, setNotifications] = useState<InboxNotification[]>([]);
+  const [notificationUnreadCount, setNotificationUnreadCount] = useState(0);
   const [expandedRequestId, setExpandedRequestId] = useState<string | null>(null);
   const [priceInputByRequest, setPriceInputByRequest] = useState<
     Record<string, string>
@@ -65,6 +72,7 @@ export default function ProviderRequestsPage() {
   const [decliningInvitationId, setDecliningInvitationId] = useState<string | null>(
     null,
   );
+  const [markingNotificationsRead, setMarkingNotificationsRead] = useState(false);
   const [status, setStatus] = useState('A carregar pedidos disponíveis...');
 
   useEffect(() => {
@@ -86,7 +94,8 @@ export default function ProviderRequestsPage() {
         }
 
         const token = session.auth.accessToken;
-        const [response, nextInvitations, nextProposals] = await Promise.all([
+        const [response, nextInvitations, nextProposals, nextNotifications] =
+          await Promise.all([
           listOpenServiceRequests(token, {
             status: 'OPEN',
             page: 1,
@@ -94,6 +103,10 @@ export default function ProviderRequestsPage() {
           }),
           listMyRequestInvitations(token),
           listMyProviderProposals(token),
+          listMyNotifications(token, {
+            page: 1,
+            limit: 12,
+          }),
         ]);
 
         if (!active) {
@@ -110,6 +123,8 @@ export default function ProviderRequestsPage() {
         setRequests(response.data);
         setInvitations(nextInvitations);
         setProposals(nextProposals);
+        setNotifications(nextNotifications.data);
+        setNotificationUnreadCount(nextNotifications.unreadCount);
         setStatus(
           inbox.pendingInvitations.length > 0 || inbox.openMarketRequests.length > 0
             ? `${inbox.pendingInvitations.length} convite(s) e ${inbox.openMarketRequests.length} pedido(s) no mercado aberto.`
@@ -121,6 +136,8 @@ export default function ProviderRequestsPage() {
           setRequests([]);
           setInvitations([]);
           setProposals([]);
+          setNotifications([]);
+          setNotificationUnreadCount(0);
         }
       } finally {
         if (active) {
@@ -141,7 +158,8 @@ export default function ProviderRequestsPage() {
       return;
     }
 
-    const [response, nextInvitations, nextProposals] = await Promise.all([
+    const [response, nextInvitations, nextProposals, nextNotifications] =
+      await Promise.all([
       listOpenServiceRequests(accessToken, {
         status: 'OPEN',
         page: 1,
@@ -149,11 +167,43 @@ export default function ProviderRequestsPage() {
       }),
       listMyRequestInvitations(accessToken),
       listMyProviderProposals(accessToken),
+      listMyNotifications(accessToken, {
+        page: 1,
+        limit: 12,
+      }),
     ]);
 
     setRequests(response.data);
     setInvitations(nextInvitations);
     setProposals(nextProposals);
+    setNotifications(nextNotifications.data);
+    setNotificationUnreadCount(nextNotifications.unreadCount);
+  }
+
+  async function handleMarkAllNotificationsRead() {
+    if (!accessToken) {
+      setStatus('Sessão inválida. Faz login novamente.');
+      return;
+    }
+
+    setMarkingNotificationsRead(true);
+
+    try {
+      await markAllNotificationsRead(accessToken);
+      const nextNotifications = await listMyNotifications(accessToken, {
+        page: 1,
+        limit: 12,
+      });
+      setNotifications(nextNotifications.data);
+      setNotificationUnreadCount(nextNotifications.unreadCount);
+      setStatus('Notificações marcadas como lidas.');
+    } catch (error) {
+      setStatus(
+        humanizeUnknownError(error, 'Falha ao atualizar notificações.'),
+      );
+    } finally {
+      setMarkingNotificationsRead(false);
+    }
   }
 
   async function handleSubmitProposal(requestId: string) {
@@ -215,6 +265,16 @@ export default function ProviderRequestsPage() {
         proposals,
       }),
     [invitations, proposals, requests],
+  );
+  const persistedNotifications = useMemo(
+    () =>
+      notifications.filter(
+        (item) =>
+          item.kind === 'REQUEST_INVITATION_RECEIVED' ||
+          item.kind === 'PROPOSAL_SELECTED' ||
+          item.kind === 'JOB_MESSAGE_RECEIVED',
+      ),
+    [notifications],
   );
 
   function renderProposalComposer(requestId: string) {
@@ -328,11 +388,25 @@ export default function ProviderRequestsPage() {
 
       <ProviderInboxNotifications
         title='Atualizações importantes'
-        subtitle='Eventos que pedem atenção agora e oportunidades que merecem resposta.'
-        items={inbox.notifications.filter(
-          (item) => item.kind !== 'rejected_proposals',
-        )}
-        emptyLabel='Sem alertas novos. Quando houver convites, propostas selecionadas ou pedidos relevantes, eles aparecem aqui.'
+        subtitle='Estas notificações já vêm de uma entidade persistida com histórico e estado de leitura.'
+        items={persistedNotifications}
+        emptyLabel='Sem alertas novos na tua inbox persistida.'
+        action={
+          notificationUnreadCount > 0 ? (
+            <button
+              type='button'
+              className='inline-flex items-center rounded-lg border border-slate-300 px-3 py-2 text-sm font-medium text-slate-700 hover:bg-slate-100 disabled:opacity-60'
+              onClick={() => {
+                void handleMarkAllNotificationsRead();
+              }}
+              disabled={markingNotificationsRead}
+            >
+              {markingNotificationsRead
+                ? 'A atualizar...'
+                : `Marcar ${notificationUnreadCount} como lidas`}
+            </button>
+          ) : null
+        }
       />
 
       {invitations.length > 0 ? (

@@ -6,6 +6,7 @@ import { confirmReauth, ensureSession } from '@/lib/auth';
 import { humanizeUnknownError, ReauthRequiredError } from '@/lib/http-errors';
 import {
   AdminPaymentsOverview,
+  approveAdminRefund,
   approveAdminPayout,
   createAdminPayout,
   createAdminRefund,
@@ -20,6 +21,7 @@ import {
   processAdminPayout,
   reconcileAdminPendingCharges,
   reconcileAdminTransaction,
+  rejectAdminRefund,
   RefundRequest,
   releaseAdminFunds,
 } from '@/lib/payments';
@@ -307,6 +309,74 @@ export default function AdminPaymentsPage() {
       await loadDashboard(accessToken);
     } catch (error) {
       setStatus(humanizeUnknownError(error, 'Falha ao criar refund.'));
+    } finally {
+      setRunningCriticalAction(false);
+    }
+  }
+
+  async function handleApproveRefund(refundId: string) {
+    if (!accessToken) {
+      setStatus('Sessão inválida. Faz login novamente.');
+      return;
+    }
+
+    setRunningCriticalAction(true);
+    setStatus(`A aprovar refund ${refundId.slice(0, 8)}...`);
+
+    try {
+      await runCriticalAdminAction({
+        purpose: 'admin.payments.refund',
+        execute: (reauthToken) =>
+          approveAdminRefund(accessToken, refundId, { reauthToken }),
+      });
+      setStatus(`Refund ${refundId.slice(0, 8)} aprovado.`);
+      await loadDashboard(accessToken);
+    } catch (error) {
+      setStatus(humanizeUnknownError(error, 'Falha ao aprovar refund.'));
+    } finally {
+      setRunningCriticalAction(false);
+    }
+  }
+
+  async function handleRejectRefund(refundId: string) {
+    if (!accessToken) {
+      setStatus('Sessão inválida. Faz login novamente.');
+      return;
+    }
+
+    if (typeof window === 'undefined') {
+      setStatus('Não foi possível recolher o motivo da recusa.');
+      return;
+    }
+
+    const reason = window.prompt(
+      'Indica o motivo da recusa deste pedido de refund:',
+      'Pedido recusado após análise operacional.',
+    );
+
+    if (!reason || reason.trim().length < 3) {
+      setStatus('A recusa precisa de um motivo com pelo menos 3 caracteres.');
+      return;
+    }
+
+    setRunningCriticalAction(true);
+    setStatus(`A recusar refund ${refundId.slice(0, 8)}...`);
+
+    try {
+      await runCriticalAdminAction({
+        purpose: 'admin.payments.refund',
+        execute: (reauthToken) =>
+          rejectAdminRefund(
+            accessToken,
+            refundId,
+            { reason: reason.trim() },
+            { reauthToken },
+          ),
+      });
+      setStatus(`Refund ${refundId.slice(0, 8)} recusado.`);
+      await loadDashboard(accessToken);
+    } catch (error) {
+      setStatus(humanizeUnknownError(error, 'Falha ao recusar refund.'));
     } finally {
       setRunningCriticalAction(false);
     }
@@ -732,7 +802,13 @@ export default function AdminPaymentsPage() {
       {activeTab === 'refunds' ? (
         <section className='space-y-4'>
           <article className='rounded-2xl border border-slate-200 bg-white p-4 shadow-sm'>
-            <h2 className='text-lg font-semibold text-slate-900'>Criar refund</h2>
+            <h2 className='text-lg font-semibold text-slate-900'>
+              Criar refund manual
+            </h2>
+            <p className='mt-1 text-sm text-slate-600'>
+              Usa este bloco para exceções operacionais. Os pedidos vindos do
+              produto aparecem abaixo para aprovação ou recusa.
+            </p>
             <div className='mt-3 grid gap-3 sm:grid-cols-3'>
               <label className='space-y-1 text-sm text-slate-700'>
                 <span>Payment intent</span>
@@ -810,6 +886,22 @@ export default function AdminPaymentsPage() {
                         <p>
                           <strong>Motivo:</strong> {refund.reason}
                         </p>
+                        <p>
+                          <strong>Pedido por:</strong>{' '}
+                          {refund.requestedByUser?.name ?? refund.requestedByUserId.slice(0, 10)}
+                        </p>
+                        {refund.approvedByUserId ? (
+                          <p>
+                            <strong>Decidido por:</strong>{' '}
+                            {refund.approvedByUser?.name ??
+                              refund.approvedByUserId.slice(0, 10)}
+                          </p>
+                        ) : null}
+                        {refund.failureReason ? (
+                          <p className='text-rose-700'>
+                            <strong>Nota:</strong> {refund.failureReason}
+                          </p>
+                        ) : null}
                       </div>
                       <span
                         className={`inline-flex w-fit rounded-full px-2.5 py-1 text-xs font-semibold ${statusBadgeClass(refund.status)}`}
@@ -817,6 +909,31 @@ export default function AdminPaymentsPage() {
                         {refund.status}
                       </span>
                     </div>
+
+                    {refund.status === 'PENDING' ? (
+                      <div className='mt-3 flex flex-wrap gap-2'>
+                        <button
+                          type='button'
+                          className='inline-flex items-center rounded-lg bg-slate-900 px-3 py-1.5 text-xs font-semibold text-white hover:bg-black disabled:opacity-60'
+                          onClick={() => {
+                            void handleApproveRefund(refund.id);
+                          }}
+                          disabled={runningCriticalAction}
+                        >
+                          Aprovar e processar
+                        </button>
+                        <button
+                          type='button'
+                          className='inline-flex items-center rounded-lg border border-slate-300 px-3 py-1.5 text-xs font-medium text-slate-700 hover:bg-slate-100 disabled:opacity-60'
+                          onClick={() => {
+                            void handleRejectRefund(refund.id);
+                          }}
+                          disabled={runningCriticalAction}
+                        >
+                          Recusar
+                        </button>
+                      </div>
+                    ) : null}
                   </article>
                 ))}
               </div>

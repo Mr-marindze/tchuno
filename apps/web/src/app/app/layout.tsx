@@ -12,6 +12,7 @@ export default function CustomerLayout({
       title='Tchuno Cliente'
       items={[
         { href: '/app/pedidos', label: 'Pedidos' },
+        { href: '/app/mensagens', label: 'Mensagens' },
         { href: '/app/pagamentos', label: 'Pagamentos' },
         { href: '/app/perfil', label: 'Perfil' },
       ]}
