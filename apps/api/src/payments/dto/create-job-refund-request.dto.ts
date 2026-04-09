@@ -1,6 +1,8 @@
 import { Type } from 'class-transformer';
 import {
+  ArrayMaxSize,
   IsInt,
+  IsArray,
   IsOptional,
   IsString,
   Max,
@@ -21,4 +23,11 @@ export class CreateJobRefundRequestDto {
   @MinLength(3)
   @MaxLength(240)
   reason!: string;
+
+  @IsOptional()
+  @IsArray()
+  @ArrayMaxSize(12)
+  @IsString({ each: true })
+  @MaxLength(240, { each: true })
+  evidenceItems?: string[];
 }

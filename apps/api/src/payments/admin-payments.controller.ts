@@ -30,6 +30,7 @@ import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
 import { AdminActionAuditInterceptor } from '../auth/interceptors/admin-action-audit.interceptor';
 import { CreatePayoutDto } from './dto/create-payout.dto';
 import { CreateRefundRequestDto } from './dto/create-refund-request.dto';
+import { ApproveRefundRequestDto } from './dto/approve-refund-request.dto';
 import { ListPaymentsQueryDto } from './dto/list-payments-query.dto';
 import { ProcessPayoutDto } from './dto/process-payout.dto';
 import { RejectRefundRequestDto } from './dto/reject-refund-request.dto';
@@ -127,8 +128,12 @@ export class AdminPaymentsController {
   @ApiNotFoundResponse({ type: ErrorResponseDto })
   @RequirePermissions('admin.payments.manage')
   @RequireReauth('admin.payments.refund')
-  approveRefund(@Req() req: AdminRequest, @Param('id') id: string) {
-    return this.paymentsService.adminApproveRefund(req.user.sub, id);
+  approveRefund(
+    @Req() req: AdminRequest,
+    @Param('id') id: string,
+    @Body() dto: ApproveRefundRequestDto,
+  ) {
+    return this.paymentsService.adminApproveRefund(req.user.sub, id, dto);
   }
 
   @Post('refunds/:id/reject')

@@ -22,6 +22,7 @@ import { PaymentsModule } from './payments/payments.module';
 import { PrismaModule } from './prisma/prisma.module';
 import { ReviewsModule } from './reviews/reviews.module';
 import { ServiceRequestsModule } from './service-requests/service-requests.module';
+import { SupportOpsModule } from './support-ops/support-ops.module';
 import { TrackingModule } from './tracking/tracking.module';
 import { TrustSafetyModule } from './trust-safety/trust-safety.module';
 import { WorkerProfileModule } from './worker-profile/worker-profile.module';
@@ -60,6 +61,7 @@ const throttlerLimit = Number.isFinite(resolvedThrottleLimit)
     PaymentsModule,
     ReviewsModule,
     ServiceRequestsModule,
+    SupportOpsModule,
     TrackingModule,
     TrustSafetyModule,
     WorkerProfileModule,

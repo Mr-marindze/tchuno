@@ -61,6 +61,8 @@ export type RefundRequest = {
   amount: number;
   currency: string;
   reason: string;
+  evidenceItems: string[];
+  decisionNote: string | null;
   status: string;
   provider: 'INTERNAL' | 'MPESA' | 'EMOLA' | 'MKESH' | 'BANK_TRANSFER' | 'MANUAL';
   providerReference: string | null;
@@ -282,6 +284,7 @@ export async function createJobRefundRequest(
   input: {
     reason: string;
     amount?: number;
+    evidenceItems?: string[];
   },
 ): Promise<RefundRequest> {
   const response = await fetch(`${API_URL}/payments/jobs/${jobId}/refund-requests`, {
@@ -487,6 +490,7 @@ export async function createAdminRefund(
     paymentIntentId: string;
     reason: string;
     amount?: number;
+    evidenceItems?: string[];
   },
   options?: AdminRequestOptions,
 ): Promise<RefundRequest> {
@@ -514,18 +518,23 @@ export async function createAdminRefund(
 export async function approveAdminRefund(
   accessToken: string,
   refundRequestId: string,
+  input?: {
+    decisionNote?: string;
+  },
   options?: AdminRequestOptions,
 ): Promise<RefundRequest> {
   const response = await fetch(`${API_URL}/admin/payments/refunds/${refundRequestId}/approve`, {
     method: 'POST',
     headers: {
       Authorization: `Bearer ${accessToken}`,
+      'Content-Type': 'application/json',
       ...(options?.reauthToken
         ? {
             'x-reauth-token': options.reauthToken,
           }
         : {}),
     },
+    body: JSON.stringify(input ?? {}),
   });
 
   if (!response.ok) {
@@ -540,6 +549,7 @@ export async function rejectAdminRefund(
   refundRequestId: string,
   input: {
     reason: string;
+    decisionNote?: string;
   },
   options?: AdminRequestOptions,
 ): Promise<RefundRequest> {

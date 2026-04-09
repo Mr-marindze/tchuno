@@ -61,6 +61,14 @@ function refundStatusClass(status: string) {
   return 'bg-slate-100 text-slate-700';
 }
 
+function parseEvidenceItems(value: string): string[] {
+  return value
+    .split('\n')
+    .map((item) => item.trim())
+    .filter((item, index, array) => item.length > 0 && array.indexOf(item) === index)
+    .slice(0, 12);
+}
+
 function stageNote(financial: JobFinancialState) {
   if (!financial.refundSummary.hasPaidDeposit) {
     return 'Ainda não existe sinal pago. Cancelar encerra o job sem gerar refund.';
@@ -101,6 +109,7 @@ export function JobProtectionPanel(input: {
   const [cancelReason, setCancelReason] = useState('');
   const [refundReason, setRefundReason] = useState('');
   const [refundAmount, setRefundAmount] = useState('');
+  const [refundEvidence, setRefundEvidence] = useState('');
   const [requestRefundOnCancel, setRequestRefundOnCancel] = useState(false);
   const [runningCancel, setRunningCancel] = useState(false);
   const [runningRefund, setRunningRefund] = useState(false);
@@ -119,6 +128,7 @@ export function JobProtectionPanel(input: {
       input.financial.refundSummary.canRequestRefund &&
         input.financial.jobStatus !== 'COMPLETED',
     );
+    setRefundEvidence('');
     setLocalStatus('');
   }, [
     input.financial.jobId,
@@ -139,6 +149,8 @@ export function JobProtectionPanel(input: {
       return false;
     }
 
+    const evidenceItems = parseEvidenceItems(refundEvidence);
+
     let parsedAmount: number | undefined;
     if (refundAmount.trim().length > 0) {
       const numeric = Number(refundAmount);
@@ -157,6 +169,7 @@ export function JobProtectionPanel(input: {
       await createJobRefundRequest(input.accessToken, input.jobId, {
         reason,
         ...(typeof parsedAmount === 'number' ? { amount: parsedAmount } : {}),
+        ...(evidenceItems.length > 0 ? { evidenceItems } : {}),
       });
       await input.onRefresh();
       pushStatus('Pedido de refund/disputa enviado com sucesso.');
@@ -338,6 +351,16 @@ export function JobProtectionPanel(input: {
                       <strong>Nota:</strong> {refund.failureReason}
                     </p>
                   ) : null}
+                  {refund.decisionNote ? (
+                    <p>
+                      <strong>Decisão:</strong> {refund.decisionNote}
+                    </p>
+                  ) : null}
+                  {refund.evidenceItems.length > 0 ? (
+                    <p>
+                      <strong>Evidências:</strong> {refund.evidenceItems.join(' | ')}
+                    </p>
+                  ) : null}
                 </div>
 
                 <span
@@ -414,6 +437,17 @@ export function JobProtectionPanel(input: {
                       disabled={runningCancel}
                     />
                   </label>
+                  <label className='block space-y-2 text-sm text-slate-700'>
+                    <span>Evidências (uma por linha)</span>
+                    <textarea
+                      value={refundEvidence}
+                      onChange={(event) => setRefundEvidence(event.target.value)}
+                      maxLength={1000}
+                      className='min-h-24 w-full rounded-xl border border-slate-300 px-3 py-2 outline-none focus:border-blue-500'
+                      placeholder='Ex.: conversa combinada, fotos, referência de comprovativo ou observações da equipa.'
+                      disabled={runningCancel}
+                    />
+                  </label>
                 </>
               ) : null}
             </div>
@@ -471,6 +505,18 @@ export function JobProtectionPanel(input: {
               value={refundAmount}
               onChange={(event) => setRefundAmount(event.target.value)}
               className='w-full rounded-xl border border-slate-300 px-3 py-2 outline-none focus:border-blue-500'
+              disabled={runningRefund}
+            />
+          </label>
+
+          <label className='mt-3 block space-y-2 text-sm text-slate-700'>
+            <span>Evidências (uma por linha)</span>
+            <textarea
+              value={refundEvidence}
+              onChange={(event) => setRefundEvidence(event.target.value)}
+              maxLength={1000}
+              className='min-h-24 w-full rounded-xl border border-slate-300 px-3 py-2 outline-none focus:border-blue-500'
+              placeholder='Links, notas, fotos entregues por outro canal ou resumo factual do caso.'
               disabled={runningRefund}
             />
           </label>

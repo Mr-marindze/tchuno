@@ -63,6 +63,14 @@ function statusBadgeClass(status: string): string {
   return 'bg-slate-100 text-slate-700';
 }
 
+function parseEvidenceItems(value: string): string[] {
+  return value
+    .split('\n')
+    .map((item) => item.trim())
+    .filter((item, index, array) => item.length > 0 && array.indexOf(item) === index)
+    .slice(0, 12);
+}
+
 export default function AdminPaymentsPage() {
   const [accessToken, setAccessToken] = useState<string | null>(null);
   const [overview, setOverview] = useState<AdminPaymentsOverview | null>(null);
@@ -80,6 +88,7 @@ export default function AdminPaymentsPage() {
   const [refundIntentId, setRefundIntentId] = useState('');
   const [refundReason, setRefundReason] = useState('Ajuste operacional validado');
   const [refundAmount, setRefundAmount] = useState('');
+  const [refundEvidenceDraft, setRefundEvidenceDraft] = useState('');
 
   const [releaseJobId, setReleaseJobId] = useState('');
 
@@ -290,6 +299,7 @@ export default function AdminPaymentsPage() {
     setStatus('A criar refund...');
 
     try {
+      const evidenceItems = parseEvidenceItems(refundEvidenceDraft);
       const refund = await runCriticalAdminAction({
         purpose: 'admin.payments.refund',
         execute: (reauthToken) =>
@@ -299,6 +309,7 @@ export default function AdminPaymentsPage() {
               paymentIntentId: refundIntentId,
               reason,
               ...(typeof parsedAmount === 'number' ? { amount: parsedAmount } : {}),
+              ...(evidenceItems.length > 0 ? { evidenceItems } : {}),
             },
             { reauthToken },
           ),
@@ -306,6 +317,7 @@ export default function AdminPaymentsPage() {
 
       setStatus(`Refund ${refund.id.slice(0, 8)} criado com sucesso.`);
       setRefundAmount('');
+      setRefundEvidenceDraft('');
       await loadDashboard(accessToken);
     } catch (error) {
       setStatus(humanizeUnknownError(error, 'Falha ao criar refund.'));
@@ -320,6 +332,14 @@ export default function AdminPaymentsPage() {
       return;
     }
 
+    const decisionNote =
+      typeof window === 'undefined'
+        ? 'Aprovado após revisão operacional.'
+        : window.prompt(
+            'Nota de decisão para este refund (opcional):',
+            'Aprovado após revisão operacional.',
+          )?.trim() || '';
+
     setRunningCriticalAction(true);
     setStatus(`A aprovar refund ${refundId.slice(0, 8)}...`);
 
@@ -327,7 +347,12 @@ export default function AdminPaymentsPage() {
       await runCriticalAdminAction({
         purpose: 'admin.payments.refund',
         execute: (reauthToken) =>
-          approveAdminRefund(accessToken, refundId, { reauthToken }),
+          approveAdminRefund(
+            accessToken,
+            refundId,
+            decisionNote ? { decisionNote } : undefined,
+            { reauthToken },
+          ),
       });
       setStatus(`Refund ${refundId.slice(0, 8)} aprovado.`);
       await loadDashboard(accessToken);
@@ -359,6 +384,12 @@ export default function AdminPaymentsPage() {
       return;
     }
 
+    const decisionNote =
+      window.prompt(
+        'Nota interna/decisão (opcional):',
+        'Pedido recusado porque as evidências não sustentam refund adicional.',
+      )?.trim() || '';
+
     setRunningCriticalAction(true);
     setStatus(`A recusar refund ${refundId.slice(0, 8)}...`);
 
@@ -369,7 +400,10 @@ export default function AdminPaymentsPage() {
           rejectAdminRefund(
             accessToken,
             refundId,
-            { reason: reason.trim() },
+            {
+              reason: reason.trim(),
+              ...(decisionNote ? { decisionNote } : {}),
+            },
             { reauthToken },
           ),
       });
@@ -848,6 +882,17 @@ export default function AdminPaymentsPage() {
                   className='w-full rounded-lg border border-slate-300 px-3 py-2 outline-none focus:border-blue-500'
                 />
               </label>
+
+              <label className='space-y-1 text-sm text-slate-700 sm:col-span-2'>
+                <span>Evidências (uma por linha)</span>
+                <textarea
+                  value={refundEvidenceDraft}
+                  onChange={(event) => setRefundEvidenceDraft(event.target.value)}
+                  maxLength={1000}
+                  className='min-h-24 w-full rounded-lg border border-slate-300 px-3 py-2 outline-none focus:border-blue-500'
+                  placeholder='Resumo factual, links internos, comprovativos ou notas recolhidas pela equipa.'
+                />
+              </label>
             </div>
             <button
               type='button'
@@ -900,6 +945,17 @@ export default function AdminPaymentsPage() {
                         {refund.failureReason ? (
                           <p className='text-rose-700'>
                             <strong>Nota:</strong> {refund.failureReason}
+                          </p>
+                        ) : null}
+                        {refund.decisionNote ? (
+                          <p>
+                            <strong>Decisão:</strong> {refund.decisionNote}
+                          </p>
+                        ) : null}
+                        {refund.evidenceItems.length > 0 ? (
+                          <p>
+                            <strong>Evidências:</strong>{' '}
+                            {refund.evidenceItems.join(' | ')}
                           </p>
                         ) : null}
                       </div>

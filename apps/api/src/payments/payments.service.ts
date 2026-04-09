@@ -26,6 +26,7 @@ import { NotificationsService } from '../notifications/notifications.service';
 import { MetricsService } from '../observability/metrics.service';
 import { PrismaService } from '../prisma/prisma.service';
 import { AppRole } from '../auth/authorization.types';
+import { ApproveRefundRequestDto } from './dto/approve-refund-request.dto';
 import { CreateJobRefundRequestDto } from './dto/create-job-refund-request.dto';
 import { CreatePaymentIntentDto } from './dto/create-payment-intent.dto';
 import { CreatePayoutDto } from './dto/create-payout.dto';
@@ -154,6 +155,19 @@ type AccessibleJobFinancialRecord = {
   isCustomer: boolean;
   isProvider: boolean;
 };
+
+function normalizeEvidenceItems(items?: string[] | null): string[] {
+  if (!items || items.length === 0) {
+    return [];
+  }
+
+  return items
+    .map((item) => item.trim())
+    .filter(
+      (item, index, array) => item.length > 0 && array.indexOf(item) === index,
+    )
+    .slice(0, 12);
+}
 
 @Injectable()
 export class PaymentsService {
@@ -554,6 +568,7 @@ export class PaymentsService {
         amount: requestedAmount,
         currency: intent.currency,
         reason: dto.reason.trim(),
+        evidenceItems: normalizeEvidenceItems(dto.evidenceItems),
         status: 'PENDING',
         provider: intent.provider,
       },
@@ -1152,7 +1167,11 @@ export class PaymentsService {
     });
   }
 
-  async adminApproveRefund(actorUserId: string, refundRequestId: string) {
+  async adminApproveRefund(
+    actorUserId: string,
+    refundRequestId: string,
+    dto: ApproveRefundRequestDto,
+  ) {
     const refundRequest = await this.prisma.refundRequest.findUnique({
       where: { id: refundRequestId },
       include: {
@@ -1176,6 +1195,7 @@ export class PaymentsService {
     const processed = await this.processRefundRequest(
       refundRequest.id,
       actorUserId,
+      dto.decisionNote?.trim() || null,
     );
     const access = this.resolveJobAccess(refundRequest.job, {
       userId: actorUserId,
@@ -1194,9 +1214,11 @@ export class PaymentsService {
             : 'Reembolso aprovado com falha de processamento',
       description:
         processed.status === 'SUCCEEDED'
-          ? 'A decisão foi registada e o reembolso foi iniciado com sucesso.'
+          ? processed.decisionNote?.trim() ||
+            'A decisão foi registada e o reembolso foi iniciado com sucesso.'
           : processed.status === 'PROCESSING'
-            ? 'A decisão foi registada e o reembolso ficou em processamento.'
+            ? processed.decisionNote?.trim() ||
+              'A decisão foi registada e o reembolso ficou em processamento.'
             : processed.failureReason?.trim() ||
               'A decisão foi registada, mas houve falha ao processar o reembolso.',
       tone:
@@ -1241,6 +1263,7 @@ export class PaymentsService {
         approvedByUserId: actorUserId,
         processedAt: new Date(),
         failureReason: dto.reason.trim(),
+        decisionNote: dto.decisionNote?.trim() || dto.reason.trim(),
       },
       include: refundInclude,
     });
@@ -1255,7 +1278,7 @@ export class PaymentsService {
       refundRequest: updated,
       actorUserId,
       title: 'Pedido de reembolso recusado',
-      description: dto.reason.trim(),
+      description: dto.decisionNote?.trim() || dto.reason.trim(),
       tone: 'ATTENTION',
     });
 
@@ -1326,6 +1349,7 @@ export class PaymentsService {
         amount,
         currency: intent.currency,
         reason: dto.reason.trim(),
+        evidenceItems: normalizeEvidenceItems(dto.evidenceItems),
         status: 'PENDING',
         provider: intent.provider,
       },
@@ -1351,7 +1375,8 @@ export class PaymentsService {
         processed.status === 'FAILED'
           ? processed.failureReason?.trim() ||
             'O reembolso falhou no processamento.'
-          : 'O estado financeiro deste job foi atualizado pela equipa Tchuno.',
+          : processed.decisionNote?.trim() ||
+            'O estado financeiro deste job foi atualizado pela equipa Tchuno.',
       tone:
         processed.status === 'FAILED'
           ? 'ATTENTION'
@@ -1926,6 +1951,7 @@ export class PaymentsService {
   private async processRefundRequest(
     refundRequestId: string,
     actorUserId: string,
+    decisionNote?: string | null,
   ): Promise<RefundRecord> {
     const refundRequest = await this.prisma.refundRequest.findUnique({
       where: { id: refundRequestId },
@@ -1987,6 +2013,7 @@ export class PaymentsService {
         data: {
           status: 'APPROVED',
           approvedByUserId: actorUserId,
+          decisionNote: decisionNote?.trim() || record.decisionNote,
         },
       });
 

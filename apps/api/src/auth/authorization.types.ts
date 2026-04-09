@@ -38,6 +38,7 @@ export type Permission =
   | 'admin.orders.manage'
   | 'admin.reports.read'
   | 'admin.moderation.manage'
+  | 'admin.support.manage'
   | 'admin.settings.manage'
   | 'admin.audit.read';
 

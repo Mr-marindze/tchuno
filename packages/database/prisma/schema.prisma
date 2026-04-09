@@ -43,6 +43,8 @@ model User {
   trustSafetyInterventions         TrustSafetyIntervention[] @relation("TrustSafetyActor")
   trustSafetyCounterpartCases      TrustSafetyIntervention[] @relation("TrustSafetyCounterpart")
   reviewedTrustSafetyCases         TrustSafetyIntervention[] @relation("TrustSafetyReviewedBy")
+  createdOperationalIncidents      OperationalIncident[]     @relation("OperationalIncidentCreatedBy")
+  ownedOperationalIncidents        OperationalIncident[]     @relation("OperationalIncidentOwner")
 }
 
 model Category {
@@ -199,6 +201,7 @@ model Job {
   refundRequests    RefundRequest[]
   messages          JobMessage[]
   trustSafetyCases  TrustSafetyIntervention[]
+  operationalIncidents OperationalIncident[]
 
   @@index([customerId, status, createdAt])
   @@index([providerId, status, createdAt])
@@ -266,6 +269,7 @@ model TrustSafetyIntervention {
   actorUser        User                          @relation("TrustSafetyActor", fields: [actorUserId], references: [id], onDelete: Cascade)
   counterpartUser  User                          @relation("TrustSafetyCounterpart", fields: [counterpartUserId], references: [id], onDelete: Cascade)
   reviewedByUser   User?                         @relation("TrustSafetyReviewedBy", fields: [reviewedByUserId], references: [id], onDelete: SetNull)
+  operationalIncidents OperationalIncident[]
 
   @@index([jobId, createdAt])
   @@index([actorUserId, createdAt])
@@ -434,6 +438,8 @@ model RefundRequest {
   amount            Int
   currency          String              @default("MZN")
   reason            String
+  evidenceItems     String[]            @default([])
+  decisionNote      String?
   status            RefundStatus        @default(PENDING)
   provider          PaymentProvider     @default(INTERNAL)
   providerReference String?
@@ -446,9 +452,42 @@ model RefundRequest {
   transaction       PaymentTransaction? @relation(fields: [transactionId], references: [id], onDelete: SetNull)
   requestedByUser   User                @relation("RefundRequestedBy", fields: [requestedByUserId], references: [id], onDelete: Cascade)
   approvedByUser    User?               @relation("RefundApprovedBy", fields: [approvedByUserId], references: [id], onDelete: SetNull)
+  operationalIncidents OperationalIncident[]
 
   @@index([paymentIntentId, createdAt])
   @@index([status, createdAt])
+}
+
+model OperationalIncident {
+  id                              String                    @id @default(cuid())
+  title                           String
+  summary                         String
+  source                          OperationalIncidentSource @default(SUPPORT)
+  severity                        OperationalIncidentSeverity @default(MEDIUM)
+  status                          OperationalIncidentStatus @default(OPEN)
+  impactedArea                    String?
+  customerImpact                  String?
+  evidenceItems                   String[]                  @default([])
+  resolutionNote                  String?
+  createdByUserId                 String
+  ownerAdminUserId                String?
+  relatedJobId                    String?
+  relatedRefundRequestId          String?
+  relatedTrustSafetyInterventionId String?
+  detectedAt                      DateTime                  @default(now())
+  resolvedAt                      DateTime?
+  createdAt                       DateTime                  @default(now())
+  updatedAt                       DateTime                  @updatedAt
+  createdByUser                   User                      @relation("OperationalIncidentCreatedBy", fields: [createdByUserId], references: [id], onDelete: Cascade)
+  ownerAdminUser                  User?                     @relation("OperationalIncidentOwner", fields: [ownerAdminUserId], references: [id], onDelete: SetNull)
+  relatedJob                      Job?                      @relation(fields: [relatedJobId], references: [id], onDelete: SetNull)
+  relatedRefundRequest            RefundRequest?            @relation(fields: [relatedRefundRequestId], references: [id], onDelete: SetNull)
+  relatedTrustSafetyIntervention  TrustSafetyIntervention?  @relation(fields: [relatedTrustSafetyInterventionId], references: [id], onDelete: SetNull)
+
+  @@index([status, severity, detectedAt])
+  @@index([source, status, detectedAt])
+  @@index([ownerAdminUserId, status, updatedAt])
+  @@index([relatedJobId, createdAt])
 }
 
 model PaymentEvent {
@@ -634,6 +673,29 @@ enum TrustSafetyInterventionStatus {
   APPEALED
   CLEARED
   ENFORCED
+}
+
+enum OperationalIncidentSource {
+  SUPPORT
+  REFUND_DISPUTE
+  TRUST_SAFETY
+  PLATFORM
+}
+
+enum OperationalIncidentSeverity {
+  LOW
+  MEDIUM
+  HIGH
+  CRITICAL
+}
+
+enum OperationalIncidentStatus {
+  OPEN
+  INVESTIGATING
+  MITIGATING
+  MONITORING
+  RESOLVED
+  CANCELED
 }
 
 enum PaymentActorType {
