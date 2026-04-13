@@ -1,5 +1,12 @@
 import { Transform } from 'class-transformer';
-import { IsString, MaxLength, MinLength } from 'class-validator';
+import {
+  IsString,
+  MaxLength,
+  MinLength,
+  IsOptional,
+  IsArray,
+  ArrayMaxSize,
+} from 'class-validator';
 
 export class CreateJobMessageDto {
   @Transform(({ value }: { value: unknown }) =>
@@ -9,4 +16,10 @@ export class CreateJobMessageDto {
   @MinLength(1)
   @MaxLength(1000)
   content!: string;
+
+  @IsOptional()
+  @IsArray()
+  @ArrayMaxSize(6)
+  @IsString({ each: true })
+  attachments?: string[];
 }

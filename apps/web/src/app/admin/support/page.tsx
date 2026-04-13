@@ -3,15 +3,18 @@
 import Link from 'next/link';
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import {
+  confirmReauth,
   ensureSession,
   listPasswordRecoveryRequests,
   PasswordRecoveryRequest,
   PasswordRecoveryRequestStatus,
   updatePasswordRecoveryRequest,
 } from '@/lib/auth';
-import { humanizeUnknownError } from '@/lib/http-errors';
+import { humanizeUnknownError, ReauthRequiredError } from '@/lib/http-errors';
 import {
+  approveAdminRefund,
   listAdminRefundRequests,
+  rejectAdminRefund,
   RefundRequest,
 } from '@/lib/payments';
 import {
@@ -266,6 +269,51 @@ function formatCurrencyMzn(value: number): string {
   }).format(value);
 }
 
+function formatDateTime(value?: string | null): string {
+  if (!value) {
+    return 'n/d';
+  }
+
+  return new Date(value).toLocaleString('pt-PT');
+}
+
+function TimelineList(input: {
+  events: Array<{
+    id: string;
+    title: string;
+    description: string;
+    actorName: string | null;
+    createdAt: string;
+  }>;
+  emptyLabel: string;
+}) {
+  if (input.events.length === 0) {
+    return <p className='text-xs text-slate-500'>{input.emptyLabel}</p>;
+  }
+
+  return (
+    <div className='mt-3 space-y-2'>
+      {input.events.map((event) => (
+        <div
+          key={event.id}
+          className='rounded-lg border border-slate-200 bg-slate-50 p-3'
+        >
+          <div className='flex flex-col gap-1 sm:flex-row sm:items-start sm:justify-between'>
+            <div className='text-sm text-slate-700'>
+              <p className='font-medium text-slate-900'>{event.title}</p>
+              <p className='mt-1'>{event.description}</p>
+            </div>
+            <div className='text-xs text-slate-500 sm:text-right'>
+              <p>{formatDateTime(event.createdAt)}</p>
+              {event.actorName ? <p>{event.actorName}</p> : null}
+            </div>
+          </div>
+        </div>
+      ))}
+    </div>
+  );
+}
+
 function sortQueueItems(left: QueueItem, right: QueueItem): number {
   if (left.priority !== right.priority) {
     return right.priority - left.priority;
@@ -286,6 +334,12 @@ export default function AdminSupportPage() {
   const [refunds, setRefunds] = useState<RefundRequest[]>([]);
   const [trustCases, setTrustCases] = useState<AdminTrustSafetyIntervention[]>([]);
   const [incidents, setIncidents] = useState<OperationalIncident[]>([]);
+  const [incidentSummaryStats, setIncidentSummaryStats] = useState({
+    unresolvedCount: 0,
+    criticalCount: 0,
+    resolvedCount: 0,
+    overdueCount: 0,
+  });
   const [loading, setLoading] = useState(true);
   const [status, setStatus] = useState('A carregar fila operacional...');
   const [runningId, setRunningId] = useState<string | null>(null);
@@ -298,6 +352,7 @@ export default function AdminSupportPage() {
     useState<OperationalIncidentSource>('SUPPORT');
   const [incidentSeverity, setIncidentSeverity] =
     useState<OperationalIncidentSeverity>('MEDIUM');
+  const [incidentBaseSlaHours, setIncidentBaseSlaHours] = useState('24');
   const [incidentImpactedArea, setIncidentImpactedArea] = useState('');
   const [incidentCustomerImpact, setIncidentCustomerImpact] = useState('');
   const [incidentEvidenceDraft, setIncidentEvidenceDraft] = useState('');
@@ -313,6 +368,12 @@ export default function AdminSupportPage() {
         setRefunds([]);
         setTrustCases([]);
         setIncidents([]);
+        setIncidentSummaryStats({
+          unresolvedCount: 0,
+          criticalCount: 0,
+          resolvedCount: 0,
+          overdueCount: 0,
+        });
         return;
       }
 
@@ -344,6 +405,7 @@ export default function AdminSupportPage() {
       setRefunds(refundsResponse.data);
       setTrustCases(trustResponse.data);
       setIncidents(incidentsResponse.data);
+      setIncidentSummaryStats(incidentsResponse.summary);
     },
     [accessToken],
   );
@@ -446,7 +508,11 @@ export default function AdminSupportPage() {
         kind: 'REFUND' as const,
         createdAt: item.createdAt,
         priority: asQueuePriority(
-          item.evidenceItems.length > 0 || item.status === 'PENDING' ? 3 : 2,
+          item.supportCase?.isOverdue
+            ? 4
+            : item.evidenceItems.length > 0 || item.status === 'PENDING'
+              ? 3
+              : 2,
         ),
         payload: item,
       })),
@@ -535,11 +601,48 @@ export default function AdminSupportPage() {
     }
   }
 
+  async function runCriticalAdminAction<T>(input: {
+    purpose: string;
+    execute: (reauthToken?: string) => Promise<T>;
+  }): Promise<T> {
+    try {
+      return await input.execute();
+    } catch (error) {
+      if (!(error instanceof ReauthRequiredError)) {
+        throw error;
+      }
+
+      if (!accessToken) {
+        throw new Error('Sessão inválida para reautenticação.');
+      }
+
+      if (typeof window === 'undefined') {
+        throw new Error('Reautenticação necessária para concluir a ação.');
+      }
+
+      const password = window.prompt(
+        'Confirma a tua password para concluir a decisão financeira:',
+      );
+      if (!password || password.trim().length === 0) {
+        throw new Error('Reautenticação cancelada.');
+      }
+
+      const confirmation = await confirmReauth({
+        accessToken,
+        password: password.trim(),
+        purpose: input.purpose,
+      });
+
+      return input.execute(confirmation.reauthToken);
+    }
+  }
+
   function prefillIncident(input: {
     title: string;
     summary: string;
     source: OperationalIncidentSource;
     severity: OperationalIncidentSeverity;
+    baseSlaHours?: number;
     relatedJobId?: string | null;
     relatedRefundRequestId?: string | null;
     relatedTrustSafetyInterventionId?: string | null;
@@ -549,6 +652,7 @@ export default function AdminSupportPage() {
     setIncidentSummary(input.summary);
     setIncidentSource(input.source);
     setIncidentSeverity(input.severity);
+    setIncidentBaseSlaHours(String(input.baseSlaHours ?? 24));
     setRelatedJobId(input.relatedJobId ?? '');
     setRelatedRefundId(input.relatedRefundRequestId ?? '');
     setRelatedTrustId(input.relatedTrustSafetyInterventionId ?? '');
@@ -571,11 +675,15 @@ export default function AdminSupportPage() {
     setStatus('A criar incidente operacional...');
 
     try {
+      const parsedSla = Number(incidentBaseSlaHours);
       await createOperationalIncident(accessToken, {
         title: incidentTitle.trim(),
         summary: incidentSummary.trim(),
         source: incidentSource,
         severity: incidentSeverity,
+        ...(Number.isFinite(parsedSla) && parsedSla > 0
+          ? { baseSlaHours: Math.trunc(parsedSla) }
+          : {}),
         impactedArea: incidentImpactedArea.trim() || undefined,
         customerImpact: incidentCustomerImpact.trim() || undefined,
         evidenceItems: parseEvidenceItems(incidentEvidenceDraft),
@@ -588,6 +696,7 @@ export default function AdminSupportPage() {
       setIncidentSummary('');
       setIncidentSource('SUPPORT');
       setIncidentSeverity('MEDIUM');
+      setIncidentBaseSlaHours('24');
       setIncidentImpactedArea('');
       setIncidentCustomerImpact('');
       setIncidentEvidenceDraft('');
@@ -605,8 +714,37 @@ export default function AdminSupportPage() {
     }
   }
 
+  async function handleAssumeIncident(incident: {
+    id: string;
+    status: OperationalIncidentStatus;
+  }) {
+    if (!accessToken) {
+      setStatus('Sessão inválida. Faz login novamente.');
+      return;
+    }
+
+    setRunningId(`incident-assume-${incident.id}`);
+    setStatus(`A assumir o caso ${incident.id.slice(0, 8)}...`);
+
+    try {
+      await updateOperationalIncident(accessToken, incident.id, {
+        assignToMe: true,
+        ...(incident.status === 'OPEN' ? { status: 'INVESTIGATING' } : {}),
+      });
+      await loadDashboard(accessToken);
+      setStatus(`Caso ${incident.id.slice(0, 8)} assumido pela equipa.`);
+    } catch (error) {
+      setStatus(humanizeUnknownError(error, 'Falha ao assumir o caso.'));
+    } finally {
+      setRunningId(null);
+    }
+  }
+
   async function handleIncidentStatusChange(
-    incident: OperationalIncident,
+    incident: {
+      id: string;
+      status: OperationalIncidentStatus;
+    },
     nextStatus: OperationalIncidentStatus,
   ) {
     if (!accessToken) {
@@ -640,6 +778,94 @@ export default function AdminSupportPage() {
       );
     } catch (error) {
       setStatus(humanizeUnknownError(error, 'Falha ao atualizar incidente.'));
+    } finally {
+      setRunningId(null);
+    }
+  }
+
+  async function handleApproveRefund(refund: RefundRequest) {
+    if (!accessToken) {
+      setStatus('Sessão inválida. Faz login novamente.');
+      return;
+    }
+
+    const decisionNote =
+      typeof window === 'undefined'
+        ? 'Pedido aprovado após análise.'
+        : window.prompt(
+            'Decisão visível para cliente e prestador:',
+            'Pedido aprovado após análise do histórico e das evidências.',
+          )?.trim() || '';
+
+    setRunningId(`refund-approve-${refund.id}`);
+    setStatus(`A aprovar disputa ${refund.id.slice(0, 8)}...`);
+
+    try {
+      await runCriticalAdminAction({
+        purpose: 'admin.payments.refund',
+        execute: (reauthToken) =>
+          approveAdminRefund(
+            accessToken,
+            refund.id,
+            decisionNote ? { decisionNote } : undefined,
+            { reauthToken },
+          ),
+      });
+      await loadDashboard(accessToken);
+      setStatus(`Disputa ${refund.id.slice(0, 8)} aprovada e fechada.`);
+    } catch (error) {
+      setStatus(humanizeUnknownError(error, 'Falha ao aprovar disputa.'));
+    } finally {
+      setRunningId(null);
+    }
+  }
+
+  async function handleRejectRefund(refund: RefundRequest) {
+    if (!accessToken) {
+      setStatus('Sessão inválida. Faz login novamente.');
+      return;
+    }
+
+    const reason =
+      typeof window === 'undefined'
+        ? 'Pedido recusado após análise.'
+        : window.prompt(
+            'Motivo da recusa:',
+            'Pedido recusado após análise do histórico e das evidências.',
+          )?.trim() || '';
+
+    if (!reason) {
+      setStatus('A recusa precisa de um motivo claro.');
+      return;
+    }
+
+    const decisionNote =
+      typeof window === 'undefined'
+        ? reason
+        : window.prompt('Decisão visível para cliente e prestador:', reason)?.trim() ||
+          reason;
+
+    setRunningId(`refund-reject-${refund.id}`);
+    setStatus(`A recusar disputa ${refund.id.slice(0, 8)}...`);
+
+    try {
+      await runCriticalAdminAction({
+        purpose: 'admin.payments.refund',
+        execute: (reauthToken) =>
+          rejectAdminRefund(
+            accessToken,
+            refund.id,
+            {
+              reason,
+              ...(decisionNote ? { decisionNote } : {}),
+            },
+            { reauthToken },
+          ),
+      });
+      await loadDashboard(accessToken);
+      setStatus(`Disputa ${refund.id.slice(0, 8)} recusada e fechada.`);
+    } catch (error) {
+      setStatus(humanizeUnknownError(error, 'Falha ao recusar disputa.'));
     } finally {
       setRunningId(null);
     }
@@ -688,7 +914,7 @@ export default function AdminSupportPage() {
         <div className='mt-4 grid gap-3 sm:grid-cols-2 lg:grid-cols-4'>
           <SummaryCard label='Fila ativa' value={totalActiveQueueCount} />
           <SummaryCard label='Disputas abertas' value={activeRefunds.length} />
-          <SummaryCard label='Trust em aberto' value={activeTrustCases.length} />
+          <SummaryCard label='Casos fora de SLA' value={incidentSummaryStats.overdueCount} />
           <SummaryCard label='Incidentes ativos' value={activeIncidents.length} />
         </div>
 
@@ -711,11 +937,13 @@ export default function AdminSupportPage() {
 
           <div className='flex flex-wrap gap-2 text-xs text-slate-500'>
             <span className='rounded-full bg-slate-100 px-2.5 py-1'>
-              {activeIncidents.filter((item) => item.severity === 'CRITICAL').length}{' '}
-              críticos
+              {incidentSummaryStats.criticalCount} críticos
             </span>
             <span className='rounded-full bg-slate-100 px-2.5 py-1'>
-              {incidents.filter((item) => item.status === 'RESOLVED').length} resolvidos
+              {incidentSummaryStats.resolvedCount} resolvidos
+            </span>
+            <span className='rounded-full bg-slate-100 px-2.5 py-1'>
+              {incidentSummaryStats.overdueCount} fora de SLA
             </span>
           </div>
         </div>
@@ -742,6 +970,19 @@ export default function AdminSupportPage() {
               maxLength={120}
               className='w-full rounded-lg border border-slate-300 px-3 py-2 outline-none focus:border-blue-500'
               placeholder='Suporte, pagamentos, trust, operação...'
+            />
+          </label>
+
+          <label className='space-y-1 text-sm text-slate-700'>
+            <span>SLA base (horas)</span>
+            <input
+              type='number'
+              min={1}
+              max={168}
+              value={incidentBaseSlaHours}
+              onChange={(event) => setIncidentBaseSlaHours(event.target.value)}
+              className='w-full rounded-lg border border-slate-300 px-3 py-2 outline-none focus:border-blue-500'
+              placeholder='24'
             />
           </label>
 
@@ -866,6 +1107,7 @@ export default function AdminSupportPage() {
               setIncidentSummary('');
               setIncidentSource('SUPPORT');
               setIncidentSeverity('MEDIUM');
+              setIncidentBaseSlaHours('24');
               setIncidentImpactedArea('');
               setIncidentCustomerImpact('');
               setIncidentEvidenceDraft('');
@@ -996,6 +1238,7 @@ export default function AdminSupportPage() {
 
             if (item.kind === 'REFUND') {
               const refund = item.payload;
+              const refundCase = refund.supportCase;
 
               return (
                 <article
@@ -1041,33 +1284,162 @@ export default function AdminSupportPage() {
                           <strong>Decisão:</strong> {refund.decisionNote}
                         </p>
                       ) : null}
+                      {refundCase ? (
+                        <div className='rounded-xl border border-blue-100 bg-blue-50 p-3'>
+                          <div className='flex flex-col gap-2 sm:flex-row sm:items-start sm:justify-between'>
+                            <div>
+                              <p className='font-semibold text-slate-900'>
+                                Caso #{refundCase.id.slice(0, 8)}
+                              </p>
+                              <p className='mt-1 text-xs text-slate-600'>
+                                SLA base {refundCase.baseSlaHours}h com alvo em{' '}
+                                {formatDateTime(refundCase.slaTargetAt)}
+                              </p>
+                            </div>
+
+                            <div className='flex flex-wrap gap-2'>
+                              <span
+                                className={`rounded-full px-2.5 py-1 text-xs font-semibold ${incidentStatusClass(
+                                  refundCase.status as OperationalIncidentStatus,
+                                )}`}
+                              >
+                                {incidentStatusLabel(
+                                  refundCase.status as OperationalIncidentStatus,
+                                )}
+                              </span>
+                              {refundCase.isOverdue ? (
+                                <span className='rounded-full bg-rose-100 px-2.5 py-1 text-xs font-semibold text-rose-700'>
+                                  Fora de SLA
+                                </span>
+                              ) : null}
+                            </div>
+                          </div>
+
+                          <div className='mt-3 grid gap-2 text-xs text-slate-600 sm:grid-cols-2'>
+                            <p>
+                              <strong>Owner:</strong>{' '}
+                              {refundCase.ownerAdminUser?.name ??
+                                refundCase.ownerAdminUser?.email ??
+                                'Por atribuir'}
+                            </p>
+                            <p>
+                              <strong>Abertura:</strong>{' '}
+                              {formatDateTime(refundCase.detectedAt)}
+                            </p>
+                            {refundCase.assumedAt ? (
+                              <p>
+                                <strong>Assumido:</strong>{' '}
+                                {formatDateTime(refundCase.assumedAt)}
+                              </p>
+                            ) : null}
+                            {refundCase.resolvedAt ? (
+                              <p>
+                                <strong>Fecho:</strong>{' '}
+                                {formatDateTime(refundCase.resolvedAt)}
+                              </p>
+                            ) : null}
+                          </div>
+
+                          {refundCase.customerImpact ? (
+                            <p className='mt-3 text-sm text-slate-700'>
+                              <strong>Impacto:</strong> {refundCase.customerImpact}
+                            </p>
+                          ) : null}
+
+                          <TimelineList
+                            events={refundCase.timeline}
+                            emptyLabel='Sem movimentos registados neste caso.'
+                          />
+                        </div>
+                      ) : null}
                     </div>
 
                     <div className='flex flex-wrap gap-2'>
-                      <button
-                        type='button'
-                        className='rounded-lg border border-slate-300 px-3 py-2 text-sm font-medium text-slate-700 hover:bg-slate-100'
-                        onClick={() =>
-                          prefillIncident({
-                            title: `Escalar disputa ${refund.id.slice(0, 8)}`,
-                            summary: `${refund.reason}\n\nValor: ${refund.amount} ${refund.currency}.`,
-                            source: 'REFUND_DISPUTE',
-                            severity:
-                              refund.evidenceItems.length > 0 ? 'HIGH' : 'MEDIUM',
-                            relatedRefundRequestId: refund.id,
-                            relatedJobId: refund.jobId,
-                            evidenceItems: refund.evidenceItems,
-                          })
-                        }
-                      >
-                        Criar incidente
-                      </button>
-                      <Link
-                        href='/admin/payments'
-                        className='rounded-lg bg-slate-900 px-3 py-2 text-sm font-semibold text-white hover:bg-black'
-                      >
-                        Abrir revisão
-                      </Link>
+                      {refundCase ? (
+                        <>
+                          {!refundCase.ownerAssigned ? (
+                            <button
+                              type='button'
+                              className='rounded-lg border border-slate-300 px-3 py-2 text-sm font-medium text-slate-700 hover:bg-slate-100 disabled:opacity-60'
+                              onClick={() => {
+                                void handleAssumeIncident({
+                                  id: refundCase.id,
+                                  status:
+                                    refundCase.status as OperationalIncidentStatus,
+                                });
+                              }}
+                              disabled={runningId === `incident-assume-${refundCase.id}`}
+                            >
+                              Assumir caso
+                            </button>
+                          ) : null}
+                          {refundCase.ownerAssigned &&
+                          refundCase.status !== 'INVESTIGATING' &&
+                          !['RESOLVED', 'CANCELED'].includes(refundCase.status) ? (
+                            <button
+                              type='button'
+                              className='rounded-lg border border-slate-300 px-3 py-2 text-sm font-medium text-slate-700 hover:bg-slate-100 disabled:opacity-60'
+                              onClick={() => {
+                                void handleIncidentStatusChange(
+                                  {
+                                    id: refundCase.id,
+                                    status:
+                                      refundCase.status as OperationalIncidentStatus,
+                                  },
+                                  'INVESTIGATING',
+                                );
+                              }}
+                              disabled={runningId === `incident-${refundCase.id}`}
+                            >
+                              Investigar
+                            </button>
+                          ) : null}
+                        </>
+                      ) : (
+                        <button
+                          type='button'
+                          className='rounded-lg border border-slate-300 px-3 py-2 text-sm font-medium text-slate-700 hover:bg-slate-100'
+                          onClick={() =>
+                            prefillIncident({
+                              title: `Escalar disputa ${refund.id.slice(0, 8)}`,
+                              summary: `${refund.reason}\n\nValor: ${refund.amount} ${refund.currency}.`,
+                              source: 'REFUND_DISPUTE',
+                              severity:
+                                refund.evidenceItems.length > 0 ? 'HIGH' : 'MEDIUM',
+                              baseSlaHours: 24,
+                              relatedRefundRequestId: refund.id,
+                              relatedJobId: refund.jobId,
+                              evidenceItems: refund.evidenceItems,
+                            })
+                          }
+                        >
+                          Criar incidente
+                        </button>
+                      )}
+                      {refund.status === 'PENDING' ? (
+                        <>
+                          <button
+                            type='button'
+                            className='rounded-lg border border-emerald-300 px-3 py-2 text-sm font-medium text-emerald-700 hover:bg-emerald-50 disabled:opacity-60'
+                            onClick={() => {
+                              void handleApproveRefund(refund);
+                            }}
+                            disabled={runningId === `refund-approve-${refund.id}`}
+                          >
+                            Aprovar
+                          </button>
+                          <button
+                            type='button'
+                            className='rounded-lg bg-slate-900 px-3 py-2 text-sm font-semibold text-white hover:bg-black disabled:opacity-60'
+                            onClick={() => {
+                              void handleRejectRefund(refund);
+                            }}
+                            disabled={runningId === `refund-reject-${refund.id}`}
+                          >
+                            Recusar
+                          </button>
+                        </>
+                      ) : null}
                     </div>
                   </div>
                 </article>
@@ -1131,6 +1503,8 @@ export default function AdminSupportPage() {
                             source: 'TRUST_SAFETY',
                             severity:
                               trustCase.riskLevel === 'HIGH' ? 'CRITICAL' : 'HIGH',
+                            baseSlaHours:
+                              trustCase.riskLevel === 'HIGH' ? 12 : 24,
                             relatedTrustSafetyInterventionId: trustCase.id,
                             relatedJobId: trustCase.job.id,
                             evidenceItems: [trustCase.messagePreview],
@@ -1184,8 +1558,26 @@ export default function AdminSupportPage() {
                     </p>
                     <p>
                       <strong>Owner:</strong>{' '}
-                      {incident.ownerAdminUser?.name ?? incident.createdByUser.email}
+                      {incident.ownerAdminUser?.name ??
+                        incident.ownerAdminUser?.email ??
+                        'Por atribuir'}
                     </p>
+                    <p>
+                      <strong>SLA:</strong> {incident.baseSlaHours}h até{' '}
+                      {formatDateTime(incident.slaTargetAt)}
+                    </p>
+                    {new Date(incident.slaTargetAt).getTime() < Date.now() &&
+                    !['RESOLVED', 'CANCELED'].includes(incident.status) ? (
+                      <p className='text-rose-700'>
+                        <strong>Estado SLA:</strong> fora do prazo base
+                      </p>
+                    ) : null}
+                    {incident.assumedAt ? (
+                      <p>
+                        <strong>Assumido:</strong>{' '}
+                        {formatDateTime(incident.assumedAt)}
+                      </p>
+                    ) : null}
                     {incident.customerImpact ? (
                       <p>
                         <strong>Impacto:</strong> {incident.customerImpact}
@@ -1220,9 +1612,31 @@ export default function AdminSupportPage() {
                         <strong>Nota:</strong> {incident.resolutionNote}
                       </p>
                     ) : null}
+
+                    <div>
+                      <p className='text-xs font-semibold uppercase tracking-wide text-slate-500'>
+                        Timeline
+                      </p>
+                      <TimelineList
+                        events={incident.events}
+                        emptyLabel='Sem movimentos registados neste incidente.'
+                      />
+                    </div>
                   </div>
 
                   <div className='flex flex-wrap gap-2'>
+                    {!incident.ownerAdminUserId ? (
+                      <button
+                        type='button'
+                        className='rounded-lg border border-slate-300 px-3 py-2 text-sm font-medium text-slate-700 hover:bg-slate-100 disabled:opacity-60'
+                        onClick={() => {
+                          void handleAssumeIncident(incident);
+                        }}
+                        disabled={runningId === `incident-assume-${incident.id}`}
+                      >
+                        Assumir
+                      </button>
+                    ) : null}
                     {incident.status !== 'INVESTIGATING' ? (
                       <button
                         type='button'

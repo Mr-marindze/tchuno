@@ -78,6 +78,35 @@ export type RefundRequest = {
     id: string;
     name: string | null;
   } | null;
+  supportCase?: {
+    id: string;
+    source: string;
+    severity: string;
+    status: string;
+    baseSlaHours: number;
+    slaTargetAt: string;
+    isOverdue: boolean;
+    detectedAt: string;
+    assumedAt: string | null;
+    resolvedAt: string | null;
+    customerImpact: string | null;
+    ownerAssigned: boolean;
+    ownerAdminUser?: {
+      id: string;
+      name: string | null;
+      email: string;
+    } | null;
+    resolutionNote?: string | null;
+    timeline: Array<{
+      id: string;
+      eventType: string;
+      visibility: 'INTERNAL' | 'PARTICIPANTS';
+      title: string;
+      description: string;
+      actorName: string | null;
+      createdAt: string;
+    }>;
+  } | null;
 };
 
 export type Payout = {

@@ -1,5 +1,6 @@
 import { Module } from '@nestjs/common';
 import { NotificationsModule } from '../notifications/notifications.module';
+import { SupportOpsModule } from '../support-ops/support-ops.module';
 import { AdminPaymentsController } from './admin-payments.controller';
 import { EmolaGatewayAdapter } from './gateway/emola-gateway.adapter';
 import { InternalMockGatewayAdapter } from './gateway/internal-mock-gateway.adapter';
@@ -12,7 +13,7 @@ import { PaymentsReconciliationRunner } from './payments-reconciliation.runner';
 import { PaymentsService } from './payments.service';
 
 @Module({
-  imports: [NotificationsModule],
+  imports: [NotificationsModule, SupportOpsModule],
   controllers: [PaymentsController, AdminPaymentsController],
   providers: [
     PaymentsService,

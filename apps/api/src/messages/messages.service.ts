@@ -10,6 +10,8 @@ import { NotificationsService } from '../notifications/notifications.service';
 import { PrismaService } from '../prisma/prisma.service';
 import { TrustSafetyService } from '../trust-safety/trust-safety.service';
 import { CreateJobMessageDto } from './dto/create-job-message.dto';
+import { PresignUploadDto } from './dto/presign-upload.dto';
+import { StorageService } from '../storage/storage.service';
 
 const messageJobInclude = {
   client: {
@@ -79,7 +81,33 @@ export class MessagesService {
     private readonly prisma: PrismaService,
     private readonly notificationsService: NotificationsService,
     private readonly trustSafetyService: TrustSafetyService,
+    private readonly storageService?: StorageService,
   ) {}
+
+  async createUploadPresign(jobId: string, userId: string, dto: PresignUploadDto) {
+    const access = await this.getConversationOrThrow(jobId, userId);
+    if (!access.contactUnlocked) {
+      throw new ForbiddenException('Contact not unlocked for uploads');
+    }
+
+    if (!this.storageService) {
+      throw new Error('Storage service not available');
+    }
+
+    // build a storage key
+    const safeName = dto.fileName.replace(/[^a-zA-Z0-9._-]/g, '_').slice(0, 200);
+    const key = `uploads/messages/${jobId}/${Date.now()}-${safeName}`;
+
+    const expires = Math.max(60, Number(dto.expiresIn ?? 300));
+
+    const presign = await this.storageService.createPresignedPut(
+      key,
+      dto.contentType,
+      expires,
+    );
+
+    return presign;
+  }
 
   async listMine(userId: string) {
     const jobs = await this.prisma.job.findMany({
@@ -114,6 +142,7 @@ export class MessagesService {
         },
       },
       orderBy: [{ createdAt: 'desc' }, { id: 'desc' }],
+      include: { attachments: true },
     });
 
     const latestMessageByJobId = new Map<string, (typeof messages)[number]>();
@@ -171,6 +200,7 @@ export class MessagesService {
     const messages = await this.prisma.jobMessage.findMany({
       where: { jobId },
       orderBy: [{ createdAt: 'asc' }, { id: 'asc' }],
+      include: { attachments: true },
     });
     const trustSafety = await this.trustSafetyService.getConversationState(
       jobId,
@@ -242,13 +272,32 @@ export class MessagesService {
       return moderation;
     }
 
-    const created = await this.prisma.jobMessage.create({
-      data: {
-        jobId,
-        senderUserId: userId,
-        recipientUserId: access.counterpart.id,
-        content,
-      },
+    const created = await this.prisma.$transaction(async (tx) => {
+      const msg = await tx.jobMessage.create({
+        data: {
+          jobId,
+          senderUserId: userId,
+          recipientUserId: access.counterpart.id,
+          content,
+        },
+      });
+
+      if (dto.attachments && dto.attachments.length > 0) {
+        for (const attachmentUrl of dto.attachments.slice(0, 6)) {
+          await tx.jobMessageAttachment.create({
+            data: {
+              jobMessageId: msg.id,
+              url: attachmentUrl,
+              uploadedByUserId: userId,
+            },
+          });
+        }
+      }
+
+      return tx.jobMessage.findUniqueOrThrow({
+        where: { id: msg.id },
+        include: { attachments: true },
+      });
     });
 
     const href =
@@ -276,7 +325,10 @@ export class MessagesService {
 
     return {
       status: 'sent' as const,
-      message: this.toMessageDto(created),
+      message: {
+        ...this.toMessageDto(created),
+        attachments: dto.attachments ?? [],
+      },
     };
   }
 
@@ -345,6 +397,15 @@ export class MessagesService {
     content: string;
     createdAt: Date;
     readAt: Date | null;
+    attachments?: Array<{
+      id: string;
+      url: string;
+      key?: string | null;
+      contentType?: string | null;
+      size?: number | null;
+      uploadedByUserId?: string | null;
+      createdAt: Date;
+    }>;
   }) {
     return {
       id: message.id,
@@ -354,6 +415,15 @@ export class MessagesService {
       content: message.content,
       createdAt: message.createdAt.toISOString(),
       readAt: message.readAt ? message.readAt.toISOString() : null,
+      attachments: (message.attachments ?? []).map((a) => ({
+        id: a.id,
+        url: a.url,
+        key: a.key ?? null,
+        contentType: a.contentType ?? null,
+        size: a.size ?? null,
+        uploadedByUserId: a.uploadedByUserId ?? null,
+        createdAt: a.createdAt.toISOString(),
+      })),
     };
   }
 }

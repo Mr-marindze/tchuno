@@ -1,4 +1,5 @@
 import { ApiPropertyOptional } from '@nestjs/swagger';
+import { Type } from 'class-transformer';
 import {
   OperationalIncidentSeverity,
   OperationalIncidentSource,
@@ -7,9 +8,12 @@ import {
   ArrayMaxSize,
   IsArray,
   IsEnum,
+  IsInt,
   IsOptional,
   IsString,
+  Max,
   MaxLength,
+  Min,
   MinLength,
 } from 'class-validator';
 
@@ -43,6 +47,13 @@ export class CreateOperationalIncidentDto {
   @IsString()
   @MaxLength(240)
   customerImpact?: string;
+
+  @IsOptional()
+  @Type(() => Number)
+  @IsInt()
+  @Min(1)
+  @Max(168)
+  baseSlaHours?: number;
 
   @IsOptional()
   @IsArray()

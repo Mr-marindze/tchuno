@@ -61,6 +61,54 @@ function refundStatusClass(status: string) {
   return 'bg-slate-100 text-slate-700';
 }
 
+function supportCaseStatusLabel(status: string) {
+  if (status === 'OPEN') {
+    return 'Aberto';
+  }
+
+  if (status === 'INVESTIGATING') {
+    return 'Em investigação';
+  }
+
+  if (status === 'MITIGATING') {
+    return 'Decisão em preparação';
+  }
+
+  if (status === 'MONITORING') {
+    return 'Em acompanhamento';
+  }
+
+  if (status === 'RESOLVED') {
+    return 'Encerrado';
+  }
+
+  if (status === 'CANCELED') {
+    return 'Cancelado';
+  }
+
+  return status;
+}
+
+function supportCaseStatusClass(status: string) {
+  if (status === 'RESOLVED') {
+    return 'bg-emerald-100 text-emerald-700';
+  }
+
+  if (status === 'CANCELED') {
+    return 'bg-slate-100 text-slate-700';
+  }
+
+  if (status === 'MITIGATING') {
+    return 'bg-rose-100 text-rose-700';
+  }
+
+  if (status === 'INVESTIGATING' || status === 'MONITORING') {
+    return 'bg-blue-100 text-blue-700';
+  }
+
+  return 'bg-amber-100 text-amber-700';
+}
+
 function parseEvidenceItems(value: string): string[] {
   return value
     .split('\n')
@@ -92,6 +140,101 @@ function stageNote(financial: JobFinancialState) {
   }
 
   return 'O estado financeiro deste job ainda não exige análise de refund.';
+}
+
+function SupportCaseTimeline(input: {
+  refund: JobFinancialState['refunds'][number];
+}) {
+  const supportCase = input.refund.supportCase;
+
+  if (!supportCase) {
+    return null;
+  }
+
+  return (
+    <div className='mt-3 rounded-xl border border-blue-100 bg-white p-3'>
+      <div className='flex flex-col gap-2 sm:flex-row sm:items-start sm:justify-between'>
+        <div>
+          <p className='text-sm font-semibold text-slate-900'>
+            Caso #{supportCase.id.slice(0, 8)}
+          </p>
+          <p className='mt-1 text-xs text-slate-600'>
+            SLA base de {supportCase.baseSlaHours}h com alvo em{' '}
+            {new Date(supportCase.slaTargetAt).toLocaleString('pt-PT')}.
+          </p>
+        </div>
+
+        <div className='flex flex-wrap gap-2'>
+          <span
+            className={`rounded-full px-2.5 py-1 text-xs font-semibold ${supportCaseStatusClass(
+              supportCase.status,
+            )}`}
+          >
+            {supportCaseStatusLabel(supportCase.status)}
+          </span>
+          {supportCase.isOverdue ? (
+            <span className='rounded-full bg-rose-100 px-2.5 py-1 text-xs font-semibold text-rose-700'>
+              Fora de SLA
+            </span>
+          ) : null}
+        </div>
+      </div>
+
+      <div className='mt-3 grid gap-2 text-xs text-slate-600 sm:grid-cols-2'>
+        <p>
+          <strong>Owner interno:</strong>{' '}
+          {supportCase.ownerAssigned ? 'Atribuído' : 'Por atribuir'}
+        </p>
+        <p>
+          <strong>Abertura:</strong>{' '}
+          {new Date(supportCase.detectedAt).toLocaleString('pt-PT')}
+        </p>
+        {supportCase.assumedAt ? (
+          <p>
+            <strong>Assumido:</strong>{' '}
+            {new Date(supportCase.assumedAt).toLocaleString('pt-PT')}
+          </p>
+        ) : null}
+        {supportCase.resolvedAt ? (
+          <p>
+            <strong>Fecho:</strong>{' '}
+            {new Date(supportCase.resolvedAt).toLocaleString('pt-PT')}
+          </p>
+        ) : null}
+      </div>
+
+      {supportCase.customerImpact ? (
+        <p className='mt-3 text-sm text-slate-700'>
+          <strong>Impacto:</strong> {supportCase.customerImpact}
+        </p>
+      ) : null}
+
+      {supportCase.timeline.length > 0 ? (
+        <div className='mt-3 space-y-2'>
+          <p className='text-xs font-semibold uppercase tracking-wide text-slate-500'>
+            Timeline do caso
+          </p>
+          {supportCase.timeline.map((event) => (
+            <div
+              key={event.id}
+              className='rounded-lg border border-slate-200 bg-slate-50 p-3'
+            >
+              <div className='flex flex-col gap-1 sm:flex-row sm:items-start sm:justify-between'>
+                <div className='text-sm text-slate-700'>
+                  <p className='font-medium text-slate-900'>{event.title}</p>
+                  <p className='mt-1'>{event.description}</p>
+                </div>
+                <div className='text-xs text-slate-500 sm:text-right'>
+                  <p>{new Date(event.createdAt).toLocaleString('pt-PT')}</p>
+                  {event.actorName ? <p>{event.actorName}</p> : null}
+                </div>
+              </div>
+            </div>
+          ))}
+        </div>
+      ) : null}
+    </div>
+  );
 }
 
 export function JobProtectionPanel(input: {
@@ -361,6 +504,7 @@ export function JobProtectionPanel(input: {
                       <strong>Evidências:</strong> {refund.evidenceItems.join(' | ')}
                     </p>
                   ) : null}
+                  <SupportCaseTimeline refund={refund} />
                 </div>
 
                 <span

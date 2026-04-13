@@ -9,6 +9,7 @@ import {
 import {
   LedgerBalanceBucket,
   LedgerEntryType,
+  OperationalIncidentStatus,
   PaymentIntentStatus,
   PaymentProvider,
   PaymentTransaction,
@@ -25,6 +26,7 @@ import {
 import { NotificationsService } from '../notifications/notifications.service';
 import { MetricsService } from '../observability/metrics.service';
 import { PrismaService } from '../prisma/prisma.service';
+import { SupportOpsService } from '../support-ops/support-ops.service';
 import { AppRole } from '../auth/authorization.types';
 import { ApproveRefundRequestDto } from './dto/approve-refund-request.dto';
 import { CreateJobRefundRequestDto } from './dto/create-job-refund-request.dto';
@@ -131,6 +133,21 @@ const refundInclude = {
       name: true,
     },
   },
+  operationalIncidents: {
+    orderBy: [{ createdAt: 'desc' }, { id: 'desc' }],
+    include: {
+      ownerAdminUser: {
+        select: {
+          id: true,
+          name: true,
+          email: true,
+        },
+      },
+      events: {
+        orderBy: [{ createdAt: 'asc' }, { id: 'asc' }],
+      },
+    },
+  },
 } satisfies Prisma.RefundRequestInclude;
 
 type JobFinancialRecord = Prisma.JobGetPayload<{
@@ -140,6 +157,10 @@ type JobFinancialRecord = Prisma.JobGetPayload<{
 type RefundRecord = Prisma.RefundRequestGetPayload<{
   include: typeof refundInclude;
 }>;
+
+type RefundSupportCaseRecord = NonNullable<
+  RefundRecord['operationalIncidents']
+>[number];
 
 type JobParticipant = {
   id: string;
@@ -180,6 +201,7 @@ export class PaymentsService {
     private readonly gatewayRegistry: PaymentGatewayRegistryService,
     private readonly ledgerService: LedgerService,
     private readonly notificationsService: NotificationsService,
+    private readonly supportOpsService: SupportOpsService,
   ) {}
 
   async createIntent(actorUserId: string, dto: CreatePaymentIntentDto) {
@@ -502,7 +524,11 @@ export class PaymentsService {
       jobStatus: access.job.status,
       paymentState: latestIntent?.status ?? 'NOT_REQUIRED',
       intents,
-      refunds,
+      refunds: refunds.map((refund) =>
+        this.serializeRefundRequest(refund, {
+          includeInternalCaseDetails: access.isAdmin,
+        }),
+      ),
       cancellation: {
         canceledAt: access.job.canceledAt,
         canceledBy: access.job.canceledBy,
@@ -560,24 +586,45 @@ export class PaymentsService {
       throw new BadRequestException('Refund amount exceeds refundable balance');
     }
 
-    const created = await this.prisma.refundRequest.create({
-      data: {
+    const evidenceItems = normalizeEvidenceItems(dto.evidenceItems);
+    const actorName = this.resolveParticipantActorName(access, actor.userId);
+    const created = await this.prisma.$transaction(async (tx) => {
+      const createdRefund = await tx.refundRequest.create({
+        data: {
+          jobId: access.job.id,
+          paymentIntentId: intent.id,
+          requestedByUserId: actor.userId,
+          amount: requestedAmount,
+          currency: intent.currency,
+          reason: dto.reason.trim(),
+          evidenceItems,
+          status: 'PENDING',
+          provider: intent.provider,
+        },
+      });
+
+      await this.supportOpsService.ensureRefundDisputeCase(tx, {
+        refundRequestId: createdRefund.id,
         jobId: access.job.id,
-        paymentIntentId: intent.id,
-        requestedByUserId: actor.userId,
+        createdByUserId: actor.userId,
+        actorName,
         amount: requestedAmount,
         currency: intent.currency,
         reason: dto.reason.trim(),
-        evidenceItems: normalizeEvidenceItems(dto.evidenceItems),
-        status: 'PENDING',
-        provider: intent.provider,
-      },
-      include: refundInclude,
+        evidenceItems,
+      });
+
+      return tx.refundRequest.findUniqueOrThrow({
+        where: { id: createdRefund.id },
+        include: refundInclude,
+      });
     });
 
     await this.notifyRefundRequested(access, created, actor.userId);
 
-    return created;
+    return this.serializeRefundRequest(created, {
+      includeInternalCaseDetails: access.isAdmin,
+    });
   }
 
   async cancelRefundRequest(refundRequestId: string, actor: IntentActorInput) {
@@ -609,14 +656,32 @@ export class PaymentsService {
       );
     }
 
-    const updated = await this.prisma.refundRequest.update({
-      where: { id: refundRequest.id },
-      data: {
-        status: 'CANCELED',
-        processedAt: new Date(),
-        failureReason: 'Pedido cancelado pelo utilizador.',
-      },
-      include: refundInclude,
+    const actorName = this.resolveParticipantActorName(access, actor.userId);
+    const updated = await this.prisma.$transaction(async (tx) => {
+      await tx.refundRequest.update({
+        where: { id: refundRequest.id },
+        data: {
+          status: 'CANCELED',
+          processedAt: new Date(),
+          failureReason: 'Pedido cancelado pelo utilizador.',
+        },
+      });
+
+      await this.supportOpsService.syncRefundCaseDecision(tx, {
+        refundRequestId: refundRequest.id,
+        refundStatus: 'CANCELED',
+        actorUserId: actor.userId,
+        actorName,
+        decisionNote:
+          'O pedido foi cancelado antes da decisão final da equipa.',
+        decisionTitle: 'Pedido cancelado',
+        closeTitle: 'Caso cancelado',
+      });
+
+      return tx.refundRequest.findUniqueOrThrow({
+        where: { id: refundRequest.id },
+        include: refundInclude,
+      });
     });
 
     await this.notifyRefundStatusUpdate({
@@ -630,7 +695,9 @@ export class PaymentsService {
       audience: 'counterparty',
     });
 
-    return updated;
+    return this.serializeRefundRequest(updated, {
+      includeInternalCaseDetails: access.isAdmin,
+    });
   }
 
   async getProviderSummary(actorUserId: string): Promise<ProviderSummary> {
@@ -1160,7 +1227,11 @@ export class PaymentsService {
     ]);
 
     return buildPaginatedResponse({
-      data,
+      data: data.map((refund) =>
+        this.serializeRefundRequest(refund, {
+          includeInternalCaseDetails: true,
+        }),
+      ),
       total,
       page,
       limit,
@@ -1229,7 +1300,9 @@ export class PaymentsService {
             : 'ATTENTION',
     });
 
-    return processed;
+    return this.serializeRefundRequest(processed, {
+      includeInternalCaseDetails: true,
+    });
   }
 
   async adminRejectRefund(
@@ -1256,16 +1329,32 @@ export class PaymentsService {
       );
     }
 
-    const updated = await this.prisma.refundRequest.update({
-      where: { id: refundRequest.id },
-      data: {
-        status: 'FAILED',
-        approvedByUserId: actorUserId,
-        processedAt: new Date(),
-        failureReason: dto.reason.trim(),
+    const updated = await this.prisma.$transaction(async (tx) => {
+      await tx.refundRequest.update({
+        where: { id: refundRequest.id },
+        data: {
+          status: 'FAILED',
+          approvedByUserId: actorUserId,
+          processedAt: new Date(),
+          failureReason: dto.reason.trim(),
+          decisionNote: dto.decisionNote?.trim() || dto.reason.trim(),
+        },
+      });
+
+      await this.supportOpsService.syncRefundCaseDecision(tx, {
+        refundRequestId: refundRequest.id,
+        refundStatus: 'FAILED',
+        actorUserId,
+        actorName: 'Equipa de suporte',
         decisionNote: dto.decisionNote?.trim() || dto.reason.trim(),
-      },
-      include: refundInclude,
+        decisionTitle: 'Pedido recusado',
+        closeTitle: 'Caso encerrado',
+      });
+
+      return tx.refundRequest.findUniqueOrThrow({
+        where: { id: refundRequest.id },
+        include: refundInclude,
+      });
     });
 
     const access = this.resolveJobAccess(refundRequest.job, {
@@ -1282,7 +1371,9 @@ export class PaymentsService {
       tone: 'ATTENTION',
     });
 
-    return updated;
+    return this.serializeRefundRequest(updated, {
+      includeInternalCaseDetails: true,
+    });
   }
 
   async adminListPayouts(query: ListPaymentsQueryDto) {
@@ -1385,7 +1476,9 @@ export class PaymentsService {
             : 'SUCCESS',
     });
 
-    return processed;
+    return this.serializeRefundRequest(processed, {
+      includeInternalCaseDetails: true,
+    });
   }
 
   async adminCreatePayout(actorUserId: string, dto: CreatePayoutDto) {
@@ -2067,6 +2160,30 @@ export class PaymentsService {
         },
       });
 
+      await this.supportOpsService.syncRefundCaseDecision(tx, {
+        refundRequestId: record.id,
+        refundStatus: nextRefundStatus,
+        actorUserId,
+        actorName: 'Equipa de suporte',
+        decisionNote:
+          decisionNote?.trim() ||
+          transaction.failureReason?.trim() ||
+          record.decisionNote ||
+          null,
+        decisionTitle:
+          nextRefundStatus === 'SUCCEEDED'
+            ? 'Pedido aprovado'
+            : nextRefundStatus === 'PROCESSING'
+              ? 'Pedido aprovado e em processamento'
+              : 'Aprovação com falha',
+        closeTitle:
+          nextRefundStatus === 'PROCESSING'
+            ? 'Caso encerrado'
+            : nextRefundStatus === 'FAILED'
+              ? 'Caso encerrado'
+              : 'Caso encerrado',
+      });
+
       if (transaction.status === 'SUCCEEDED') {
         await this.appendRefundLedgerEntries(tx, {
           intent,
@@ -2089,6 +2206,109 @@ export class PaymentsService {
     return job.requestId
       ? `/app/pedidos/${job.requestId}`
       : `/app/mensagens?job=${job.id}`;
+  }
+
+  private resolveParticipantActorName(
+    access: AccessibleJobFinancialRecord,
+    actorUserId: string,
+  ) {
+    return actorUserId === access.customer.id
+      ? access.customer.name?.trim() || 'Cliente'
+      : access.provider.name?.trim() || 'Prestador';
+  }
+
+  private pickRefundSupportCase(refund: RefundRecord) {
+    return (
+      refund.operationalIncidents.find(
+        (incident) =>
+          incident.status !== OperationalIncidentStatus.RESOLVED &&
+          incident.status !== OperationalIncidentStatus.CANCELED,
+      ) ??
+      refund.operationalIncidents[0] ??
+      null
+    );
+  }
+
+  private mapRefundSupportCase(
+    supportCase: RefundSupportCaseRecord | null,
+    options: {
+      includeInternalCaseDetails: boolean;
+    },
+  ) {
+    if (!supportCase) {
+      return null;
+    }
+
+    const includeInternal = options.includeInternalCaseDetails;
+    const now = Date.now();
+
+    return {
+      id: supportCase.id,
+      source: supportCase.source,
+      severity: supportCase.severity,
+      status: supportCase.status,
+      baseSlaHours: supportCase.baseSlaHours,
+      slaTargetAt: supportCase.slaTargetAt,
+      isOverdue:
+        !['RESOLVED', 'CANCELED'].includes(supportCase.status) &&
+        supportCase.slaTargetAt.getTime() < now,
+      detectedAt: supportCase.detectedAt,
+      assumedAt: supportCase.assumedAt,
+      resolvedAt: supportCase.resolvedAt,
+      customerImpact: supportCase.customerImpact,
+      ownerAssigned: Boolean(supportCase.ownerAdminUserId),
+      ownerAdminUser: includeInternal ? supportCase.ownerAdminUser : null,
+      resolutionNote: includeInternal ? supportCase.resolutionNote : null,
+      timeline: supportCase.events
+        .filter(
+          (event) => includeInternal || event.visibility === 'PARTICIPANTS',
+        )
+        .map((event) => ({
+          id: event.id,
+          eventType: event.eventType,
+          visibility: event.visibility,
+          title: event.title,
+          description: event.description,
+          actorName: event.actorName,
+          createdAt: event.createdAt,
+        })),
+    };
+  }
+
+  private serializeRefundRequest(
+    refund: RefundRecord,
+    options: {
+      includeInternalCaseDetails: boolean;
+    },
+  ) {
+    const supportCase = this.mapRefundSupportCase(
+      this.pickRefundSupportCase(refund),
+      options,
+    );
+
+    return {
+      id: refund.id,
+      jobId: refund.jobId,
+      paymentIntentId: refund.paymentIntentId,
+      transactionId: refund.transactionId,
+      requestedByUserId: refund.requestedByUserId,
+      approvedByUserId: refund.approvedByUserId,
+      amount: refund.amount,
+      currency: refund.currency,
+      reason: refund.reason,
+      evidenceItems: refund.evidenceItems,
+      decisionNote: refund.decisionNote,
+      status: refund.status,
+      provider: refund.provider,
+      providerReference: refund.providerReference,
+      processedAt: refund.processedAt,
+      failureReason: refund.failureReason,
+      createdAt: refund.createdAt,
+      updatedAt: refund.updatedAt,
+      requestedByUser: refund.requestedByUser,
+      approvedByUser: refund.approvedByUser,
+      supportCase,
+    };
   }
 
   private resolveProviderHref(job: JobFinancialRecord) {

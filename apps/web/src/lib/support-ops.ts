@@ -29,6 +29,8 @@ export type OperationalIncident = {
   source: OperationalIncidentSource;
   severity: OperationalIncidentSeverity;
   status: OperationalIncidentStatus;
+  baseSlaHours: number;
+  slaTargetAt: string;
   impactedArea: string | null;
   customerImpact: string | null;
   evidenceItems: string[];
@@ -39,6 +41,7 @@ export type OperationalIncident = {
   relatedRefundRequestId: string | null;
   relatedTrustSafetyInterventionId: string | null;
   detectedAt: string;
+  assumedAt: string | null;
   resolvedAt: string | null;
   createdAt: string;
   updatedAt: string;
@@ -72,6 +75,16 @@ export type OperationalIncident = {
     reasonSummary: string;
     jobId: string;
   } | null;
+  events: Array<{
+    id: string;
+    eventType: string;
+    visibility: 'INTERNAL' | 'PARTICIPANTS';
+    title: string;
+    description: string;
+    actorUserId: string | null;
+    actorName: string | null;
+    createdAt: string;
+  }>;
 };
 
 export async function listOperationalIncidents(
@@ -88,6 +101,7 @@ export async function listOperationalIncidents(
       unresolvedCount: number;
       criticalCount: number;
       resolvedCount: number;
+      overdueCount: number;
     };
   }
 > {
@@ -126,6 +140,7 @@ export async function listOperationalIncidents(
       unresolvedCount: number;
       criticalCount: number;
       resolvedCount: number;
+      overdueCount: number;
     };
   };
 }
@@ -137,6 +152,7 @@ export async function createOperationalIncident(
     summary: string;
     source?: OperationalIncidentSource;
     severity?: OperationalIncidentSeverity;
+    baseSlaHours?: number;
     impactedArea?: string;
     customerImpact?: string;
     evidenceItems?: string[];
@@ -170,6 +186,8 @@ export async function updateOperationalIncident(
     source?: OperationalIncidentSource;
     severity?: OperationalIncidentSeverity;
     status?: OperationalIncidentStatus;
+    baseSlaHours?: number;
+    assignToMe?: boolean;
     impactedArea?: string;
     customerImpact?: string;
     evidenceItems?: string[];

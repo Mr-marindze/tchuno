@@ -1,4 +1,5 @@
 import { ApiPropertyOptional } from '@nestjs/swagger';
+import { Type } from 'class-transformer';
 import {
   OperationalIncidentSeverity,
   OperationalIncidentSource,
@@ -7,10 +8,14 @@ import {
 import {
   ArrayMaxSize,
   IsArray,
+  IsBoolean,
   IsEnum,
+  IsInt,
   IsOptional,
   IsString,
+  Max,
   MaxLength,
+  Min,
   MinLength,
 } from 'class-validator';
 
@@ -51,6 +56,18 @@ export class UpdateOperationalIncidentDto {
   @IsString()
   @MaxLength(240)
   customerImpact?: string;
+
+  @IsOptional()
+  @Type(() => Number)
+  @IsInt()
+  @Min(1)
+  @Max(168)
+  baseSlaHours?: number;
+
+  @ApiPropertyOptional({ description: 'Assign the case to the acting admin' })
+  @IsOptional()
+  @IsBoolean()
+  assignToMe?: boolean;
 
   @IsOptional()
   @IsArray()

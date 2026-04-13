@@ -19,6 +19,7 @@ import { ErrorResponseDto } from '../auth/dto/error-response.dto';
 import { AccessPolicyGuard } from '../auth/guards/access-policy.guard';
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
 import { CreateJobMessageDto } from './dto/create-job-message.dto';
+import { PresignUploadDto } from './dto/presign-upload.dto';
 import { MessagesService } from './messages.service';
 
 type AuthenticatedRequest = {
@@ -66,6 +67,18 @@ export class MessagesController {
     @Body() dto: CreateJobMessageDto,
   ) {
     return this.messagesService.send(jobId, req.user.sub, dto);
+  }
+
+  @Post('jobs/:jobId/uploads/presign')
+  @ApiOperation({ summary: 'Create presigned upload URL for message attachments' })
+  @ApiOkResponse({ description: 'Presigned URL generated' })
+  @ApiUnauthorizedResponse({ type: ErrorResponseDto })
+  presignUpload(
+    @Req() req: AuthenticatedRequest,
+    @Param('jobId') jobId: string,
+    @Body() dto: PresignUploadDto,
+  ) {
+    return this.messagesService.createUploadPresign(jobId, req.user.sub, dto);
   }
 
   @Post('jobs/:jobId/read')

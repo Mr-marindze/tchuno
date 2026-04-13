@@ -241,9 +241,25 @@ model JobMessage {
   readAt          DateTime?
   job             Job      @relation(fields: [jobId], references: [id], onDelete: Cascade)
 
+  attachments     JobMessageAttachment[]
+
   @@index([jobId, createdAt])
   @@index([recipientUserId, readAt, createdAt])
   @@index([senderUserId, createdAt])
+}
+
+model JobMessageAttachment {
+  id               String   @id @default(cuid())
+  jobMessageId     String
+  url              String
+  key              String?
+  contentType      String?
+  size             Int?
+  uploadedByUserId String?
+  createdAt        DateTime @default(now())
+  jobMessage       JobMessage @relation(fields: [jobMessageId], references: [id], onDelete: Cascade)
+
+  @@index([jobMessageId])
 }
 
 model TrustSafetyIntervention {
@@ -465,6 +481,8 @@ model OperationalIncident {
   source                          OperationalIncidentSource @default(SUPPORT)
   severity                        OperationalIncidentSeverity @default(MEDIUM)
   status                          OperationalIncidentStatus @default(OPEN)
+  baseSlaHours                    Int                       @default(24)
+  slaTargetAt                     DateTime
   impactedArea                    String?
   customerImpact                  String?
   evidenceItems                   String[]                  @default([])
@@ -475,6 +493,7 @@ model OperationalIncident {
   relatedRefundRequestId          String?
   relatedTrustSafetyInterventionId String?
   detectedAt                      DateTime                  @default(now())
+  assumedAt                       DateTime?
   resolvedAt                      DateTime?
   createdAt                       DateTime                  @default(now())
   updatedAt                       DateTime                  @updatedAt
@@ -483,11 +502,30 @@ model OperationalIncident {
   relatedJob                      Job?                      @relation(fields: [relatedJobId], references: [id], onDelete: SetNull)
   relatedRefundRequest            RefundRequest?            @relation(fields: [relatedRefundRequestId], references: [id], onDelete: SetNull)
   relatedTrustSafetyIntervention  TrustSafetyIntervention?  @relation(fields: [relatedTrustSafetyInterventionId], references: [id], onDelete: SetNull)
+  events                          OperationalIncidentEvent[]
 
   @@index([status, severity, detectedAt])
   @@index([source, status, detectedAt])
   @@index([ownerAdminUserId, status, updatedAt])
   @@index([relatedJobId, createdAt])
+  @@index([status, slaTargetAt])
+}
+
+model OperationalIncidentEvent {
+  id         String                           @id @default(cuid())
+  incidentId String
+  eventType  OperationalIncidentEventType
+  visibility OperationalIncidentEventVisibility @default(INTERNAL)
+  title      String
+  description String
+  actorUserId String?
+  actorName  String?
+  metadata   Json?
+  createdAt  DateTime                         @default(now())
+  incident   OperationalIncident              @relation(fields: [incidentId], references: [id], onDelete: Cascade)
+
+  @@index([incidentId, createdAt])
+  @@index([visibility, createdAt])
 }
 
 model PaymentEvent {
@@ -696,6 +734,21 @@ enum OperationalIncidentStatus {
   MONITORING
   RESOLVED
   CANCELED
+}
+
+enum OperationalIncidentEventType {
+  CASE_OPENED
+  EVIDENCE_ADDED
+  OWNER_ASSIGNED
+  STATUS_CHANGED
+  SLA_UPDATED
+  DECISION_RECORDED
+  CASE_CLOSED
+}
+
+enum OperationalIncidentEventVisibility {
+  INTERNAL
+  PARTICIPANTS
 }
 
 enum PaymentActorType {
