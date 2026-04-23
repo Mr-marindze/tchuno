@@ -18,6 +18,7 @@ import { JobsModule } from './jobs/jobs.module';
 import { MessagesModule } from './messages/messages.module';
 import { NotificationsModule } from './notifications/notifications.module';
 import { ObservabilityModule } from './observability/observability.module';
+import { RealtimeModule } from './realtime/realtime.module';
 import { PaymentsModule } from './payments/payments.module';
 import { PrismaModule } from './prisma/prisma.module';
 import { ReviewsModule } from './reviews/reviews.module';
@@ -57,6 +58,7 @@ const throttlerLimit = Number.isFinite(resolvedThrottleLimit)
     JobsModule,
     MessagesModule,
     NotificationsModule,
+    RealtimeModule,
     ObservabilityModule,
     PaymentsModule,
     ReviewsModule,

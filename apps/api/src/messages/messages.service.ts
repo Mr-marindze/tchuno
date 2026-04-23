@@ -12,6 +12,7 @@ import { TrustSafetyService } from '../trust-safety/trust-safety.service';
 import { CreateJobMessageDto } from './dto/create-job-message.dto';
 import { PresignUploadDto } from './dto/presign-upload.dto';
 import { StorageService } from '../storage/storage.service';
+import { RealtimeGateway } from '../realtime/realtime.gateway';
 
 const messageJobInclude = {
   client: {
@@ -82,6 +83,8 @@ export class MessagesService {
     private readonly notificationsService: NotificationsService,
     private readonly trustSafetyService: TrustSafetyService,
     private readonly storageService?: StorageService,
+    // Realtime gateway is optional for environments without sockets
+    private readonly realtimeGateway?: RealtimeGateway,
   ) {}
 
   async createUploadPresign(jobId: string, userId: string, dto: PresignUploadDto) {
@@ -322,6 +325,19 @@ export class MessagesService {
         jobId,
       } satisfies Prisma.JsonObject,
     });
+
+    try {
+      if (this.realtimeGateway) {
+        const payload = this.toMessageDto(created);
+        // notify sender and recipient rooms
+        this.realtimeGateway.emitToUsers('message.created', payload, [
+          access.counterpart.id,
+          userId,
+        ]);
+      }
+    } catch (err) {
+      // best-effort: do not block message delivery on realtime errors
+    }
 
     return {
       status: 'sent' as const,
