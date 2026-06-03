@@ -15,6 +15,7 @@ import {
 } from "@/components/marketplace/marketplace-worker-presenter";
 import { PublicPageShell } from "@/components/public/public-page-shell";
 import { buildAuthRoute, saveAuthIntent } from "@/lib/access-control";
+import { hasStoredSessionTokens } from "@/lib/auth";
 import { listCategories, Category } from "@/lib/categories";
 import { humanizeUnknownError } from "@/lib/http-errors";
 import { trackEvent } from "@/lib/tracking";
@@ -28,10 +29,11 @@ type TrustSignalTone = "is-ok" | "is-muted" | "is-danger";
 
 type WorkerTrustIndicator = {
   label:
-    | "Responde rápido"
-    | "Alta taxa de resposta"
-    | "Mais escolhido"
-    | "Disponível hoje";
+    | "Disponível para propostas"
+    | "Perfil avaliado"
+    | "Em destaque"
+    | "Disponível hoje"
+    | "Agenda limitada";
   tone: TrustSignalTone;
 };
 
@@ -52,15 +54,7 @@ export function PublicWorkersPage() {
   const [locationSearch, setLocationSearch] = useState("");
   const [categorySlug, setCategorySlug] = useState("");
   const [availability, setAvailability] = useState<"all" | "available">("all");
-  const [hasSession] = useState(() => {
-    if (typeof window === "undefined") {
-      return false;
-    }
-
-    const accessToken = localStorage.getItem("tchuno_access_token");
-    const refreshToken = localStorage.getItem("tchuno_refresh_token");
-    return Boolean(accessToken || refreshToken);
-  });
+  const [hasSession] = useState(() => hasStoredSessionTokens());
 
   useEffect(() => {
     if (typeof window === "undefined") {
@@ -241,25 +235,25 @@ export function PublicWorkersPage() {
     const relevanceRank = ranking.relevanceRankById[worker.id] ?? Number.MAX_SAFE_INTEGER;
 
     if (rankingLabel === "Mais procurado" || relevanceRank === 1) {
-      return { label: "Mais escolhido", tone: "is-ok" };
+      return { label: "Em destaque", tone: "is-ok" };
     }
 
     if (worker.isAvailable && worker.ratingCount >= 6) {
-      return { label: "Alta taxa de resposta", tone: "is-ok" };
+      return { label: "Perfil avaliado", tone: "is-ok" };
     }
 
     if (
       worker.isAvailable &&
       (worker.experienceYears >= 4 || (worker.ratingCount >= 3 && ratingValue >= 4.4))
     ) {
-      return { label: "Responde rápido", tone: "is-ok" };
+      return { label: "Disponível para propostas", tone: "is-ok" };
     }
 
     if (worker.isAvailable) {
       return { label: "Disponível hoje", tone: "is-ok" };
     }
 
-    return { label: "Mais escolhido", tone: "is-muted" };
+    return { label: "Agenda limitada", tone: "is-muted" };
   }
 
   function renderWorkerCard(worker: WorkerProfile, options?: { featured?: boolean }) {

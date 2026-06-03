@@ -144,9 +144,13 @@ export class AuthService {
   }
 
   async refresh(
-    refreshToken: string,
+    refreshToken: string | undefined,
     clientInfo?: SessionClientInfo,
   ): Promise<AuthResponse> {
+    if (!refreshToken) {
+      throw new UnauthorizedException('Invalid refresh token');
+    }
+
     const payload = this.verifyRefreshToken(refreshToken);
     const session = await this.prisma.session.findUnique({
       where: { id: payload.sid },

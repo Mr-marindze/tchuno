@@ -1,16 +1,15 @@
 import type { Metadata } from "next";
-import { Space_Grotesk } from "next/font/google";
 import { ToastProvider } from "@/components/toast-provider";
 import "./globals.css";
 
-const spaceGrotesk = Space_Grotesk({
-  variable: "--font-space-grotesk",
-  subsets: ["latin"],
-});
-
 export const metadata: Metadata = {
-  title: "Tchuno Web",
-  description: "Frontend para autenticação Tchuno",
+  title: {
+    default: "Tchuno",
+    template: "%s | Tchuno",
+  },
+  description:
+    "Marketplace moçambicano para pedir serviços locais, receber propostas e acompanhar o serviço com mais clareza.",
+  applicationName: "Tchuno",
 };
 
 export default function RootLayout({
@@ -20,7 +19,7 @@ export default function RootLayout({
 }>) {
   return (
     <html lang="pt">
-      <body className={`${spaceGrotesk.variable} antialiased`}>
+      <body className="antialiased">
         <ToastProvider>{children}</ToastProvider>
       </body>
     </html>

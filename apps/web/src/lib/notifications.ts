@@ -1,4 +1,4 @@
-import { API_URL } from '@/lib/auth';
+import { apiFetch, API_URL } from '@/lib/auth';
 import { readApiError } from '@/lib/http-errors';
 import type { PaginatedResponse } from '@/lib/pagination';
 
@@ -51,10 +51,8 @@ export async function listMyNotifications(
   accessToken: string,
   query?: ListNotificationsQuery,
 ): Promise<NotificationListResponse> {
-  const response = await fetch(`${API_URL}/notifications/me${buildQuery(query)}`, {
-    headers: {
-      Authorization: `Bearer ${accessToken}`,
-    },
+  const response = await apiFetch(`${API_URL}/notifications/me${buildQuery(query)}`, {
+    accessToken,
   });
 
   if (!response.ok) {
@@ -68,11 +66,9 @@ export async function markNotificationRead(
   accessToken: string,
   notificationId: string,
 ): Promise<InboxNotification> {
-  const response = await fetch(`${API_URL}/notifications/${notificationId}/read`, {
+  const response = await apiFetch(`${API_URL}/notifications/${notificationId}/read`, {
     method: 'POST',
-    headers: {
-      Authorization: `Bearer ${accessToken}`,
-    },
+    accessToken,
   });
 
   if (!response.ok) {
@@ -88,11 +84,9 @@ export async function markAllNotificationsRead(
   markedCount: number;
   updatedAt: string;
 }> {
-  const response = await fetch(`${API_URL}/notifications/me/read-all`, {
+  const response = await apiFetch(`${API_URL}/notifications/me/read-all`, {
     method: 'POST',
-    headers: {
-      Authorization: `Bearer ${accessToken}`,
-    },
+    accessToken,
   });
 
   if (!response.ok) {

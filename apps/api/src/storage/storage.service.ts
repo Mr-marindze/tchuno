@@ -59,8 +59,12 @@ export class StorageService {
       ACL: 'private',
     });
 
-    const url = await getSignedUrl(client, command, { expiresIn: expiresSeconds });
-    const expiresAt = new Date(Date.now() + expiresSeconds * 1000).toISOString();
+    const url = await getSignedUrl(client, command, {
+      expiresIn: expiresSeconds,
+    });
+    const expiresAt = new Date(
+      Date.now() + expiresSeconds * 1000,
+    ).toISOString();
 
     return { url, key, expiresAt };
   }

@@ -70,7 +70,9 @@ export class MessagesController {
   }
 
   @Post('jobs/:jobId/uploads/presign')
-  @ApiOperation({ summary: 'Create presigned upload URL for message attachments' })
+  @ApiOperation({
+    summary: 'Create presigned upload URL for message attachments',
+  })
   @ApiOkResponse({ description: 'Presigned URL generated' })
   @ApiUnauthorizedResponse({ type: ErrorResponseDto })
   presignUpload(

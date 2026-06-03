@@ -1,4 +1,4 @@
-import { API_URL } from '@/lib/auth';
+import { apiFetch, API_URL } from '@/lib/auth';
 import { parseApiError, readApiError, toApiError } from '@/lib/http-errors';
 import { PaginatedResponse } from '@/lib/pagination';
 
@@ -233,37 +233,63 @@ function buildQuery(query?: ListPaymentsQuery): string {
   return `?${params.toString()}`;
 }
 
+async function requestAuthedJson<T>(
+  path: string,
+  accessToken: string,
+  options?: {
+    method?: 'GET' | 'POST' | 'DELETE' | 'PATCH' | 'PUT';
+    body?: unknown;
+    reauthToken?: string;
+    useApiError?: boolean;
+  },
+): Promise<T> {
+  const response = await apiFetch(`${API_URL}${path}`, {
+    method: options?.method,
+    accessToken,
+    headers: {
+      ...(options?.body !== undefined
+        ? {
+            'Content-Type': 'application/json',
+          }
+        : {}),
+      ...(options?.reauthToken
+        ? {
+            'x-reauth-token': options.reauthToken,
+          }
+        : {}),
+    },
+    body:
+      options?.body !== undefined ? JSON.stringify(options.body) : undefined,
+  });
+
+  if (!response.ok) {
+    if (options?.useApiError) {
+      throw toApiError(await parseApiError(response));
+    }
+
+    throw new Error(await readApiError(response));
+  }
+
+  return (await response.json()) as T;
+}
+
 export async function listMyCustomerPaymentIntents(
   accessToken: string,
   query?: ListPaymentsQuery,
 ): Promise<PaginatedResponse<PaymentIntent>> {
-  const response = await fetch(`${API_URL}/payments/me${buildQuery(query)}`, {
-    headers: {
-      Authorization: `Bearer ${accessToken}`,
-    },
-  });
-
-  if (!response.ok) {
-    throw new Error(await readApiError(response));
-  }
-
-  return (await response.json()) as PaginatedResponse<PaymentIntent>;
+  return requestAuthedJson<PaginatedResponse<PaymentIntent>>(
+    `/payments/me${buildQuery(query)}`,
+    accessToken,
+  );
 }
 
 export async function getProviderEarningsSummary(
   accessToken: string,
 ): Promise<ProviderEarningsSummary> {
-  const response = await fetch(`${API_URL}/payments/provider/summary`, {
-    headers: {
-      Authorization: `Bearer ${accessToken}`,
-    },
-  });
-
-  if (!response.ok) {
-    throw new Error(await readApiError(response));
-  }
-
-  return (await response.json()) as ProviderEarningsSummary;
+  return requestAuthedJson<ProviderEarningsSummary>(
+    '/payments/provider/summary',
+    accessToken,
+  );
 }
 
 export async function payPaymentIntent(
@@ -274,37 +300,24 @@ export async function payPaymentIntent(
     simulate?: 'success' | 'pending' | 'failed' | 'reversed';
   },
 ): Promise<PaymentIntent> {
-  const response = await fetch(`${API_URL}/payments/intents/${paymentIntentId}/pay`, {
-    method: 'POST',
-    headers: {
-      Authorization: `Bearer ${accessToken}`,
-      'Content-Type': 'application/json',
+  return requestAuthedJson<PaymentIntent>(
+    `/payments/intents/${paymentIntentId}/pay`,
+    accessToken,
+    {
+      method: 'POST',
+      body: input ?? {},
     },
-    body: JSON.stringify(input ?? {}),
-  });
-
-  if (!response.ok) {
-    throw new Error(await readApiError(response));
-  }
-
-  return (await response.json()) as PaymentIntent;
+  );
 }
 
 export async function getJobFinancialState(
   accessToken: string,
   jobId: string,
 ): Promise<JobFinancialState> {
-  const response = await fetch(`${API_URL}/payments/jobs/${jobId}`, {
-    headers: {
-      Authorization: `Bearer ${accessToken}`,
-    },
-  });
-
-  if (!response.ok) {
-    throw new Error(await readApiError(response));
-  }
-
-  return (await response.json()) as JobFinancialState;
+  return requestAuthedJson<JobFinancialState>(
+    `/payments/jobs/${jobId}`,
+    accessToken,
+  );
 }
 
 export async function createJobRefundRequest(
@@ -316,134 +329,76 @@ export async function createJobRefundRequest(
     evidenceItems?: string[];
   },
 ): Promise<RefundRequest> {
-  const response = await fetch(`${API_URL}/payments/jobs/${jobId}/refund-requests`, {
-    method: 'POST',
-    headers: {
-      Authorization: `Bearer ${accessToken}`,
-      'Content-Type': 'application/json',
+  return requestAuthedJson<RefundRequest>(
+    `/payments/jobs/${jobId}/refund-requests`,
+    accessToken,
+    {
+      method: 'POST',
+      body: input,
     },
-    body: JSON.stringify(input),
-  });
-
-  if (!response.ok) {
-    throw new Error(await readApiError(response));
-  }
-
-  return (await response.json()) as RefundRequest;
+  );
 }
 
 export async function cancelMyRefundRequest(
   accessToken: string,
   refundRequestId: string,
 ): Promise<RefundRequest> {
-  const response = await fetch(`${API_URL}/payments/refunds/${refundRequestId}/cancel`, {
-    method: 'POST',
-    headers: {
-      Authorization: `Bearer ${accessToken}`,
+  return requestAuthedJson<RefundRequest>(
+    `/payments/refunds/${refundRequestId}/cancel`,
+    accessToken,
+    {
+      method: 'POST',
     },
-  });
-
-  if (!response.ok) {
-    throw new Error(await readApiError(response));
-  }
-
-  return (await response.json()) as RefundRequest;
+  );
 }
 
 export async function getAdminPaymentsOverview(
   accessToken: string,
 ): Promise<AdminPaymentsOverview> {
-  const response = await fetch(`${API_URL}/admin/payments/overview`, {
-    headers: {
-      Authorization: `Bearer ${accessToken}`,
-    },
-  });
-
-  if (!response.ok) {
-    throw new Error(await readApiError(response));
-  }
-
-  return (await response.json()) as AdminPaymentsOverview;
+  return requestAuthedJson<AdminPaymentsOverview>(
+    '/admin/payments/overview',
+    accessToken,
+  );
 }
 
 export async function listAdminPaymentIntents(
   accessToken: string,
   query?: ListPaymentsQuery,
 ): Promise<PaginatedResponse<PaymentIntent>> {
-  const response = await fetch(
-    `${API_URL}/admin/payments/intents${buildQuery(query)}`,
-    {
-      headers: {
-        Authorization: `Bearer ${accessToken}`,
-      },
-    },
+  return requestAuthedJson<PaginatedResponse<PaymentIntent>>(
+    `/admin/payments/intents${buildQuery(query)}`,
+    accessToken,
   );
-
-  if (!response.ok) {
-    throw new Error(await readApiError(response));
-  }
-
-  return (await response.json()) as PaginatedResponse<PaymentIntent>;
 }
 
 export async function listAdminPaymentTransactions(
   accessToken: string,
   query?: ListPaymentsQuery,
 ): Promise<PaginatedResponse<PaymentTransaction>> {
-  const response = await fetch(
-    `${API_URL}/admin/payments/transactions${buildQuery(query)}`,
-    {
-      headers: {
-        Authorization: `Bearer ${accessToken}`,
-      },
-    },
+  return requestAuthedJson<PaginatedResponse<PaymentTransaction>>(
+    `/admin/payments/transactions${buildQuery(query)}`,
+    accessToken,
   );
-
-  if (!response.ok) {
-    throw new Error(await readApiError(response));
-  }
-
-  return (await response.json()) as PaginatedResponse<PaymentTransaction>;
 }
 
 export async function listAdminRefundRequests(
   accessToken: string,
   query?: ListPaymentsQuery,
 ): Promise<PaginatedResponse<RefundRequest>> {
-  const response = await fetch(
-    `${API_URL}/admin/payments/refunds${buildQuery(query)}`,
-    {
-      headers: {
-        Authorization: `Bearer ${accessToken}`,
-      },
-    },
+  return requestAuthedJson<PaginatedResponse<RefundRequest>>(
+    `/admin/payments/refunds${buildQuery(query)}`,
+    accessToken,
   );
-
-  if (!response.ok) {
-    throw new Error(await readApiError(response));
-  }
-
-  return (await response.json()) as PaginatedResponse<RefundRequest>;
 }
 
 export async function listAdminPayouts(
   accessToken: string,
   query?: ListPaymentsQuery,
 ): Promise<PaginatedResponse<Payout>> {
-  const response = await fetch(
-    `${API_URL}/admin/payments/payouts${buildQuery(query)}`,
-    {
-      headers: {
-        Authorization: `Bearer ${accessToken}`,
-      },
-    },
+  return requestAuthedJson<PaginatedResponse<Payout>>(
+    `/admin/payments/payouts${buildQuery(query)}`,
+    accessToken,
   );
-
-  if (!response.ok) {
-    throw new Error(await readApiError(response));
-  }
-
-  return (await response.json()) as PaginatedResponse<Payout>;
 }
 
 export async function reconcileAdminTransaction(
@@ -453,23 +408,14 @@ export async function reconcileAdminTransaction(
     simulate?: 'success' | 'pending' | 'failed' | 'reversed';
   },
 ): Promise<PaymentTransaction> {
-  const response = await fetch(
-    `${API_URL}/payments/transactions/${transactionId}/reconcile`,
+  return requestAuthedJson<PaymentTransaction>(
+    `/payments/transactions/${transactionId}/reconcile`,
+    accessToken,
     {
       method: 'POST',
-      headers: {
-        Authorization: `Bearer ${accessToken}`,
-        'Content-Type': 'application/json',
-      },
-      body: JSON.stringify(input ?? {}),
+      body: input ?? {},
     },
   );
-
-  if (!response.ok) {
-    throw new Error(await readApiError(response));
-  }
-
-  return (await response.json()) as PaymentTransaction;
 }
 
 export async function reconcileAdminPendingCharges(
@@ -488,20 +434,7 @@ export async function reconcileAdminPendingCharges(
   stillPending: number;
   errors: Array<{ transactionId: string; reason: string }>;
 }> {
-  const response = await fetch(`${API_URL}/admin/payments/reconcile/pending`, {
-    method: 'POST',
-    headers: {
-      Authorization: `Bearer ${accessToken}`,
-      'Content-Type': 'application/json',
-    },
-    body: JSON.stringify(input ?? {}),
-  });
-
-  if (!response.ok) {
-    throw new Error(await readApiError(response));
-  }
-
-  return (await response.json()) as {
+  return requestAuthedJson<{
     source: string;
     scanned: number;
     reconciled: number;
@@ -510,7 +443,10 @@ export async function reconcileAdminPendingCharges(
     reversed: number;
     stillPending: number;
     errors: Array<{ transactionId: string; reason: string }>;
-  };
+  }>('/admin/payments/reconcile/pending', accessToken, {
+    method: 'POST',
+    body: input ?? {},
+  });
 }
 
 export async function createAdminRefund(
@@ -523,25 +459,12 @@ export async function createAdminRefund(
   },
   options?: AdminRequestOptions,
 ): Promise<RefundRequest> {
-  const response = await fetch(`${API_URL}/admin/payments/refunds`, {
+  return requestAuthedJson<RefundRequest>('/admin/payments/refunds', accessToken, {
     method: 'POST',
-    headers: {
-      Authorization: `Bearer ${accessToken}`,
-      'Content-Type': 'application/json',
-      ...(options?.reauthToken
-        ? {
-            'x-reauth-token': options.reauthToken,
-          }
-        : {}),
-    },
-    body: JSON.stringify(input),
+    body: input,
+    reauthToken: options?.reauthToken,
+    useApiError: true,
   });
-
-  if (!response.ok) {
-    throw toApiError(await parseApiError(response));
-  }
-
-  return (await response.json()) as RefundRequest;
 }
 
 export async function approveAdminRefund(
@@ -552,25 +475,16 @@ export async function approveAdminRefund(
   },
   options?: AdminRequestOptions,
 ): Promise<RefundRequest> {
-  const response = await fetch(`${API_URL}/admin/payments/refunds/${refundRequestId}/approve`, {
-    method: 'POST',
-    headers: {
-      Authorization: `Bearer ${accessToken}`,
-      'Content-Type': 'application/json',
-      ...(options?.reauthToken
-        ? {
-            'x-reauth-token': options.reauthToken,
-          }
-        : {}),
+  return requestAuthedJson<RefundRequest>(
+    `/admin/payments/refunds/${refundRequestId}/approve`,
+    accessToken,
+    {
+      method: 'POST',
+      body: input ?? {},
+      reauthToken: options?.reauthToken,
+      useApiError: true,
     },
-    body: JSON.stringify(input ?? {}),
-  });
-
-  if (!response.ok) {
-    throw toApiError(await parseApiError(response));
-  }
-
-  return (await response.json()) as RefundRequest;
+  );
 }
 
 export async function rejectAdminRefund(
@@ -582,25 +496,16 @@ export async function rejectAdminRefund(
   },
   options?: AdminRequestOptions,
 ): Promise<RefundRequest> {
-  const response = await fetch(`${API_URL}/admin/payments/refunds/${refundRequestId}/reject`, {
-    method: 'POST',
-    headers: {
-      Authorization: `Bearer ${accessToken}`,
-      'Content-Type': 'application/json',
-      ...(options?.reauthToken
-        ? {
-            'x-reauth-token': options.reauthToken,
-          }
-        : {}),
+  return requestAuthedJson<RefundRequest>(
+    `/admin/payments/refunds/${refundRequestId}/reject`,
+    accessToken,
+    {
+      method: 'POST',
+      body: input,
+      reauthToken: options?.reauthToken,
+      useApiError: true,
     },
-    body: JSON.stringify(input),
-  });
-
-  if (!response.ok) {
-    throw toApiError(await parseApiError(response));
-  }
-
-  return (await response.json()) as RefundRequest;
+  );
 }
 
 export async function createAdminPayout(
@@ -615,25 +520,12 @@ export async function createAdminPayout(
   },
   options?: AdminRequestOptions,
 ): Promise<Payout> {
-  const response = await fetch(`${API_URL}/admin/payments/payouts`, {
+  return requestAuthedJson<Payout>('/admin/payments/payouts', accessToken, {
     method: 'POST',
-    headers: {
-      Authorization: `Bearer ${accessToken}`,
-      'Content-Type': 'application/json',
-      ...(options?.reauthToken
-        ? {
-            'x-reauth-token': options.reauthToken,
-          }
-        : {}),
-    },
-    body: JSON.stringify(input),
+    body: input,
+    reauthToken: options?.reauthToken,
+    useApiError: true,
   });
-
-  if (!response.ok) {
-    throw toApiError(await parseApiError(response));
-  }
-
-  return (await response.json()) as Payout;
 }
 
 export async function approveAdminPayout(
@@ -641,23 +533,15 @@ export async function approveAdminPayout(
   payoutId: string,
   options?: AdminRequestOptions,
 ): Promise<Payout> {
-  const response = await fetch(`${API_URL}/admin/payments/payouts/${payoutId}/approve`, {
-    method: 'POST',
-    headers: {
-      Authorization: `Bearer ${accessToken}`,
-      ...(options?.reauthToken
-        ? {
-            'x-reauth-token': options.reauthToken,
-          }
-        : {}),
+  return requestAuthedJson<Payout>(
+    `/admin/payments/payouts/${payoutId}/approve`,
+    accessToken,
+    {
+      method: 'POST',
+      reauthToken: options?.reauthToken,
+      useApiError: true,
     },
-  });
-
-  if (!response.ok) {
-    throw toApiError(await parseApiError(response));
-  }
-
-  return (await response.json()) as Payout;
+  );
 }
 
 export async function processAdminPayout(
@@ -669,25 +553,16 @@ export async function processAdminPayout(
   },
   options?: AdminRequestOptions,
 ): Promise<Payout> {
-  const response = await fetch(`${API_URL}/admin/payments/payouts/${payoutId}/process`, {
-    method: 'POST',
-    headers: {
-      Authorization: `Bearer ${accessToken}`,
-      'Content-Type': 'application/json',
-      ...(options?.reauthToken
-        ? {
-            'x-reauth-token': options.reauthToken,
-          }
-        : {}),
+  return requestAuthedJson<Payout>(
+    `/admin/payments/payouts/${payoutId}/process`,
+    accessToken,
+    {
+      method: 'POST',
+      body: input ?? {},
+      reauthToken: options?.reauthToken,
+      useApiError: true,
     },
-    body: JSON.stringify(input ?? {}),
-  });
-
-  if (!response.ok) {
-    throw toApiError(await parseApiError(response));
-  }
-
-  return (await response.json()) as Payout;
+  );
 }
 
 export async function releaseAdminFunds(
@@ -700,26 +575,14 @@ export async function releaseAdminFunds(
   releasedAmount: number;
   currency: string;
 }> {
-  const response = await fetch(`${API_URL}/admin/payments/release/${jobId}`, {
-    method: 'POST',
-    headers: {
-      Authorization: `Bearer ${accessToken}`,
-      ...(options?.reauthToken
-        ? {
-            'x-reauth-token': options.reauthToken,
-          }
-        : {}),
-    },
-  });
-
-  if (!response.ok) {
-    throw toApiError(await parseApiError(response));
-  }
-
-  return (await response.json()) as {
+  return requestAuthedJson<{
     jobId: string;
     paymentIntentId: string;
     releasedAmount: number;
     currency: string;
-  };
+  }>(`/admin/payments/release/${jobId}`, accessToken, {
+    method: 'POST',
+    reauthToken: options?.reauthToken,
+    useApiError: true,
+  });
 }

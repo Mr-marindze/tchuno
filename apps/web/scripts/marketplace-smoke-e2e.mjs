@@ -8,7 +8,8 @@ import { chromium } from "playwright-core";
 
 const ROOT_DIR = fileURLToPath(new URL("../../../", import.meta.url));
 const WEB_PORT = Number(process.env.SMOKE_WEB_PORT ?? 3105);
-const WEB_URL = `http://127.0.0.1:${WEB_PORT}`;
+const WEB_URL = `http://localhost:${WEB_PORT}`;
+const API_URL = "http://localhost:3001";
 const CHROME_PATH = process.env.CHROME_PATH ?? "/usr/bin/google-chrome";
 const SMOKE_SCREENSHOT_DIR = path.join(
   ROOT_DIR,
@@ -272,6 +273,7 @@ function paginated(data, page = 1, limit = 20) {
 
 function resolveAuthProfile(request) {
   const authHeader = request.headers()["authorization"] ?? "";
+  const cookieHeader = request.headers()["cookie"] ?? "";
 
   if (authHeader === `Bearer ${TOKENS.admin}`) {
     return "admin";
@@ -285,11 +287,79 @@ function resolveAuthProfile(request) {
     return "customer";
   }
 
+  if (cookieHeader.includes("tchuno_smoke_profile=admin")) {
+    return "admin";
+  }
+
+  if (cookieHeader.includes("tchuno_smoke_profile=provider")) {
+    return "provider";
+  }
+
+  if (cookieHeader.includes("tchuno_smoke_profile=customer")) {
+    return "customer";
+  }
+
   return "public";
+}
+
+function buildMockAuthResponse(profile) {
+  if (profile === "admin") {
+    return {
+      user: {
+        id: "admin-1",
+        email: "admin@tchuno.local",
+        name: "Smoke Admin",
+        role: "ADMIN",
+      },
+      accessToken: TOKENS.admin,
+      refreshToken: `${TOKENS.admin}-refresh`,
+    };
+  }
+
+  if (profile === "provider") {
+    return {
+      user: {
+        id: "provider-1",
+        email: "provider@tchuno.local",
+        name: "Smoke Provider",
+        role: "USER",
+      },
+      accessToken: TOKENS.provider,
+      refreshToken: `${TOKENS.provider}-refresh`,
+    };
+  }
+
+  if (profile === "customer") {
+    return {
+      user: {
+        id: "customer-1",
+        email: "customer@tchuno.local",
+        name: "Smoke Customer",
+        role: "USER",
+      },
+      accessToken: TOKENS.customer,
+      refreshToken: `${TOKENS.customer}-refresh`,
+    };
+  }
+
+  return {
+    user: {
+      id: "guest",
+      email: "guest@tchuno.local",
+      name: "Guest",
+      role: "USER",
+    },
+    accessToken: "",
+    refreshToken: "",
+  };
 }
 
 function resolveMockBody(url, request) {
   const profile = resolveAuthProfile(request);
+
+  if (url.pathname === "/auth/refresh") {
+    return buildMockAuthResponse(profile);
+  }
 
   if (url.pathname === "/auth/me") {
     if (profile === "admin") {
@@ -581,13 +651,41 @@ function routePathToScreenshotName(routePath) {
   return `${base}--${normalizedQuery}`;
 }
 
-async function hasRoleWithName(page, role, name) {
-  try {
-    await page.getByRole(role, { name }).first().waitFor({ timeout: 3_000 });
-    return true;
-  } catch {
-    return false;
+async function waitForVisibleRoleName(page, role, name, timeout = 3_000) {
+  const deadline = Date.now() + timeout;
+
+  while (Date.now() < deadline) {
+    const locator = page.getByRole(role, { name });
+    const count = await locator.count();
+
+    for (let index = 0; index < count; index += 1) {
+      if (await locator.nth(index).isVisible()) {
+        return true;
+      }
+    }
+
+    await delay(200);
   }
+
+  return false;
+}
+
+async function hasRoleWithName(page, role, name) {
+  return waitForVisibleRoleName(page, role, name, 3_000);
+}
+
+async function waitForVisibleAction(page, name, timeout = 20_000) {
+  const hasButton = await waitForVisibleRoleName(page, "button", name, timeout);
+  if (hasButton) {
+    return;
+  }
+
+  const hasLink = await waitForVisibleRoleName(page, "link", name, timeout);
+  if (hasLink) {
+    return;
+  }
+
+  throw new Error(`No visible action found for ${String(name)}`);
 }
 
 async function assertA11yBasics(page, check, viewportName) {
@@ -667,14 +765,12 @@ async function assertRouteSpecificContent(page, check, viewportName) {
 function seedAuthStorage(profile) {
   if (profile === "public") {
     return {
-      accessToken: null,
-      refreshToken: null,
+      profile: null,
     };
   }
 
   return {
-    accessToken: TOKENS[profile],
-    refreshToken: `${TOKENS[profile]}-refresh`,
+    profile,
   };
 }
 
@@ -699,93 +795,105 @@ async function run() {
         {
           path: "/",
           auth: "public",
-          heading: "O que precisas hoje?",
-          block: "Profissionais em destaque",
-          cta: /Encontrar profissional|Entrar no Tchuno/,
+          heading: "Resolve serviços locais sem perder tempo.",
+          block: "Uma única explicação clara do fluxo",
+          cta: /Criar pedido/,
           mustHave: [
-            { type: "label", value: "Pesquisa principal" },
-            { type: "aria", value: "Categorias" },
-            { type: "text", value: "Profissionais em destaque" },
+            {
+              type: "text",
+              value: "Marketplace moçambicano de serviços locais",
+            },
+            { type: "aria", value: "Resumo visual do fluxo" },
+            {
+              type: "text",
+              value: "Sinais públicos para orientar a escolha",
+            },
           ],
         },
         {
           path: "/prestadores",
           auth: "public",
           heading: "Profissionais",
-          block: "Pesquisa por serviço, área ou profissional",
-          cta: /Procurar/,
+          block: "Usa perfis públicos como referência",
+          cta: /Atualizar perfis/,
           mustHave: [
-            { type: "label", value: "Pesquisa" },
+            { type: "label", value: "Filtro rápido" },
             { type: "label", value: "Área" },
             {
               type: "text",
               value:
-                "No Tchuno, o cliente cria pedido, recebe propostas e paga sinal antes do contacto",
+                "A escolha acontece depois de criares pedido e receberes propostas",
             },
           ],
         },
         {
           path: "/app/pedidos",
           auth: "customer",
-          heading: "Pedidos de Serviço",
-          block: "Sem sinal, sem contacto",
-          cta: /Criar pedido|Recarregar/,
+          heading: "Pedidos",
+          block: "Acompanha os pedidos e avança no fluxo de propostas",
+          cta: /Novo pedido/,
           mustHave: [
-            { type: "label", value: "Categoria" },
-            { type: "label", value: "Título" },
+            { type: "text", value: "Aguardando propostas" },
+            { type: "text", value: "Pagamento pendente" },
           ],
         },
         {
           path: "/app/pagamentos",
           auth: "customer",
           heading: "Pagamentos",
-          block: "Acompanha o estado financeiro",
+          block: "Histórico financeiro dos teus pedidos",
           cta: /Ver pedidos/,
           mustHave: [{ type: "text", value: "Total pago" }],
         },
         {
           path: "/pro/pedidos",
           auth: "provider",
-          heading: "Pedidos Disponíveis",
-          block: "Propor -> esperar seleção",
-          cta: /Enviar proposta/,
-          mustHave: [{ type: "label", value: "Preço proposto (MZN)" }],
+          heading: "Inbox do prestador",
+          block: "Vê convites e mercado aberto ordenados por fit real",
+          cta: /Ver propostas/,
+          mustHave: [{ type: "text", value: "Mercado aberto" }],
         },
         {
           path: "/pro/ganhos",
           auth: "provider",
           heading: "Ganhos",
-          block: "Controla saldos retidos",
-          cta: /Ver pedidos/,
+          block: "Saldo retido, saldo disponível",
+          cta: /Ver propostas/,
           mustHave: [{ type: "text", value: "Saldo disponível" }],
         },
         {
           path: "/pro/propostas",
           auth: "provider",
-          heading: "Propostas",
-          block: "Histórico das tuas propostas",
-          cta: /Ver pedido aberto/,
+          heading: "Propostas enviadas",
+          block: "Acompanha o que foi enviado",
+          cta: /Voltar aos pedidos/,
         },
         {
           path: "/admin/payments",
           auth: "admin",
-          heading: "Operação de Pagamentos",
-          block: "Monitoriza intents",
-          cta: /Reconciliar pendentes em lote/,
+          heading: "Pagamentos",
+          block: "Gestão de intents, refunds, payouts e reconciliação",
+          cta: /Reconciliar pendentes|Recarregar/,
+          mustHave: [{ type: "text", value: "Payouts pendentes" }],
         },
         {
           path: "/admin/users",
           auth: "admin",
-          heading: "Users",
+          heading: "Utilizadores",
           block: "utilizadores com atividade financeira",
-          cta: /Abrir payments/,
+          cta: /Copiar ID|Copiado/,
+          mustHave: [{ type: "text", value: "Clientes" }],
         },
         {
           path: "/admin/audit",
           auth: "admin",
-          heading: "Audit",
-          block: "Eventos recentes de transações",
-          cta: /Abrir payments/,
+          heading: "Auditoria",
+          block: "Eventos administrativos e de segurança",
+          cta: /Filtrar/,
+          mustHave: [
+            { type: "label", value: "Ação" },
+            { type: "label", value: "Estado" },
+          ],
         },
       ];
 
@@ -809,17 +917,33 @@ async function run() {
           });
 
           const seededTokens = seedAuthStorage(check.auth);
+          if (seededTokens?.profile) {
+            await context.addCookies([
+              {
+                name: "tchuno_session_present",
+                value: "1",
+                url: WEB_URL,
+                sameSite: "Lax",
+              },
+              {
+                name: "tchuno_smoke_profile",
+                value: seededTokens.profile,
+                url: API_URL,
+                sameSite: "Lax",
+              },
+            ]);
+          }
+
           await context.addInitScript((tokens) => {
             localStorage.removeItem("tchuno_access_token");
             localStorage.removeItem("tchuno_refresh_token");
             localStorage.setItem("tchuno_device_id", "smoke-device");
+            document.cookie =
+              "tchuno_session_present=; Path=/; Max-Age=0; SameSite=Lax";
 
-            if (tokens?.accessToken) {
-              localStorage.setItem("tchuno_access_token", tokens.accessToken);
-            }
-
-            if (tokens?.refreshToken) {
-              localStorage.setItem("tchuno_refresh_token", tokens.refreshToken);
+            if (tokens?.profile) {
+              document.cookie =
+                "tchuno_session_present=1; Path=/; SameSite=Lax";
             }
           }, seededTokens);
 
@@ -860,9 +984,7 @@ async function run() {
             timeout: 20_000,
           });
 
-          await page.getByText(check.cta).first().waitFor({
-            timeout: 20_000,
-          });
+          await waitForVisibleAction(page, check.cta, 20_000);
 
           await assertA11yBasics(page, check, viewportConfig.name);
           await assertRouteSpecificContent(page, check, viewportConfig.name);

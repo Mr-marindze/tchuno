@@ -1,4 +1,4 @@
-import { API_URL } from "@/lib/auth";
+import { apiFetch, API_URL } from "@/lib/auth";
 import { readApiError } from "@/lib/http-errors";
 import { PaginatedResponse } from "@/lib/pagination";
 
@@ -86,12 +86,10 @@ export async function listMyClientJobs(
   accessToken: string,
   query?: ListJobsQuery,
 ): Promise<PaginatedResponse<Job>> {
-  const response = await fetch(
+  const response = await apiFetch(
     `${API_URL}/jobs/me/client${buildQueryString(query)}`,
     {
-      headers: {
-        Authorization: `Bearer ${accessToken}`,
-      },
+      accessToken,
     },
   );
 
@@ -106,12 +104,10 @@ export async function listMyWorkerJobs(
   accessToken: string,
   query?: ListJobsQuery,
 ): Promise<PaginatedResponse<Job>> {
-  const response = await fetch(
+  const response = await apiFetch(
     `${API_URL}/jobs/me/worker${buildQueryString(query)}`,
     {
-      headers: {
-        Authorization: `Bearer ${accessToken}`,
-      },
+      accessToken,
     },
   );
 
@@ -143,10 +139,9 @@ export async function updateJobStatus(
     cancelReason?: string;
   },
 ): Promise<Job> {
-  const response = await fetch(`${API_URL}/jobs/${jobId}/status`, {
+  const response = await apiFetch(`${API_URL}/jobs/${jobId}/status`, {
     method: "PATCH",
     headers: {
-      Authorization: `Bearer ${accessToken}`,
       "Content-Type": "application/json",
     },
     body: JSON.stringify({
@@ -154,6 +149,7 @@ export async function updateJobStatus(
       quotedAmount: options?.quotedAmount,
       cancelReason: options?.cancelReason,
     }),
+    accessToken,
   });
 
   if (!response.ok) {
@@ -167,10 +163,8 @@ export async function getJobById(
   accessToken: string,
   jobId: string,
 ): Promise<JobDetails> {
-  const response = await fetch(`${API_URL}/jobs/${jobId}`, {
-    headers: {
-      Authorization: `Bearer ${accessToken}`,
-    },
+  const response = await apiFetch(`${API_URL}/jobs/${jobId}`, {
+    accessToken,
   });
 
   if (!response.ok) {

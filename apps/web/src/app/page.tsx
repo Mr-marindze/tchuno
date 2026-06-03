@@ -13,6 +13,7 @@ import {
 } from "@/components/public/landing-ui";
 import { useMarketplaceDiscovery } from "@/components/marketplace/use-marketplace-discovery";
 import { buildAuthRoute, saveAuthIntent } from "@/lib/access-control";
+import { hasStoredSessionTokens } from "@/lib/auth";
 import { trackEvent } from "@/lib/tracking";
 import styles from "./page.module.css";
 
@@ -93,15 +94,7 @@ function getAreaIcon(label: string): LandingIconName {
 export default function Home() {
   const router = useRouter();
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
-  const [hasSession] = useState(() => {
-    if (typeof window === "undefined") {
-      return false;
-    }
-
-    const accessToken = localStorage.getItem("tchuno_access_token");
-    const refreshToken = localStorage.getItem("tchuno_refresh_token");
-    return Boolean(accessToken || refreshToken);
-  });
+  const [hasSession] = useState(() => hasStoredSessionTokens());
 
   const loginHref = buildAuthRoute({
     mode: "login",
@@ -112,7 +105,12 @@ export default function Home() {
     nextPath: "/app/pedidos",
   });
 
-  const { marketCategories, trustSummary } = useMarketplaceDiscovery();
+  const {
+    discoveryLoading,
+    discoveryMessage,
+    marketCategories,
+    trustSummary,
+  } = useMarketplaceDiscovery();
 
   const landingAreas = useMemo(() => {
     const namesBySlug = new Map(
@@ -127,10 +125,27 @@ export default function Home() {
     );
   }, [marketCategories]);
 
+  const providerCount =
+    typeof trustSummary.totalCount === "number"
+      ? String(trustSummary.totalCount)
+      : trustSummary.state === "unavailable"
+        ? "Em atualização"
+        : "A validar";
   const averageRating =
+    typeof trustSummary.avgRating === "string" &&
     Number(trustSummary.avgRating) > 0
       ? `${trustSummary.avgRating}/5`
-      : "Sem avaliações";
+      : trustSummary.state === "unavailable"
+        ? "Em atualização"
+        : "Sem avaliações";
+  const responseEstimate =
+    trustSummary.responseEstimate ??
+    (trustSummary.state === "unavailable" ? "Em atualização" : "A validar");
+  const trustSectionNote = discoveryLoading
+    ? "Estamos a validar estes indicadores públicos antes de os mostrar por completo."
+    : trustSummary.state === "unavailable"
+      ? "Os indicadores públicos estão temporariamente em atualização. A navegação e os pedidos continuam disponíveis."
+      : "Estes sinais públicos ajudam a orientar a decisão, mas não substituem a comparação das propostas.";
 
   function goToCreateRequest(input?: { selectedService?: string }) {
     const nextPath = "/app/pedidos#novo-pedido";
@@ -338,27 +353,34 @@ export default function Home() {
         <section className={styles.section}>
           <div className={styles.sectionHeader}>
             <p className="kicker">Confiança</p>
-            <h2 className="section-title">Sinais rápidos para decidir melhor</h2>
+            <h2 className="section-title">Sinais públicos para orientar a escolha</h2>
+            <p
+              className={styles.sectionNotice}
+              aria-live={discoveryLoading ? "polite" : undefined}
+              title={trustSummary.state === "unavailable" ? discoveryMessage : undefined}
+            >
+              {trustSectionNote}
+            </p>
           </div>
 
           <div className={styles.statsGrid}>
             <StatCard
               icon="workers"
-              label="Profissionais disponíveis"
-              value={String(trustSummary.totalCount)}
-              note="Perfis com disponibilidade ativa no marketplace."
+              label="Perfis activos"
+              value={providerCount}
+              note="Perfis públicos com disponibilidade activa no marketplace."
             />
             <StatCard
               icon="rating"
-              label="Avaliação média"
+              label="Avaliação visível"
               value={averageRating}
-              note="Baseada nas avaliações públicas já disponíveis."
+              note="Mostra apenas avaliações públicas já publicadas."
             />
             <StatCard
               icon="clock"
-              label="Resposta média estimada"
-              value={trustSummary.responseEstimate}
-              note="Estimativa simples com base na atividade atual."
+              label="Janela típica de resposta"
+              value={responseEstimate}
+              note="Estimativa operacional. Não funciona como garantia."
             />
           </div>
         </section>

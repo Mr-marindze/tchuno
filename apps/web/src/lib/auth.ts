@@ -97,23 +97,122 @@ export type ListPasswordRecoveryRequestsQuery = {
 };
 
 export const API_URL = process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:3001";
-const ACCESS_TOKEN_KEY = "tchuno_access_token";
-const REFRESH_TOKEN_KEY = "tchuno_refresh_token";
 const DEVICE_ID_KEY = "tchuno_device_id";
+const SESSION_MARKER_COOKIE = "tchuno_session_present";
 
-async function postJson<T>(path: string, payload: unknown): Promise<T> {
-  const headers: Record<string, string> = {
-    "Content-Type": "application/json",
+type ApiFetchOptions = RequestInit & {
+  accessToken?: string | null;
+  retryOnUnauthorized?: boolean;
+};
+
+let currentAuth: AuthResponse | null = null;
+let refreshPromise: Promise<AuthResponse | null> | null = null;
+
+function sanitizeAuthResponse(auth: AuthResponse): AuthResponse {
+  return {
+    ...auth,
+    refreshToken: "",
   };
+}
 
-  if (typeof window !== "undefined") {
-    headers["x-device-id"] = getOrCreateDeviceId();
+function rememberSessionMarker(): void {
+  if (typeof document === "undefined") {
+    return;
   }
 
-  const response = await fetch(`${API_URL}${path}`, {
+  document.cookie = `${SESSION_MARKER_COOKIE}=1; Path=/; Max-Age=${7 * 24 * 60 * 60}; SameSite=Lax`;
+}
+
+function clearSessionMarker(): void {
+  if (typeof document === "undefined") {
+    return;
+  }
+
+  document.cookie = `${SESSION_MARKER_COOKIE}=; Path=/; Max-Age=0; SameSite=Lax`;
+}
+
+function hasSessionMarker(): boolean {
+  if (typeof document === "undefined") {
+    return false;
+  }
+
+  return document.cookie
+    .split(";")
+    .map((part) => part.trim())
+    .some((part) => part === `${SESSION_MARKER_COOKIE}=1`);
+}
+
+function buildHeaders(
+  headersInit?: HeadersInit,
+  accessToken?: string | null,
+): Headers {
+  const headers = new Headers(headersInit);
+  const resolvedToken = accessToken?.trim();
+
+  if (resolvedToken) {
+    headers.set("Authorization", `Bearer ${resolvedToken}`);
+  } else {
+    headers.delete("Authorization");
+  }
+
+  if (typeof window !== "undefined" && !headers.has("x-device-id")) {
+    headers.set("x-device-id", getOrCreateDeviceId());
+  }
+
+  return headers;
+}
+
+export async function apiFetch(
+  input: string,
+  init: ApiFetchOptions = {},
+): Promise<Response> {
+  const {
+    accessToken,
+    retryOnUnauthorized = true,
+    headers: headersInit,
+    credentials,
+    ...rest
+  } = init;
+
+  const resolvedToken = currentAuth?.accessToken ?? accessToken ?? undefined;
+  const response = await fetch(input, {
+    ...rest,
+    credentials: credentials ?? "include",
+    headers: buildHeaders(headersInit, resolvedToken),
+  });
+
+  if (response.status !== 401 || !retryOnUnauthorized) {
+    return response;
+  }
+
+  const refreshedAuth = await refreshSession();
+  if (!refreshedAuth?.accessToken) {
+    return response;
+  }
+
+  return fetch(input, {
+    ...rest,
+    credentials: credentials ?? "include",
+    headers: buildHeaders(headersInit, refreshedAuth.accessToken),
+  });
+}
+
+async function postJson<T>(
+  path: string,
+  payload: unknown,
+  options?: {
+    accessToken?: string | null;
+    retryOnUnauthorized?: boolean;
+  },
+): Promise<T> {
+  const response = await apiFetch(`${API_URL}${path}`, {
     method: "POST",
-    headers,
+    headers: {
+      "Content-Type": "application/json",
+    },
     body: JSON.stringify(payload),
+    accessToken: options?.accessToken,
+    retryOnUnauthorized: options?.retryOnUnauthorized ?? false,
   });
 
   if (!response.ok) {
@@ -127,11 +226,12 @@ async function postJson<T>(path: string, payload: unknown): Promise<T> {
   return (await response.json()) as T;
 }
 
-async function getJson<T>(path: string, accessToken: string): Promise<T> {
-  const response = await fetch(`${API_URL}${path}`, {
-    headers: {
-      Authorization: `Bearer ${accessToken}`,
-    },
+async function getJson<T>(
+  path: string,
+  accessToken?: string | null,
+): Promise<T> {
+  const response = await apiFetch(`${API_URL}${path}`, {
+    accessToken,
   });
 
   if (!response.ok) {
@@ -145,24 +245,28 @@ export function getStoredTokens(): {
   accessToken: string | null;
   refreshToken: string | null;
 } {
-  if (typeof window === "undefined") {
-    return { accessToken: null, refreshToken: null };
-  }
-
   return {
-    accessToken: localStorage.getItem(ACCESS_TOKEN_KEY),
-    refreshToken: localStorage.getItem(REFRESH_TOKEN_KEY),
+    accessToken: currentAuth?.accessToken ?? null,
+    refreshToken:
+      currentAuth?.refreshToken && currentAuth.refreshToken.trim().length > 0
+        ? currentAuth.refreshToken
+        : null,
   };
 }
 
+export function hasStoredSessionTokens(): boolean {
+  const { accessToken, refreshToken } = getStoredTokens();
+  return Boolean(accessToken || refreshToken || hasSessionMarker());
+}
+
 export function saveTokens(auth: AuthResponse): void {
-  localStorage.setItem(ACCESS_TOKEN_KEY, auth.accessToken);
-  localStorage.setItem(REFRESH_TOKEN_KEY, auth.refreshToken);
+  currentAuth = sanitizeAuthResponse(auth);
+  rememberSessionMarker();
 }
 
 export function clearTokens(): void {
-  localStorage.removeItem(ACCESS_TOKEN_KEY);
-  localStorage.removeItem(REFRESH_TOKEN_KEY);
+  currentAuth = null;
+  clearSessionMarker();
 }
 
 function createFallbackDeviceId(): string {
@@ -195,7 +299,9 @@ export async function register(input: {
   password: string;
   name?: string;
 }): Promise<AuthResponse> {
-  return postJson<AuthResponse>("/auth/register", input);
+  return sanitizeAuthResponse(
+    await postJson<AuthResponse>("/auth/register", input),
+  );
 }
 
 function buildPasswordRecoveryQuery(
@@ -222,7 +328,7 @@ export async function login(input: {
   email: string;
   password: string;
 }): Promise<AuthResponse> {
-  return postJson<AuthResponse>("/auth/login", input);
+  return sanitizeAuthResponse(await postJson<AuthResponse>("/auth/login", input));
 }
 
 export async function confirmReauth(input: {
@@ -230,16 +336,16 @@ export async function confirmReauth(input: {
   password: string;
   purpose?: string;
 }): Promise<ReauthResponse> {
-  const response = await fetch(`${API_URL}/auth/reauth/confirm`, {
+  const response = await apiFetch(`${API_URL}/auth/reauth/confirm`, {
     method: "POST",
     headers: {
-      Authorization: `Bearer ${input.accessToken}`,
       "Content-Type": "application/json",
     },
     body: JSON.stringify({
       password: input.password,
       purpose: input.purpose,
     }),
+    accessToken: input.accessToken,
   });
 
   if (!response.ok) {
@@ -249,8 +355,13 @@ export async function confirmReauth(input: {
   return (await response.json()) as ReauthResponse;
 }
 
-export async function refresh(refreshToken: string): Promise<AuthResponse> {
-  return postJson<AuthResponse>("/auth/refresh", { refreshToken });
+export async function refresh(refreshToken?: string): Promise<AuthResponse> {
+  return sanitizeAuthResponse(
+    await postJson<AuthResponse>(
+      "/auth/refresh",
+      refreshToken ? { refreshToken } : {},
+    ),
+  );
 }
 
 export async function requestPasswordRecovery(
@@ -261,18 +372,21 @@ export async function requestPasswordRecovery(
   });
 }
 
-export async function logout(refreshToken: string): Promise<void> {
-  await postJson<void>("/auth/logout", { refreshToken });
+export async function logout(refreshToken?: string): Promise<void> {
+  await postJson<void>(
+    "/auth/logout",
+    refreshToken ? { refreshToken } : {},
+  );
 }
 
 export async function logoutAll(accessToken: string): Promise<void> {
-  const response = await fetch(`${API_URL}/auth/logout-all`, {
+  const response = await apiFetch(`${API_URL}/auth/logout-all`, {
     method: "POST",
     headers: {
-      Authorization: `Bearer ${accessToken}`,
       "Content-Type": "application/json",
     },
     body: JSON.stringify({}),
+    accessToken,
   });
 
   if (!response.ok) {
@@ -280,7 +394,7 @@ export async function logoutAll(accessToken: string): Promise<void> {
   }
 }
 
-export async function getMe(accessToken: string): Promise<unknown> {
+export async function getMe(accessToken?: string | null): Promise<unknown> {
   return getJson<unknown>("/auth/me", accessToken);
 }
 
@@ -315,12 +429,10 @@ export async function listPasswordRecoveryRequests(
   accessToken: string,
   query?: ListPasswordRecoveryRequestsQuery,
 ): Promise<PaginatedResponse<PasswordRecoveryRequest>> {
-  const response = await fetch(
+  const response = await apiFetch(
     `${API_URL}/auth/password-recovery/requests${buildPasswordRecoveryQuery(query)}`,
     {
-      headers: {
-        Authorization: `Bearer ${accessToken}`,
-      },
+      accessToken,
     },
   );
 
@@ -339,13 +451,13 @@ export async function updatePasswordRecoveryRequest(
     note?: string;
   },
 ): Promise<PasswordRecoveryRequest> {
-  const response = await fetch(`${API_URL}/auth/password-recovery/requests/${id}`, {
+  const response = await apiFetch(`${API_URL}/auth/password-recovery/requests/${id}`, {
     method: "POST",
     headers: {
-      Authorization: `Bearer ${accessToken}`,
       "Content-Type": "application/json",
     },
     body: JSON.stringify(input),
+    accessToken,
   });
 
   if (!response.ok) {
@@ -359,11 +471,9 @@ export async function revokeSession(
   accessToken: string,
   sessionId: string,
 ): Promise<void> {
-  const response = await fetch(`${API_URL}/auth/sessions/${sessionId}`, {
+  const response = await apiFetch(`${API_URL}/auth/sessions/${sessionId}`, {
     method: "DELETE",
-    headers: {
-      Authorization: `Bearer ${accessToken}`,
-    },
+    accessToken,
   });
 
   if (!response.ok) {
@@ -372,15 +482,9 @@ export async function revokeSession(
 }
 
 export async function ensureSession(): Promise<SessionState | null> {
-  const { accessToken, refreshToken } = getStoredTokens();
-
-  if (!accessToken && !refreshToken) {
-    return null;
-  }
-
-  if (accessToken) {
+  if (currentAuth?.accessToken) {
     try {
-      const me = await getMe(accessToken);
+      const me = await getMe(currentAuth.accessToken);
       return {
         auth: {
           user: (me as { user?: AuthResponse["user"] }).user ?? {
@@ -389,8 +493,8 @@ export async function ensureSession(): Promise<SessionState | null> {
             name: null,
             role: "USER",
           },
-          accessToken,
-          refreshToken: refreshToken ?? "",
+          accessToken: currentAuth.accessToken,
+          refreshToken: currentAuth.refreshToken,
         },
         me,
       };
@@ -399,14 +503,18 @@ export async function ensureSession(): Promise<SessionState | null> {
     }
   }
 
-  if (!refreshToken) {
+  if (!hasStoredSessionTokens()) {
     clearTokens();
     return null;
   }
 
   try {
-    const auth = await refresh(refreshToken);
-    saveTokens(auth);
+    const auth = await refreshSession();
+    if (!auth) {
+      clearTokens();
+      return null;
+    }
+
     const me = await getMe(auth.accessToken);
     return { auth, me };
   } catch {
@@ -417,19 +525,36 @@ export async function ensureSession(): Promise<SessionState | null> {
 
 export function startAutoRefresh(onSuccess?: (auth: AuthResponse) => void): () => void {
   const timer = window.setInterval(async () => {
-    const { refreshToken } = getStoredTokens();
-    if (!refreshToken) {
+    if (!hasStoredSessionTokens()) {
       return;
     }
 
-    try {
-      const auth = await refresh(refreshToken);
-      saveTokens(auth);
+    const auth = await refreshSession();
+    if (auth) {
       onSuccess?.(auth);
-    } catch {
-      clearTokens();
     }
   }, 10 * 60 * 1000);
 
   return () => window.clearInterval(timer);
+}
+
+export async function refreshSession(): Promise<AuthResponse | null> {
+  if (refreshPromise) {
+    return refreshPromise;
+  }
+
+  refreshPromise = (async () => {
+    try {
+      const auth = await refresh(currentAuth?.refreshToken);
+      saveTokens(auth);
+      return currentAuth;
+    } catch {
+      clearTokens();
+      return null;
+    } finally {
+      refreshPromise = null;
+    }
+  })();
+
+  return refreshPromise;
 }

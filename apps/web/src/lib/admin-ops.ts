@@ -1,4 +1,4 @@
-import { API_URL } from '@/lib/auth';
+import { apiFetch, API_URL } from '@/lib/auth';
 import { Job } from '@/lib/jobs';
 import { readApiError } from '@/lib/http-errors';
 import { PaginatedResponse } from '@/lib/pagination';
@@ -109,10 +109,8 @@ function buildAuditQuery(query?: ListAdminAuditLogsQuery): string {
 export async function getAdminOpsOverview(
   accessToken: string,
 ): Promise<AdminOpsOverview> {
-  const response = await fetch(`${API_URL}/admin/ops/overview`, {
-    headers: {
-      Authorization: `Bearer ${accessToken}`,
-    },
+  const response = await apiFetch(`${API_URL}/admin/ops/overview`, {
+    accessToken,
   });
 
   if (!response.ok) {
@@ -126,12 +124,10 @@ export async function listAdminAuditLogs(
   accessToken: string,
   query?: ListAdminAuditLogsQuery,
 ): Promise<PaginatedResponse<AdminAuditLog>> {
-  const response = await fetch(
+  const response = await apiFetch(
     `${API_URL}/admin/ops/audit-logs${buildAuditQuery(query)}`,
     {
-      headers: {
-        Authorization: `Bearer ${accessToken}`,
-      },
+      accessToken,
     },
   );
 

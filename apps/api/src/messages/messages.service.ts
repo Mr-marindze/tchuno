@@ -87,7 +87,11 @@ export class MessagesService {
     private readonly realtimeGateway?: RealtimeGateway,
   ) {}
 
-  async createUploadPresign(jobId: string, userId: string, dto: PresignUploadDto) {
+  async createUploadPresign(
+    jobId: string,
+    userId: string,
+    dto: PresignUploadDto,
+  ) {
     const access = await this.getConversationOrThrow(jobId, userId);
     if (!access.contactUnlocked) {
       throw new ForbiddenException('Contact not unlocked for uploads');
@@ -98,7 +102,9 @@ export class MessagesService {
     }
 
     // build a storage key
-    const safeName = dto.fileName.replace(/[^a-zA-Z0-9._-]/g, '_').slice(0, 200);
+    const safeName = dto.fileName
+      .replace(/[^a-zA-Z0-9._-]/g, '_')
+      .slice(0, 200);
     const key = `uploads/messages/${jobId}/${Date.now()}-${safeName}`;
 
     const expires = Math.max(60, Number(dto.expiresIn ?? 300));
@@ -335,7 +341,7 @@ export class MessagesService {
           userId,
         ]);
       }
-    } catch (err) {
+    } catch {
       // best-effort: do not block message delivery on realtime errors
     }
 

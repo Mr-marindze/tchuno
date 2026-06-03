@@ -2,7 +2,7 @@
 
 import { useState } from 'react';
 import { clearAuthIntent } from '@/lib/access-control';
-import { clearTokens, getStoredTokens, logout } from '@/lib/auth';
+import { clearTokens, logout } from '@/lib/auth';
 
 type LogoutButtonProps = {
   className?: string;
@@ -25,10 +25,7 @@ export function LogoutButton({
     setRunning(true);
 
     try {
-      const { refreshToken } = getStoredTokens();
-      if (refreshToken) {
-        await logout(refreshToken);
-      }
+      await logout();
     } catch {
       // Continue logout locally even if remote revoke fails.
     } finally {

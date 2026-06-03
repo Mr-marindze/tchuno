@@ -1,4 +1,4 @@
-import { API_URL } from "@/lib/auth";
+import { apiFetch, API_URL } from "@/lib/auth";
 import { readApiError } from "@/lib/http-errors";
 import { PaginatedResponse } from "@/lib/pagination";
 
@@ -157,10 +157,8 @@ export async function listWorkerProfiles(
 export async function getMyWorkerProfile(
   accessToken: string,
 ): Promise<WorkerProfile | null> {
-  const response = await fetch(`${API_URL}/worker-profile/me`, {
-    headers: {
-      Authorization: `Bearer ${accessToken}`,
-    },
+  const response = await apiFetch(`${API_URL}/worker-profile/me`, {
+    accessToken,
   });
 
   if (response.status === 404) {
@@ -190,13 +188,13 @@ export async function upsertMyWorkerProfile(
   accessToken: string,
   input: UpsertWorkerProfileInput,
 ): Promise<WorkerProfile> {
-  const response = await fetch(`${API_URL}/worker-profile/me`, {
+  const response = await apiFetch(`${API_URL}/worker-profile/me`, {
     method: "PUT",
     headers: {
-      Authorization: `Bearer ${accessToken}`,
       "Content-Type": "application/json",
     },
     body: JSON.stringify(input),
+    accessToken,
   });
 
   if (!response.ok) {

@@ -1,4 +1,4 @@
-import { API_URL } from "@/lib/auth";
+import { apiFetch, API_URL } from "@/lib/auth";
 import { readApiError } from "@/lib/http-errors";
 import { PaginatedResponse } from "@/lib/pagination";
 
@@ -52,13 +52,13 @@ export async function createReview(
   accessToken: string,
   input: CreateReviewInput,
 ): Promise<Review> {
-  const response = await fetch(`${API_URL}/reviews`, {
+  const response = await apiFetch(`${API_URL}/reviews`, {
     method: "POST",
     headers: {
-      Authorization: `Bearer ${accessToken}`,
       "Content-Type": "application/json",
     },
     body: JSON.stringify(input),
+    accessToken,
   });
 
   if (!response.ok) {
@@ -72,12 +72,10 @@ export async function listMyReviews(
   accessToken: string,
   query?: ListReviewsQuery,
 ): Promise<PaginatedResponse<Review>> {
-  const response = await fetch(
+  const response = await apiFetch(
     `${API_URL}/reviews/me${buildQueryString(query)}`,
     {
-      headers: {
-        Authorization: `Bearer ${accessToken}`,
-      },
+      accessToken,
     },
   );
 

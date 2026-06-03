@@ -1,4 +1,4 @@
-import { API_URL } from '@/lib/auth';
+import { apiFetch, API_URL } from '@/lib/auth';
 import { readApiError } from '@/lib/http-errors';
 import { PaginatedResponse } from '@/lib/pagination';
 
@@ -249,13 +249,13 @@ export async function createServiceRequest(
   accessToken: string,
   input: CreateServiceRequestInput,
 ): Promise<ServiceRequest> {
-  const response = await fetch(`${API_URL}/service-requests`, {
+  const response = await apiFetch(`${API_URL}/service-requests`, {
     method: 'POST',
     headers: {
-      Authorization: `Bearer ${accessToken}`,
       'Content-Type': 'application/json',
     },
     body: JSON.stringify(input),
+    accessToken,
   });
 
   if (!response.ok) {
@@ -269,12 +269,10 @@ export async function listMyServiceRequests(
   accessToken: string,
   query?: ListServiceRequestsQuery,
 ): Promise<PaginatedResponse<ServiceRequest>> {
-  const response = await fetch(
+  const response = await apiFetch(
     `${API_URL}/service-requests/me${buildQuery(query)}`,
     {
-      headers: {
-        Authorization: `Bearer ${accessToken}`,
-      },
+      accessToken,
     },
   );
 
@@ -289,12 +287,10 @@ export async function listOpenServiceRequests(
   accessToken: string,
   query?: ListServiceRequestsQuery,
 ): Promise<PaginatedResponse<ServiceRequest>> {
-  const response = await fetch(
+  const response = await apiFetch(
     `${API_URL}/service-requests/open${buildQuery(query)}`,
     {
-      headers: {
-        Authorization: `Bearer ${accessToken}`,
-      },
+      accessToken,
     },
   );
 
@@ -309,10 +305,8 @@ export async function getServiceRequestById(
   accessToken: string,
   requestId: string,
 ): Promise<ServiceRequest> {
-  const response = await fetch(`${API_URL}/service-requests/${requestId}`, {
-    headers: {
-      Authorization: `Bearer ${accessToken}`,
-    },
+  const response = await apiFetch(`${API_URL}/service-requests/${requestId}`, {
+    accessToken,
   });
 
   if (!response.ok) {
@@ -327,15 +321,15 @@ export async function recreateServiceRequest(
   requestId: string,
   input?: RecreateServiceRequestInput,
 ): Promise<ServiceRequest> {
-  const response = await fetch(
+  const response = await apiFetch(
     `${API_URL}/service-requests/${requestId}/recreate`,
     {
       method: 'POST',
       headers: {
-        Authorization: `Bearer ${accessToken}`,
         'Content-Type': 'application/json',
       },
       body: JSON.stringify(input ?? {}),
+      accessToken,
     },
   );
 
@@ -351,13 +345,13 @@ export async function updateServiceRequest(
   requestId: string,
   input: UpdateServiceRequestInput,
 ): Promise<ServiceRequest> {
-  const response = await fetch(`${API_URL}/service-requests/${requestId}`, {
+  const response = await apiFetch(`${API_URL}/service-requests/${requestId}`, {
     method: 'PATCH',
     headers: {
-      Authorization: `Bearer ${accessToken}`,
       'Content-Type': 'application/json',
     },
     body: JSON.stringify(input),
+    accessToken,
   });
 
   if (!response.ok) {
@@ -372,13 +366,13 @@ export async function submitProposal(
   requestId: string,
   input: SubmitProposalInput,
 ): Promise<Proposal> {
-  const response = await fetch(`${API_URL}/service-requests/${requestId}/proposals`, {
+  const response = await apiFetch(`${API_URL}/service-requests/${requestId}/proposals`, {
     method: 'POST',
     headers: {
-      Authorization: `Bearer ${accessToken}`,
       'Content-Type': 'application/json',
     },
     body: JSON.stringify(input),
+    accessToken,
   });
 
   if (!response.ok) {
@@ -392,10 +386,8 @@ export async function listRequestProposals(
   accessToken: string,
   requestId: string,
 ): Promise<Proposal[]> {
-  const response = await fetch(`${API_URL}/service-requests/${requestId}/proposals`, {
-    headers: {
-      Authorization: `Bearer ${accessToken}`,
-    },
+  const response = await apiFetch(`${API_URL}/service-requests/${requestId}/proposals`, {
+    accessToken,
   });
 
   if (!response.ok) {
@@ -408,10 +400,8 @@ export async function listRequestProposals(
 export async function listMyProviderProposals(
   accessToken: string,
 ): Promise<ProviderProposalFeedItem[]> {
-  const response = await fetch(`${API_URL}/service-requests/proposals/mine`, {
-    headers: {
-      Authorization: `Bearer ${accessToken}`,
-    },
+  const response = await apiFetch(`${API_URL}/service-requests/proposals/mine`, {
+    accessToken,
   });
 
   if (!response.ok) {
@@ -441,15 +431,15 @@ export async function selectProposal(
   } | null;
   idempotent: boolean;
 }> {
-  const response = await fetch(
+  const response = await apiFetch(
     `${API_URL}/service-requests/${requestId}/select/${proposalId}`,
     {
       method: 'POST',
       headers: {
-        Authorization: `Bearer ${accessToken}`,
         'Content-Type': 'application/json',
       },
       body: JSON.stringify(input ?? {}),
+      accessToken,
     },
   );
 
@@ -479,15 +469,15 @@ export async function createRequestInvitation(
   requestId: string,
   input: CreateRequestInvitationInput,
 ): Promise<RequestInvitation> {
-  const response = await fetch(
+  const response = await apiFetch(
     `${API_URL}/service-requests/${requestId}/invitations`,
     {
       method: 'POST',
       headers: {
-        Authorization: `Bearer ${accessToken}`,
         'Content-Type': 'application/json',
       },
       body: JSON.stringify(input),
+      accessToken,
     },
   );
 
@@ -502,12 +492,10 @@ export async function listRequestInvitations(
   accessToken: string,
   requestId: string,
 ): Promise<RequestInvitation[]> {
-  const response = await fetch(
+  const response = await apiFetch(
     `${API_URL}/service-requests/${requestId}/invitations`,
     {
-      headers: {
-        Authorization: `Bearer ${accessToken}`,
-      },
+      accessToken,
     },
   );
 
@@ -521,10 +509,8 @@ export async function listRequestInvitations(
 export async function listMyRequestInvitations(
   accessToken: string,
 ): Promise<ProviderRequestInvitation[]> {
-  const response = await fetch(`${API_URL}/service-requests/invitations/mine`, {
-    headers: {
-      Authorization: `Bearer ${accessToken}`,
-    },
+  const response = await apiFetch(`${API_URL}/service-requests/invitations/mine`, {
+    accessToken,
   });
 
   if (!response.ok) {
@@ -538,13 +524,11 @@ export async function declineRequestInvitation(
   accessToken: string,
   invitationId: string,
 ): Promise<RequestInvitation> {
-  const response = await fetch(
+  const response = await apiFetch(
     `${API_URL}/service-requests/invitations/${invitationId}/decline`,
     {
       method: 'POST',
-      headers: {
-        Authorization: `Bearer ${accessToken}`,
-      },
+      accessToken,
     },
   );
 

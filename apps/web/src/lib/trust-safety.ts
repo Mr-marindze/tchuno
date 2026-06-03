@@ -1,4 +1,4 @@
-import { API_URL } from '@/lib/auth';
+import { apiFetch, API_URL } from '@/lib/auth';
 import { parseApiError, toApiError } from '@/lib/http-errors';
 import type { TrustSafetyIntervention } from '@/lib/messages';
 import { PaginatedResponse } from '@/lib/pagination';
@@ -54,14 +54,12 @@ export async function listAdminTrustSafetyInterventions(
     params.set('status', query.status);
   }
 
-  const response = await fetch(
+  const response = await apiFetch(
     `${API_URL}/admin/trust-safety/interventions${
       params.size > 0 ? `?${params.toString()}` : ''
     }`,
     {
-      headers: {
-        Authorization: `Bearer ${accessToken}`,
-      },
+      accessToken,
     },
   );
 
@@ -86,15 +84,15 @@ export async function reviewAdminTrustSafetyIntervention(
     resolutionNote?: string;
   },
 ): Promise<AdminTrustSafetyIntervention> {
-  const response = await fetch(
+  const response = await apiFetch(
     `${API_URL}/admin/trust-safety/interventions/${interventionId}/review`,
     {
       method: 'POST',
       headers: {
-        Authorization: `Bearer ${accessToken}`,
         'Content-Type': 'application/json',
       },
       body: JSON.stringify(input),
+      accessToken,
     },
   );
 

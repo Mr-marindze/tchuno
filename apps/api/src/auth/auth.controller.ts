@@ -9,6 +9,7 @@ import {
   Query,
   Post,
   Req,
+  Res,
   UseGuards,
 } from '@nestjs/common';
 import {
@@ -28,7 +29,7 @@ import {
   ApiUnauthorizedResponse,
 } from '@nestjs/swagger';
 import { Throttle } from '@nestjs/throttler';
-import type { Request } from 'express';
+import type { Request, Response } from 'express';
 import { AppRole } from './authorization.types';
 import { RequireAppRoles } from './decorators/require-app-roles.decorator';
 import { AuthService } from './auth.service';
@@ -48,6 +49,7 @@ import { UpdatePasswordRecoveryRequestDto } from './dto/update-password-recovery
 import { AuthorizationService } from './authorization.service';
 import { JwtAuthGuard } from './guards/jwt-auth.guard';
 import { ReauthService } from './reauth.service';
+import { AuthCookieService } from './auth-cookie.service';
 import { SessionClientInfo } from './types';
 import { AdminSubrole } from '@prisma/client';
 
@@ -79,6 +81,7 @@ export class AuthController {
     private readonly authService: AuthService,
     private readonly authorizationService: AuthorizationService,
     private readonly reauthService: ReauthService,
+    private readonly authCookieService: AuthCookieService,
   ) {}
 
   @Post('register')
@@ -88,8 +91,17 @@ export class AuthController {
   @ApiBadRequestResponse({ type: ErrorResponseDto })
   @ApiConflictResponse({ type: ErrorResponseDto })
   @ApiTooManyRequestsResponse({ type: ErrorResponseDto })
-  register(@Body() dto: RegisterDto, @Req() req: Request) {
-    return this.authService.register(dto, this.extractClientInfo(req));
+  async register(
+    @Body() dto: RegisterDto,
+    @Req() req: Request,
+    @Res({ passthrough: true }) res: Response,
+  ) {
+    const auth = await this.authService.register(
+      dto,
+      this.extractClientInfo(req),
+    );
+    this.authCookieService.applyAuthCookies(res, auth);
+    return auth;
   }
 
   @Post('login')
@@ -100,8 +112,14 @@ export class AuthController {
   @ApiBadRequestResponse({ type: ErrorResponseDto })
   @ApiUnauthorizedResponse({ type: ErrorResponseDto })
   @ApiTooManyRequestsResponse({ type: ErrorResponseDto })
-  login(@Body() dto: LoginDto, @Req() req: Request) {
-    return this.authService.login(dto, this.extractClientInfo(req));
+  async login(
+    @Body() dto: LoginDto,
+    @Req() req: Request,
+    @Res({ passthrough: true }) res: Response,
+  ) {
+    const auth = await this.authService.login(dto, this.extractClientInfo(req));
+    this.authCookieService.applyAuthCookies(res, auth);
+    return auth;
   }
 
   @Post('refresh')
@@ -113,11 +131,22 @@ export class AuthController {
   @ApiBadRequestResponse({ type: ErrorResponseDto })
   @ApiUnauthorizedResponse({ type: ErrorResponseDto })
   @ApiTooManyRequestsResponse({ type: ErrorResponseDto })
-  refresh(@Body() dto: RefreshTokenDto, @Req() req: Request) {
-    return this.authService.refresh(
-      dto.refreshToken,
-      this.extractClientInfo(req),
-    );
+  async refresh(
+    @Body() dto: RefreshTokenDto,
+    @Req() req: Request,
+    @Res({ passthrough: true }) res: Response,
+  ) {
+    try {
+      const auth = await this.authService.refresh(
+        dto.refreshToken ?? this.authCookieService.readRefreshToken(req),
+        this.extractClientInfo(req),
+      );
+      this.authCookieService.applyAuthCookies(res, auth);
+      return auth;
+    } catch (error) {
+      this.authCookieService.clearAuthCookies(res);
+      throw error;
+    }
   }
 
   @Post('password-recovery/request')
@@ -169,8 +198,15 @@ export class AuthController {
   @ApiBody({ type: RefreshTokenDto })
   @ApiNoContentResponse({ description: 'Successfully logged out' })
   @ApiBadRequestResponse({ type: ErrorResponseDto })
-  logout(@Body() dto: RefreshTokenDto) {
-    return this.authService.logout(dto.refreshToken);
+  async logout(
+    @Body() dto: RefreshTokenDto,
+    @Req() req: Request,
+    @Res({ passthrough: true }) res: Response,
+  ) {
+    await this.authService.logout(
+      dto.refreshToken ?? this.authCookieService.readRefreshToken(req),
+    );
+    this.authCookieService.clearAuthCookies(res);
   }
 
   @Post('logout-all')
@@ -182,8 +218,12 @@ export class AuthController {
   })
   @ApiNoContentResponse({ description: 'All sessions revoked' })
   @ApiUnauthorizedResponse({ type: ErrorResponseDto })
-  logoutAll(@Req() req: AuthenticatedRequest) {
-    return this.authService.logoutAll(req.user.sub);
+  async logoutAll(
+    @Req() req: AuthenticatedRequest,
+    @Res({ passthrough: true }) res: Response,
+  ) {
+    await this.authService.logoutAll(req.user.sub);
+    this.authCookieService.clearAuthCookies(res);
   }
 
   @Get('password-recovery/requests')

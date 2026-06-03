@@ -1,4 +1,4 @@
-import { API_URL } from "@/lib/auth";
+import { apiFetch, API_URL } from "@/lib/auth";
 import { parseApiError, readApiError, toApiError } from "@/lib/http-errors";
 
 export type Category = {
@@ -50,10 +50,9 @@ export async function createCategory(
   input: CreateCategoryInput,
   options?: AdminRequestOptions,
 ): Promise<Category> {
-  const response = await fetch(`${API_URL}/categories`, {
+  const response = await apiFetch(`${API_URL}/categories`, {
     method: "POST",
     headers: {
-      Authorization: `Bearer ${accessToken}`,
       "Content-Type": "application/json",
       ...(options?.reauthToken
         ? {
@@ -62,6 +61,7 @@ export async function createCategory(
         : {}),
     },
     body: JSON.stringify(input),
+    accessToken,
   });
 
   if (!response.ok) {
@@ -76,16 +76,16 @@ export async function deactivateCategory(
   categoryId: string,
   options?: AdminRequestOptions,
 ): Promise<void> {
-  const response = await fetch(`${API_URL}/categories/${categoryId}`, {
+  const response = await apiFetch(`${API_URL}/categories/${categoryId}`, {
     method: "DELETE",
     headers: {
-      Authorization: `Bearer ${accessToken}`,
       ...(options?.reauthToken
         ? {
             "x-reauth-token": options.reauthToken,
           }
         : {}),
     },
+    accessToken,
   });
 
   if (!response.ok) {

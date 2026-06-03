@@ -16,6 +16,7 @@ import {
 import {
   AuthResponse,
   ensureSession,
+  hasStoredSessionTokens,
   login,
   register,
   saveTokens,
@@ -70,11 +71,15 @@ function getResolvedRole(auth: AuthResponse, me: unknown): AppRole {
 
 export function AuthEntryForm({ mode }: AuthEntryFormProps) {
   const router = useRouter();
-  const [email, setEmail] = useState("user1@tchuno.local");
-  const [password, setPassword] = useState("abc12345");
-  const [name, setName] = useState("User 1");
+  const [email, setEmail] = useState("");
+  const [password, setPassword] = useState("");
+  const [name, setName] = useState("");
   const [isSubmitting, setIsSubmitting] = useState(false);
-  const [status, setStatus] = useState("Pronto para autenticar.");
+  const [status, setStatus] = useState(
+    mode === "login"
+      ? "Preenche os teus dados para entrar."
+      : "Preenche os teus dados para criar conta.",
+  );
   const [intentPreview, setIntentPreview] = useState<ReturnType<typeof readAuthIntent>>(null);
   const [safeNextPath, setSafeNextPath] = useState<string | null>(null);
   const [forceLogin, setForceLogin] = useState(false);
@@ -190,8 +195,13 @@ export function AuthEntryForm({ mode }: AuthEntryFormProps) {
             Email
             <input
               type="email"
+              autoComplete="email"
+              autoCorrect="off"
+              autoCapitalize="none"
+              inputMode="email"
               value={email}
               onChange={(event) => setEmail(event.target.value)}
+              placeholder="nome@exemplo.com"
               required
             />
           </label>
@@ -200,11 +210,13 @@ export function AuthEntryForm({ mode }: AuthEntryFormProps) {
             Password
             <input
               type="password"
+              autoComplete={mode === "login" ? "current-password" : "new-password"}
               value={password}
               onChange={(event) => setPassword(event.target.value)}
               minLength={8}
               pattern="(?=.*[A-Za-z])(?=.*[0-9]).{8,}"
               title="Use pelo menos 8 caracteres, incluindo 1 letra e 1 número."
+              placeholder="Pelo menos 8 caracteres"
               required
             />
           </label>
@@ -214,8 +226,10 @@ export function AuthEntryForm({ mode }: AuthEntryFormProps) {
               Nome (opcional)
               <input
                 type="text"
+                autoComplete="name"
                 value={name}
                 onChange={(event) => setName(event.target.value)}
+                placeholder="Como queres aparecer no Tchuno"
                 maxLength={80}
               />
             </label>
@@ -246,6 +260,12 @@ export function AuthEntryForm({ mode }: AuthEntryFormProps) {
         {intentPreview ? (
           <p className="status">
             Continuação guardada: <strong>{intentPreview.nextPath}</strong>
+          </p>
+        ) : null}
+
+        {mode === "login" && process.env.NODE_ENV !== "production" && !hasStoredSessionTokens() ? (
+          <p className="status">
+            Ambiente local: usa uma conta seeded no backend ou cria uma conta nova.
           </p>
         ) : null}
 

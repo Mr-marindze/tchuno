@@ -6,6 +6,7 @@ import { PrismaModule } from '../prisma/prisma.module';
 import { AuthController } from './auth.controller';
 import { AuthorizationService } from './authorization.service';
 import { AuthService } from './auth.service';
+import { AuthCookieService } from './auth-cookie.service';
 import { AccessPolicyGuard } from './guards/access-policy.guard';
 import { JwtAuthGuard } from './guards/jwt-auth.guard';
 import { AdminActionAuditInterceptor } from './interceptors/admin-action-audit.interceptor';
@@ -27,6 +28,7 @@ import { JwtStrategy } from './strategies/jwt.strategy';
   controllers: [AuthController],
   providers: [
     AuthService,
+    AuthCookieService,
     JwtStrategy,
     JwtAuthGuard,
     AuthorizationService,
@@ -36,7 +38,9 @@ import { JwtStrategy } from './strategies/jwt.strategy';
     AdminActionAuditInterceptor,
   ],
   exports: [
+    JwtModule,
     AuthService,
+    AuthCookieService,
     AuthorizationService,
     ReauthService,
     AccessPolicyGuard,

@@ -1,4 +1,4 @@
-import { API_URL } from '@/lib/auth';
+import { apiFetch, API_URL } from '@/lib/auth';
 import { readApiError } from '@/lib/http-errors';
 
 export type MessageConversationSummary = {
@@ -97,10 +97,8 @@ export type SendJobMessageResult =
 export async function listMyMessageConversations(
   accessToken: string,
 ): Promise<MessageConversationSummary[]> {
-  const response = await fetch(`${API_URL}/messages/me`, {
-    headers: {
-      Authorization: `Bearer ${accessToken}`,
-    },
+  const response = await apiFetch(`${API_URL}/messages/me`, {
+    accessToken,
   });
 
   if (!response.ok) {
@@ -114,10 +112,8 @@ export async function getJobConversation(
   accessToken: string,
   jobId: string,
 ): Promise<JobConversation> {
-  const response = await fetch(`${API_URL}/messages/jobs/${jobId}`, {
-    headers: {
-      Authorization: `Bearer ${accessToken}`,
-    },
+  const response = await apiFetch(`${API_URL}/messages/jobs/${jobId}`, {
+    accessToken,
   });
 
   if (!response.ok) {
@@ -132,13 +128,13 @@ export async function sendJobMessage(
   jobId: string,
   input: { content: string },
 ): Promise<SendJobMessageResult> {
-  const response = await fetch(`${API_URL}/messages/jobs/${jobId}`, {
+  const response = await apiFetch(`${API_URL}/messages/jobs/${jobId}`, {
     method: 'POST',
     headers: {
-      Authorization: `Bearer ${accessToken}`,
       'Content-Type': 'application/json',
     },
     body: JSON.stringify(input),
+    accessToken,
   });
 
   if (!response.ok) {
@@ -155,11 +151,9 @@ export async function markJobConversationRead(
   updatedCount: number;
   readAt: string;
 }> {
-  const response = await fetch(`${API_URL}/messages/jobs/${jobId}/read`, {
+  const response = await apiFetch(`${API_URL}/messages/jobs/${jobId}/read`, {
     method: 'POST',
-    headers: {
-      Authorization: `Bearer ${accessToken}`,
-    },
+    accessToken,
   });
 
   if (!response.ok) {
@@ -177,15 +171,15 @@ export async function appealTrustSafetyIntervention(
   interventionId: string,
   input: { reason: string },
 ): Promise<TrustSafetyIntervention> {
-  const response = await fetch(
+  const response = await apiFetch(
     `${API_URL}/trust-safety/interventions/${interventionId}/appeal`,
     {
       method: 'POST',
       headers: {
-        Authorization: `Bearer ${accessToken}`,
         'Content-Type': 'application/json',
       },
       body: JSON.stringify(input),
+      accessToken,
     },
   );
 

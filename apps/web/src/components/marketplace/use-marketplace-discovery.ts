@@ -17,11 +17,14 @@ type UseMarketplaceDiscoveryResult = {
   discoveryMessage: string;
   marketCategories: MarketplaceCategory[];
   trustSummary: {
-    totalCount: number;
-    avgRating: string;
-    responseEstimate: string;
+    totalCount: number | null;
+    avgRating: string | null;
+    responseEstimate: string | null;
+    state: "loading" | "ready" | "unavailable";
   };
 };
+
+type TrustSummaryState = UseMarketplaceDiscoveryResult["trustSummary"];
 
 function getResponseEstimate(workers: WorkerProfile[]): string {
   const fastResponse = workers.some(
@@ -55,10 +58,11 @@ export function useMarketplaceDiscovery(): UseMarketplaceDiscoveryResult {
   const [marketCategories, setMarketCategories] = useState<MarketplaceCategory[]>(
     [],
   );
-  const [trustSummary, setTrustSummary] = useState({
-    totalCount: 0,
-    avgRating: "0.0",
-    responseEstimate: "Até 1h",
+  const [trustSummary, setTrustSummary] = useState<TrustSummaryState>({
+    totalCount: null as number | null,
+    avgRating: null as string | null,
+    responseEstimate: null as string | null,
+    state: "loading" as const,
   });
 
   useEffect(() => {
@@ -113,6 +117,7 @@ export function useMarketplaceDiscovery(): UseMarketplaceDiscoveryResult {
             workersResponse.meta?.total ?? workersResponse.data.length,
           avgRating,
           responseEstimate: getResponseEstimate(workersResponse.data),
+          state: "ready",
         });
         setDiscoveryMessage("Áreas disponíveis carregadas.");
       } catch (error) {
@@ -120,6 +125,12 @@ export function useMarketplaceDiscovery(): UseMarketplaceDiscoveryResult {
           return;
         }
 
+        setTrustSummary({
+          totalCount: null,
+          avgRating: null,
+          responseEstimate: null,
+          state: "unavailable",
+        });
         setDiscoveryMessage(
           humanizeUnknownError(
             error,

@@ -1,4 +1,4 @@
-import { API_URL } from '@/lib/auth';
+import { apiFetch, API_URL } from '@/lib/auth';
 import { parseApiError, toApiError } from '@/lib/http-errors';
 import { PaginatedResponse } from '@/lib/pagination';
 
@@ -120,14 +120,12 @@ export async function listOperationalIncidents(
     params.set('source', query.source);
   }
 
-  const response = await fetch(
+  const response = await apiFetch(
     `${API_URL}/admin/support/incidents${
       params.size > 0 ? `?${params.toString()}` : ''
     }`,
     {
-      headers: {
-        Authorization: `Bearer ${accessToken}`,
-      },
+      accessToken,
     },
   );
 
@@ -161,13 +159,13 @@ export async function createOperationalIncident(
     relatedTrustSafetyInterventionId?: string;
   },
 ): Promise<OperationalIncident> {
-  const response = await fetch(`${API_URL}/admin/support/incidents`, {
+  const response = await apiFetch(`${API_URL}/admin/support/incidents`, {
     method: 'POST',
     headers: {
-      Authorization: `Bearer ${accessToken}`,
       'Content-Type': 'application/json',
     },
     body: JSON.stringify(input),
+    accessToken,
   });
 
   if (!response.ok) {
@@ -194,13 +192,13 @@ export async function updateOperationalIncident(
     resolutionNote?: string;
   },
 ): Promise<OperationalIncident> {
-  const response = await fetch(`${API_URL}/admin/support/incidents/${incidentId}`, {
+  const response = await apiFetch(`${API_URL}/admin/support/incidents/${incidentId}`, {
     method: 'PATCH',
     headers: {
-      Authorization: `Bearer ${accessToken}`,
       'Content-Type': 'application/json',
     },
     body: JSON.stringify(input),
+    accessToken,
   });
 
   if (!response.ok) {

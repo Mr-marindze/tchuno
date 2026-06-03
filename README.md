@@ -9,10 +9,15 @@
 ## Local Development
 
 ```bash
-docker compose up -d
 corepack yarn install
+corepack yarn db:up
 corepack yarn dev
 ```
+
+Useful local DB commands:
+- `corepack yarn db:ps`
+- `corepack yarn db:logs`
+- `corepack yarn db:down`
 
 Services:
 - API: `http://localhost:3001`
@@ -59,6 +64,7 @@ Demo users (password: `demo1234`):
 ```bash
 corepack yarn lint
 corepack yarn test
+corepack yarn db:up
 corepack yarn test:e2e
 corepack yarn ci
 ```
