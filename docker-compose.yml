@@ -1,0 +1,15 @@
+services:
+  db:
+    image: postgres:16
+    container_name: tchuno_db
+    environment:
+      POSTGRES_USER: tchuno
+      POSTGRES_PASSWORD: tchuno
+      POSTGRES_DB: tchuno
+    ports:
+      - "5432:5432"
+    volumes:
+      - tchuno_db_data:/var/lib/postgresql/data
+
+volumes:
+  tchuno_db_data:
