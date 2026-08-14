@@ -1,36 +1,54 @@
-This is a [Next.js](https://nextjs.org) project bootstrapped with [`create-next-app`](https://nextjs.org/docs/app/api-reference/cli/create-next-app).
+# Tchuno Web
 
-## Getting Started
+This workspace contains the Next.js web application for Tchuno.
 
-First, run the development server:
+## Responsibilities
+
+- public product pages;
+- authentication entry screens;
+- customer area under `/app`;
+- provider area under `/pro`;
+- admin area under `/admin`;
+- route guards and role-aware navigation;
+- API client helpers in `src/lib`.
+
+## Main Route Groups
+
+- Public: `/`, `/categorias`, `/prestadores`, `/prestadores/[slug]`,
+  `/como-funciona`, `/sobre`, `/faq`, `/contacto`, `/termos`,
+  `/privacidade`.
+- Auth: `/login`, `/registo`, `/recuperar-senha`, `/verificar-conta`.
+- Customer: `/app`, `/app/pedidos`, `/app/pedidos/[id]`, `/app/mensagens`,
+  `/app/pagamentos`, `/app/perfil`.
+- Provider: `/pro`, `/pro/pedidos`, `/pro/propostas`, `/pro/mensagens`,
+  `/pro/ganhos`, `/pro/perfil`.
+- Admin: `/admin`, `/admin/payments`, `/admin/moderation`, `/admin/users`,
+  `/admin/support`, `/admin/audit`, `/admin/reports`.
+
+## Local Commands
+
+From the repository root:
 
 ```bash
-npm run dev
-# or
-yarn dev
-# or
-pnpm dev
-# or
-bun dev
+corepack yarn dev:web
+corepack yarn workspace @tchuno/web build
+corepack yarn workspace @tchuno/web lint
+corepack yarn workspace @tchuno/web test:smoke
 ```
 
-Open [http://localhost:3000](http://localhost:3000) with your browser to see the result.
+The web app uses `NEXT_PUBLIC_API_URL` and defaults to `http://localhost:3001`.
 
-You can start editing the page by modifying `app/page.tsx`. The page auto-updates as you edit the file.
+## Important Notes
 
-This project uses [`next/font`](https://nextjs.org/docs/app/building-your-application/optimizing/fonts) to automatically optimize and load [Geist](https://vercel.com/font), a new font family for Vercel.
+- Frontend route guards are UX helpers. Backend guards remain the source of
+  truth for authorization.
+- The web smoke test uses a mock API server and screenshots. It validates UI
+  behavior, not a full real API integration.
+- Do not present partial capabilities such as advanced geolocation, live payment
+  gateways, or full KYC as implemented.
 
-## Learn More
+See also:
 
-To learn more about Next.js, take a look at the following resources:
-
-- [Next.js Documentation](https://nextjs.org/docs) - learn about Next.js features and API.
-- [Learn Next.js](https://nextjs.org/learn) - an interactive Next.js tutorial.
-
-You can check out [the Next.js GitHub repository](https://github.com/vercel/next.js) - your feedback and contributions are welcome!
-
-## Deploy on Vercel
-
-The easiest way to deploy your Next.js app is to use the [Vercel Platform](https://vercel.com/new?utm_medium=default-template&filter=next.js&utm_source=create-next-app&utm_campaign=create-next-app-readme) from the creators of Next.js.
-
-Check out our [Next.js deployment documentation](https://nextjs.org/docs/app/building-your-application/deploying) for more details.
+- [Product vision](../../docs/product-vision.md)
+- [Architecture](../../docs/architecture.md)
+- [Current status](../../docs/current-status.md)
