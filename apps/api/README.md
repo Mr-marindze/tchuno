@@ -39,7 +39,9 @@ The API expects PostgreSQL through `DATABASE_URL`.
   `ServiceRequest -> Proposal -> Selection -> Job`.
 - Direct job creation is deprecated and blocked with `410 Gone`.
 - External payment providers are simulated/prepared, not production-live.
-- S3 upload presign support is prepared but requires production hardening.
+- S3 upload presign support is backend-only and includes MIME allowlist, size,
+  expiry, ownership, state, and server-generated key policy. Malware/content
+  scanning is not implemented.
 - Staging, pilot, and production fail fast if required runtime secrets are
   missing or placeholder-like.
 

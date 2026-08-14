@@ -116,6 +116,34 @@ Examples:
 - only payment/job participants or admins can access payment records where
   applicable.
 
+## Upload Security
+
+Message attachment uploads are currently backend-only. The API exposes a
+presign endpoint for job messages after the conversation is eligible.
+
+Implemented policy:
+
+- endpoint requires JWT auth and app role authorization;
+- only job participants can request upload presigns;
+- uploads require contact unlock/payment eligibility;
+- canceled jobs cannot receive new upload presigns;
+- client cannot choose storage object keys;
+- object keys are server-generated as
+  `uploads/messages/{userId}/{jobId}/{uuid}.{ext}`;
+- allowed MIME types are `image/jpeg`, `image/png`, and `image/webp`;
+- file extension must match the declared MIME type;
+- declared attachment size must be between 1 byte and 5 MiB;
+- presigned URL expiry is bounded between 60 and 600 seconds;
+- message attachment references must include a key bound to the same user and
+  job before they are persisted.
+
+Remaining limitations:
+
+- binary size enforcement ultimately depends on the object storage accepting
+  the signed upload request as sent by the client;
+- malware/content scanning is not implemented;
+- the frontend does not yet expose an attachment upload UI.
+
 ## Current Known Gaps
 
 These are known gaps or hardening items, not automatically confirmed exploits:
@@ -123,8 +151,8 @@ These are known gaps or hardening items, not automatically confirmed exploits:
 1. Staging, pilot, and production now fail fast when required runtime secrets
    are missing, placeholder-like, or too short. Development keeps local
    fallbacks for convenience.
-2. Upload validation is incomplete; content type and size enforcement need
-   hardening.
+2. Upload validation has a backend allowlist, size, expiry, ownership, state,
+   and storage-key policy, but malware/content scanning is not implemented.
 3. Email verification is not implemented.
 4. Phone verification is not implemented.
 5. Password recovery is assisted/operational, not full self-service reset.

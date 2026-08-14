@@ -28,6 +28,7 @@
     "test": "yarn workspaces foreach -Apt run test",
     "test:e2e": "yarn workspace @tchuno/api test:e2e",
     "test:smoke:web": "yarn workspace @tchuno/web test:smoke",
+    "test:integration:web-api": "yarn workspace @tchuno/web test:integration:web-api",
     "ci": "yarn lint && yarn test && yarn test:e2e && yarn test:smoke:web"
   }
 }

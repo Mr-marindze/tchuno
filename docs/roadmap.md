@@ -24,7 +24,9 @@ The repository contains implemented and tested foundations for:
 - pilot runbooks and QA guidance;
 - V1.1 foundation hardening for repeatable demo seed, application Docker
   images, local compose bootstrap, non-development secret validation, and
-  database readiness checks.
+  database readiness checks;
+- V1.2 security and integration hardening for message attachment upload policy
+  and real browser-to-API-to-PostgreSQL marketplace integration.
 
 ## CURRENT FOUNDATION
 
@@ -52,8 +54,8 @@ feature expansion:
 3. Add external secret management and rotation process for staging/pilot.
 4. Decide payments path: live provider integration, manual pilot operation, or
    staged hybrid.
-5. Harden upload validation and storage policy.
-6. Add a real frontend-to-API integration test for the core flow.
+5. Add malware/content scanning policy for uploads.
+6. Add Docker image builds to CI.
 7. Clarify provider onboarding and whether provider role remains profile-based.
 8. Define staging/deploy/release automation.
 9. Add backup and external observability plan.

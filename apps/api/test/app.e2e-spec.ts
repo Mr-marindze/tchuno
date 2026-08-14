@@ -9,6 +9,7 @@ import { resolve } from 'node:path';
 import request from 'supertest';
 import { App } from 'supertest/types';
 import { AppModule } from './../src/app.module';
+import { StorageService } from './../src/storage/storage.service';
 
 type AuthPayload = {
   accessToken: string;
@@ -114,6 +115,12 @@ type AuditLogListResponse = {
 describe('Auth and Sessions (e2e)', () => {
   let app: INestApplication<App>;
   let prisma: PrismaClient;
+  let storageServiceMock: {
+    createPresignedPut: jest.Mock<
+      Promise<{ url: string; key: string; expiresAt: string }>,
+      [string, string, number]
+    >;
+  };
 
   const rootDir = resolve(__dirname, '../../..');
   const originalDatabaseUrl = process.env.DATABASE_URL;
@@ -150,9 +157,25 @@ describe('Auth and Sessions (e2e)', () => {
       },
     });
 
+    storageServiceMock = {
+      createPresignedPut: jest.fn(
+        (key: string, contentType: string, expiresSeconds: number) =>
+          Promise.resolve({
+            url: `https://storage.test/${encodeURIComponent(key)}?contentType=${encodeURIComponent(contentType)}`,
+            key,
+            expiresAt: new Date(
+              Date.now() + expiresSeconds * 1000,
+            ).toISOString(),
+          }),
+      ),
+    };
+
     const moduleFixture: TestingModule = await Test.createTestingModule({
       imports: [AppModule],
-    }).compile();
+    })
+      .overrideProvider(StorageService)
+      .useValue(storageServiceMock)
+      .compile();
 
     app = moduleFixture.createNestApplication();
     app.useGlobalPipes(
@@ -1561,6 +1584,275 @@ describe('Auth and Sessions (e2e)', () => {
         selectedProposalInDetail?.provider?.workerProfile?.ratingAvg ?? '0',
       ),
     ).toBeCloseTo(5, 2);
+  });
+
+  it('hardens message attachment presign and attachment binding', async () => {
+    const base = Date.now();
+    const password = 'abc12345';
+    const passwordHash = await bcrypt.hash(password, 10);
+
+    const [customer, provider, outsider] = await Promise.all([
+      prisma.user.create({
+        data: {
+          email: `upload_customer_${base}@tchuno.local`,
+          name: 'Upload Customer',
+          passwordHash,
+        },
+      }),
+      prisma.user.create({
+        data: {
+          email: `upload_provider_${base}@tchuno.local`,
+          name: 'Upload Provider',
+          passwordHash,
+        },
+      }),
+      prisma.user.create({
+        data: {
+          email: `upload_outsider_${base}@tchuno.local`,
+          name: 'Upload Outsider',
+          passwordHash,
+        },
+      }),
+    ]);
+
+    const category = await prisma.category.create({
+      data: {
+        name: `Upload Categoria ${base}`,
+        slug: `upload-categoria-${base}`,
+        description: 'Categoria para validar uploads',
+        sortOrder: 90,
+      },
+      select: { id: true },
+    });
+
+    const workerProfile = await prisma.workerProfile.create({
+      data: {
+        userId: provider.id,
+        bio: 'Prestador para validar upload',
+        location: 'Maputo',
+        hourlyRate: 1500,
+        experienceYears: 3,
+        isAvailable: true,
+      },
+      select: { id: true },
+    });
+
+    const [activeJob, canceledJob] = await Promise.all([
+      prisma.job.create({
+        data: {
+          clientId: customer.id,
+          customerId: customer.id,
+          providerId: provider.id,
+          workerProfileId: workerProfile.id,
+          categoryId: category.id,
+          title: 'Job com upload permitido',
+          description: 'Validar upload seguro em job ativo.',
+          status: 'ACCEPTED',
+          contactUnlockedAt: new Date(),
+        },
+        select: { id: true },
+      }),
+      prisma.job.create({
+        data: {
+          clientId: customer.id,
+          customerId: customer.id,
+          providerId: provider.id,
+          workerProfileId: workerProfile.id,
+          categoryId: category.id,
+          title: 'Job cancelado com upload bloqueado',
+          description: 'Validar bloqueio de upload em job cancelado.',
+          status: 'CANCELED',
+          canceledAt: new Date(),
+          canceledBy: customer.id,
+          contactUnlockedAt: new Date(),
+        },
+        select: { id: true },
+      }),
+    ]);
+
+    async function login(email: string) {
+      const response = await request(app.getHttpServer())
+        .post('/auth/login')
+        .send({ email, password })
+        .expect(200);
+      return (response.body as AuthPayload).accessToken;
+    }
+
+    const customerAccessToken = await login(customer.email);
+    const outsiderAccessToken = await login(outsider.email);
+
+    await request(app.getHttpServer())
+      .post(`/messages/jobs/${activeJob.id}/uploads/presign`)
+      .send({
+        fileName: 'evidencia.jpg',
+        contentType: 'image/jpeg',
+        sizeBytes: 1024,
+      })
+      .expect(401);
+
+    await request(app.getHttpServer())
+      .post(`/messages/jobs/${activeJob.id}/uploads/presign`)
+      .set('Authorization', `Bearer ${outsiderAccessToken}`)
+      .send({
+        fileName: 'evidencia.jpg',
+        contentType: 'image/jpeg',
+        sizeBytes: 1024,
+      })
+      .expect(403);
+
+    const presignResponse = await request(app.getHttpServer())
+      .post(`/messages/jobs/${activeJob.id}/uploads/presign`)
+      .set('Authorization', `Bearer ${customerAccessToken}`)
+      .send({
+        fileName: 'evidencia.jpg',
+        contentType: 'image/jpeg',
+        sizeBytes: 1024,
+        expiresIn: 300,
+      })
+      .expect(201);
+    const presign = presignResponse.body as {
+      url: string;
+      key: string;
+      contentType: string;
+      sizeBytes: number;
+      maxSizeBytes: number;
+      expiresAt: string;
+    };
+
+    expect(presign.key).toMatch(
+      new RegExp(
+        `^uploads/messages/${customer.id}/${activeJob.id}/[0-9a-f-]+\\.jpg$`,
+      ),
+    );
+    expect(presign.key).not.toContain('evidencia');
+    expect(presign.contentType).toBe('image/jpeg');
+    expect(presign.sizeBytes).toBe(1024);
+    expect(presign.maxSizeBytes).toBe(5 * 1024 * 1024);
+    expect(storageServiceMock.createPresignedPut).toHaveBeenCalledWith(
+      presign.key,
+      'image/jpeg',
+      300,
+    );
+
+    const sendResponse = await request(app.getHttpServer())
+      .post(`/messages/jobs/${activeJob.id}`)
+      .set('Authorization', `Bearer ${customerAccessToken}`)
+      .send({
+        content: 'Segue evidencia fotografica.',
+        attachments: [
+          {
+            url: presign.url,
+            key: presign.key,
+            contentType: 'image/jpeg',
+            size: 1024,
+          },
+        ],
+      })
+      .expect(201);
+    const sentBody = sendResponse.body as {
+      message: {
+        attachments: Array<{
+          key: string;
+          contentType: string;
+          size: number;
+          uploadedByUserId: string;
+        }>;
+      };
+    };
+    expect(sentBody.message.attachments[0]).toMatchObject({
+      key: presign.key,
+      contentType: 'image/jpeg',
+      size: 1024,
+      uploadedByUserId: customer.id,
+    });
+
+    await request(app.getHttpServer())
+      .post(`/messages/jobs/${activeJob.id}`)
+      .set('Authorization', `Bearer ${customerAccessToken}`)
+      .send({
+        content: 'Tentativa com key fora do escopo.',
+        attachments: [
+          {
+            url: presign.url,
+            key: `uploads/messages/${outsider.id}/${activeJob.id}/file.jpg`,
+            contentType: 'image/jpeg',
+            size: 1024,
+          },
+        ],
+      })
+      .expect(400);
+
+    await request(app.getHttpServer())
+      .post(`/messages/jobs/${activeJob.id}/uploads/presign`)
+      .set('Authorization', `Bearer ${customerAccessToken}`)
+      .send({
+        fileName: 'evidencia.gif',
+        contentType: 'image/gif',
+        sizeBytes: 1024,
+      })
+      .expect(400);
+
+    await request(app.getHttpServer())
+      .post(`/messages/jobs/${activeJob.id}/uploads/presign`)
+      .set('Authorization', `Bearer ${customerAccessToken}`)
+      .send({
+        fileName: 'evidencia.png',
+        contentType: 'image/png',
+        sizeBytes: 5 * 1024 * 1024 + 1,
+      })
+      .expect(400);
+
+    await request(app.getHttpServer())
+      .post(`/messages/jobs/${activeJob.id}/uploads/presign`)
+      .set('Authorization', `Bearer ${customerAccessToken}`)
+      .send({
+        fileName: '../evidencia.jpg',
+        contentType: 'image/jpeg',
+        sizeBytes: 1024,
+      })
+      .expect(400);
+
+    await request(app.getHttpServer())
+      .post(`/messages/jobs/${activeJob.id}/uploads/presign`)
+      .set('Authorization', `Bearer ${customerAccessToken}`)
+      .send({
+        fileName: 'evidencia.jpg',
+        contentType: 'image/jpeg',
+        sizeBytes: 1024,
+        expiresIn: 3600,
+      })
+      .expect(400);
+
+    await request(app.getHttpServer())
+      .post(`/messages/jobs/${activeJob.id}/uploads/presign`)
+      .set('Authorization', `Bearer ${customerAccessToken}`)
+      .send({
+        fileName: 'evidencia.jpg',
+        contentType: 'image/jpeg',
+        sizeBytes: 1024,
+        key: 'uploads/messages/custom/key.jpg',
+      })
+      .expect(400);
+
+    await request(app.getHttpServer())
+      .post(`/messages/jobs/${randomUUID()}/uploads/presign`)
+      .set('Authorization', `Bearer ${customerAccessToken}`)
+      .send({
+        fileName: 'evidencia.jpg',
+        contentType: 'image/jpeg',
+        sizeBytes: 1024,
+      })
+      .expect(404);
+
+    await request(app.getHttpServer())
+      .post(`/messages/jobs/${canceledJob.id}/uploads/presign`)
+      .set('Authorization', `Bearer ${customerAccessToken}`)
+      .send({
+        fileName: 'evidencia.jpg',
+        contentType: 'image/jpeg',
+        sizeBytes: 1024,
+      })
+      .expect(409);
   });
 
   it('enforces review permissions and duplicate protection on completed jobs', async () => {

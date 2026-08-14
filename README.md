@@ -96,10 +96,11 @@ corepack yarn lint
 corepack yarn test
 corepack yarn test:e2e
 corepack yarn test:smoke:web
+corepack yarn test:integration:web-api
 corepack yarn ci
 ```
 
-E2E tests require PostgreSQL and `DATABASE_URL`.
+E2E and real integration tests require PostgreSQL and `DATABASE_URL`.
 
 ## Staging Baseline
 
@@ -188,12 +189,15 @@ Decisions:
   validation, but production deploy/release automation is still not implemented.
 - External payment gateways are simulated/prepared, not live production
   integrations.
-- S3 upload support is prepared but requires validation and production
-  hardening.
+- S3 upload presign support is backend-only and has MIME, size, expiry,
+  ownership, state, and server-generated key policy. Malware/content scanning
+  and frontend upload UI are not implemented.
 - Email verification, phone verification, and full self-service password reset
   are not implemented.
 - There is no Redis/queue worker process today; timer/runner work lives inside
   the API.
+- CI includes a real browser-to-API-to-PostgreSQL integration job for the core
+  marketplace path, but does not yet build Docker images.
 
 ## Out Of Scope
 

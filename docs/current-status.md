@@ -1,17 +1,21 @@
 # Current Status
 
 This document is the current concise status baseline for Tchuno. It is based on
-repository inspection at commit `99c98fa` on branch `main`.
+repository inspection at commit `94e5bb1` on branch `main`, plus V1.2 security
+and integration hardening changes in the working tree.
 
 V1.1 foundation hardening updates the baseline with demo seed compatibility,
 application Dockerfiles, local compose runtime, stricter non-development
 environment validation, and database-backed readiness checks. It does not make
 the project production-ready.
 
+V1.2 hardens backend message attachment upload policy and adds a real
+browser-to-API-to-PostgreSQL integration test for the core marketplace path.
+
 ## Git Baseline
 
 - Branch audited: `main`
-- Commit audited: `99c98fa`
+- Commit audited: `94e5bb1`
 - Latest tag observed: `v0.4.0-mvp-release`
 - Pre-documentation working tree at audit time: modified
   `.yarn/install-state.gz` only; exclude it from the documentation baseline.
@@ -75,7 +79,7 @@ These are broad ranges, not precise measurements.
 | Proximity | PARTIAL | Text location and service areas; no geospatial matching. |
 | Search/filter depth | PARTIAL | Basic search and filters exist. |
 | Location | PARTIAL | Approximate text fields, no GPS capability. |
-| S3 upload flow | BACKEND_ONLY | Presign is prepared; production validation incomplete. |
+| S3 upload flow | BACKEND_ONLY | Presign has backend auth, ownership, state, MIME, size, expiry, and server-generated key policy. No frontend upload UI yet. |
 | External payment gateways | SIMULATED | Internal/simulated adapters exist; live providers deferred. |
 | Analytics/tracking | IMPLEMENTED_AND_TESTED | Event ingestion and aggregates exist. |
 | Audit | IMPLEMENTED_AND_TESTED | Audit logs and reauth covered by tests. |
@@ -103,6 +107,12 @@ Additional V1.1 validation target:
 - local compose config with DB/API/Web/bootstrap services: PASS.
 - API readiness endpoint with database query: PASS.
 
+Additional V1.2 validation target:
+
+- API upload policy positive and negative tests: covered by API e2e.
+- Real browser-to-API-to-PostgreSQL marketplace integration: covered by
+  `yarn test:integration:web-api` and CI job `integration-web-api`.
+
 ## Production Readiness
 
 - Local development: GO.
@@ -114,19 +124,22 @@ Additional V1.1 validation target:
 ## Known Gaps
 
 1. External payment gateways are simulated/prepared, not live integrations.
-2. Upload validation and storage hardening are incomplete.
+2. Upload malware/content scanning is not implemented.
 3. Email verification is not implemented.
 4. Phone verification is not implemented.
 5. Self-service password reset is not implemented.
 6. Proximity/geodata is partial.
 7. Provider role model is derived from `WorkerProfile`, which may need a
     future explicit model.
-8. Frontend integration test against the real API is still missing.
+8. Frontend integration against the real API exists for the core
+    request/proposal/selection/payment path; provider execution transitions and
+    review are still not exposed as a complete browser flow.
 9. Backup strategy is not implemented in repo.
 10. External observability and alerting are not implemented in repo.
 11. Security scanning is not configured in CI.
 12. Deploy/release automation is not implemented.
-13. The Docker runtime is suitable for local/pilot validation, not a complete
+13. CI does not build Docker images.
+14. The Docker runtime is suitable for local/pilot validation, not a complete
     production platform.
 
 ## Documentation Baseline

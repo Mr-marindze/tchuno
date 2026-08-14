@@ -13,6 +13,10 @@ import { CreateJobMessageDto } from './dto/create-job-message.dto';
 import { PresignUploadDto } from './dto/presign-upload.dto';
 import { StorageService } from '../storage/storage.service';
 import { RealtimeGateway } from '../realtime/realtime.gateway';
+import {
+  buildMessageAttachmentUpload,
+  validateMessageAttachmentReference,
+} from './upload-policy';
 
 const messageJobInclude = {
   client: {
@@ -97,25 +101,37 @@ export class MessagesService {
       throw new ForbiddenException('Contact not unlocked for uploads');
     }
 
+    if (access.job.status === 'CANCELED') {
+      throw new ConflictException(
+        'Canceled jobs are no longer open for uploads',
+      );
+    }
+
     if (!this.storageService) {
       throw new Error('Storage service not available');
     }
 
-    // build a storage key
-    const safeName = dto.fileName
-      .replace(/[^a-zA-Z0-9._-]/g, '_')
-      .slice(0, 200);
-    const key = `uploads/messages/${jobId}/${Date.now()}-${safeName}`;
-
-    const expires = Math.max(60, Number(dto.expiresIn ?? 300));
+    const upload = buildMessageAttachmentUpload({
+      jobId,
+      userId,
+      fileName: dto.fileName,
+      contentType: dto.contentType,
+      sizeBytes: dto.sizeBytes,
+      expiresIn: dto.expiresIn,
+    });
 
     const presign = await this.storageService.createPresignedPut(
-      key,
-      dto.contentType,
-      expires,
+      upload.key,
+      upload.contentType,
+      upload.expiresIn,
     );
 
-    return presign;
+    return {
+      ...presign,
+      contentType: upload.contentType,
+      sizeBytes: upload.sizeBytes,
+      maxSizeBytes: upload.maxSizeBytes,
+    };
   }
 
   async listMine(userId: string) {
@@ -292,11 +308,23 @@ export class MessagesService {
       });
 
       if (dto.attachments && dto.attachments.length > 0) {
-        for (const attachmentUrl of dto.attachments.slice(0, 6)) {
+        for (const attachment of dto.attachments.slice(0, 6)) {
+          const validated = validateMessageAttachmentReference({
+            jobId,
+            userId,
+            key: attachment.key,
+            url: attachment.url,
+            contentType: attachment.contentType,
+            size: attachment.size,
+          });
+
           await tx.jobMessageAttachment.create({
             data: {
               jobMessageId: msg.id,
-              url: attachmentUrl,
+              url: validated.url,
+              key: validated.key,
+              contentType: validated.contentType,
+              size: validated.size,
               uploadedByUserId: userId,
             },
           });
@@ -347,10 +375,7 @@ export class MessagesService {
 
     return {
       status: 'sent' as const,
-      message: {
-        ...this.toMessageDto(created),
-        attachments: dto.attachments ?? [],
-      },
+      message: this.toMessageDto(created),
     };
   }
 

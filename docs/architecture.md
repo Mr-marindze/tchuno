@@ -80,7 +80,8 @@ Database:
 - `service-requests`: request-first marketplace flow.
 - `jobs`: job execution and legacy direct job blocking.
 - `payments`: payment intents, transactions, ledger, refunds, payouts.
-- `messages`: job conversations and prepared upload presign flow.
+- `messages`: job conversations and hardened backend upload presign flow for
+  message attachments.
 - `trust-safety`: contact-sharing risk detection and interventions.
 - `support-ops`: operational incident management.
 - `tracking`: event ingestion and worker/category aggregates.
@@ -134,6 +135,8 @@ Current infrastructure files:
 - `docker-compose.yml`: local PostgreSQL, migration/seed bootstrap, API, and
   Web stack.
 - `docker-compose.staging.yml`: staging PostgreSQL database.
+- `.github/workflows/ci.yml`: lint/unit, coverage, API e2e, mocked web smoke,
+  and real Web/API/PostgreSQL integration jobs.
 
 Current limitations:
 
@@ -157,9 +160,41 @@ production.
 
 ## Storage
 
-S3 presigned uploads are prepared for message attachments.
+S3 presigned uploads are prepared for message attachments and currently exposed
+only through the API.
 
-Current limitation:
+Current policy:
 
 - storage depends on environment configuration;
-- upload validation and production hardening are partial.
+- presign requests are authenticated and bound to an existing job participant;
+- uploads require contact unlock/payment eligibility;
+- canceled jobs cannot receive new upload presigns;
+- object keys are generated server-side under
+  `uploads/messages/{userId}/{jobId}/{uuid}.{ext}`;
+- allowed content types are JPEG, PNG, and WebP;
+- declared size is limited to 5 MiB;
+- presigned expiry is bounded between 60 and 600 seconds;
+- persisted message attachments must reference keys bound to the same user and
+  job.
+
+Current limitations:
+
+- the frontend does not expose attachment uploads yet;
+- malware/content scanning is not implemented;
+- CI does not build Docker images.
+
+## Integration Testing
+
+CI includes a real browser-to-API integration job:
+
+- creates an isolated PostgreSQL schema;
+- runs Prisma migrations and seed;
+- builds API and Web;
+- starts NestJS API and Next.js Web;
+- drives Playwright through login, request creation, provider proposal,
+  proposal selection, internal payment simulation, and contact unlock;
+- verifies the resulting job and `PAID_PARTIAL` payment intent through the API;
+- drops the temporary schema after the run.
+
+The existing web smoke test remains mocked and focused on frontend screen
+coverage.

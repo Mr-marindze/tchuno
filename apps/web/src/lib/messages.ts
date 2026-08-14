@@ -21,6 +21,7 @@ export type MessageConversationSummary = {
     content: string;
     createdAt: string;
     readAt: string | null;
+    attachments: JobMessageAttachment[];
   } | null;
   lastActivityAt: string;
   createdAt: string;
@@ -34,6 +35,24 @@ export type JobMessage = {
   content: string;
   createdAt: string;
   readAt: string | null;
+  attachments: JobMessageAttachment[];
+};
+
+export type JobMessageAttachment = {
+  id: string;
+  url: string;
+  key: string | null;
+  contentType: string | null;
+  size: number | null;
+  uploadedByUserId: string | null;
+  createdAt: string;
+};
+
+export type JobMessageAttachmentInput = {
+  url: string;
+  key: string;
+  contentType: 'image/jpeg' | 'image/png' | 'image/webp';
+  size: number;
 };
 
 export type JobConversation = {
@@ -126,7 +145,7 @@ export async function getJobConversation(
 export async function sendJobMessage(
   accessToken: string,
   jobId: string,
-  input: { content: string },
+  input: { content: string; attachments?: JobMessageAttachmentInput[] },
 ): Promise<SendJobMessageResult> {
   const response = await apiFetch(`${API_URL}/messages/jobs/${jobId}`, {
     method: 'POST',

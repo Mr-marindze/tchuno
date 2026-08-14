@@ -7,7 +7,8 @@
     "build": "next build",
     "start": "next start",
     "lint": "eslint",
-    "test:smoke": "node scripts/marketplace-smoke-e2e.mjs"
+    "test:smoke": "node scripts/marketplace-smoke-e2e.mjs",
+    "test:integration:web-api": "node scripts/marketplace-real-integration.mjs"
   },
   "dependencies": {
     "next": "16.1.6",
