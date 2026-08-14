@@ -115,6 +115,7 @@ Current state:
 Current observability includes:
 
 - `GET /observability/health`;
+- `GET /observability/ready`, including a database readiness query;
 - `GET /observability/metrics`;
 - structured request logging;
 - business metrics for auth, jobs, reviews, payments, and related flows.
@@ -126,14 +127,17 @@ this repository.
 
 Current infrastructure files:
 
-- `docker-compose.yml`: local PostgreSQL database.
+- `apps/api/Dockerfile`: API application image with Prisma/OpenSSL runtime
+  support and readiness healthcheck.
+- `apps/web/Dockerfile`: Web application image with Next.js production start
+  and HTTP healthcheck.
+- `docker-compose.yml`: local PostgreSQL, migration/seed bootstrap, API, and
+  Web stack.
 - `docker-compose.staging.yml`: staging PostgreSQL database.
-- `compose.yaml` and `compose.debug.yaml`: build references.
-- `Dockerfile`: placeholder, not a production application image.
 
 Current limitations:
 
-- no production-ready application Docker image;
+- no complete production deployment platform or release pipeline;
 - no Redis or queue worker;
 - no reverse proxy config;
 - no backup automation;

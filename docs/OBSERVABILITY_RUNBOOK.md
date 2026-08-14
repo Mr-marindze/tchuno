@@ -7,6 +7,7 @@ This runbook defines the minimum operational observability baseline for pilot mo
 ## Endpoints
 
 - Health: `GET /observability/health`
+- Readiness: `GET /observability/ready`
 - Metrics (Prometheus text): `GET /observability/metrics`
 - Swagger: `GET /docs`
 
@@ -87,10 +88,11 @@ Examples:
 ## Operational Checks (Daily)
 
 1. Health endpoint returns `{"status":"ok"}`.
-2. No sustained increase in `5xx` responses.
-3. Login success/failure ratio is stable.
-4. Job funnel shows progression to `COMPLETED`.
-5. Review creation events are present after completed jobs.
+2. Readiness endpoint returns `{"status":"ok"}` and database check `ok`.
+3. No sustained increase in `5xx` responses.
+4. Login success/failure ratio is stable.
+5. Job funnel shows progression to `COMPLETED`.
+6. Review creation events are present after completed jobs.
 
 ## Incident Triage (Quick)
 

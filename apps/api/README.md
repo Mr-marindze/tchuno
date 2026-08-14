@@ -30,6 +30,7 @@ The API expects PostgreSQL through `DATABASE_URL`.
 - API root: `http://localhost:3001`
 - Swagger: `http://localhost:3001/docs`
 - Health: `GET /observability/health`
+- Readiness: `GET /observability/ready`
 - Metrics: `GET /observability/metrics`
 
 ## Important Notes
@@ -39,6 +40,8 @@ The API expects PostgreSQL through `DATABASE_URL`.
 - Direct job creation is deprecated and blocked with `410 Gone`.
 - External payment providers are simulated/prepared, not production-live.
 - S3 upload presign support is prepared but requires production hardening.
+- Staging, pilot, and production fail fast if required runtime secrets are
+  missing or placeholder-like.
 
 See also:
 

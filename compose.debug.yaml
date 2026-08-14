@@ -1,6 +1,0 @@
-services:
-  tchuno:
-    image: tchuno
-    build:
-      context: .
-      dockerfile: ./Dockerfile

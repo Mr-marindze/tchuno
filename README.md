@@ -129,8 +129,23 @@ corepack yarn staging:web
 corepack yarn staging:check
 ```
 
-Known condition: demo seed compatibility should be revalidated before relying on
-it for a pilot baseline. See [current status](docs/current-status.md).
+The demo seed is expected to be repeatable on a migrated database and includes
+request expirations required by the current schema. See
+[current status](docs/current-status.md).
+
+## Docker Runtime
+
+V1.1 adds application Docker images for local/pilot validation:
+
+```bash
+docker compose -f docker-compose.yml config
+docker compose -f docker-compose.yml up --build
+```
+
+The compose stack starts PostgreSQL, runs migrations and seed through a
+`db-bootstrap` service, then starts API and Web. Local compose secrets are for
+development only; staging/pilot/production environments must provide real
+secrets.
 
 ## Key Documentation
 
@@ -169,8 +184,8 @@ Decisions:
 
 ## Important Limitations
 
-- The root `Dockerfile` is currently a placeholder and is not a production app
-  image.
+- The application Dockerfiles and local compose stack are available for
+  validation, but production deploy/release automation is still not implemented.
 - External payment gateways are simulated/prepared, not live production
   integrations.
 - S3 upload support is prepared but requires validation and production

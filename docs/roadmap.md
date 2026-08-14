@@ -21,7 +21,10 @@ The repository contains implemented and tested foundations for:
   providers;
 - notifications and messages;
 - tracking and observability baseline;
-- pilot runbooks and QA guidance.
+- pilot runbooks and QA guidance;
+- V1.1 foundation hardening for repeatable demo seed, application Docker
+  images, local compose bootstrap, non-development secret validation, and
+  database readiness checks.
 
 ## CURRENT FOUNDATION
 
@@ -44,9 +47,9 @@ Current source of truth:
 Candidate next work should focus on hardening and reliability before major new
 feature expansion:
 
-1. Validate and repair demo seed compatibility.
-2. Replace or clearly retire the placeholder app Dockerfile.
-3. Harden non-development secret handling.
+1. Continue validating the V1.1 Docker runtime under pilot-like data and load.
+2. Define deploy/release automation around the application images.
+3. Add external secret management and rotation process for staging/pilot.
 4. Decide payments path: live provider integration, manual pilot operation, or
    staged hybrid.
 5. Harden upload validation and storage policy.

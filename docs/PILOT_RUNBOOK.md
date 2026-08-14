@@ -24,6 +24,21 @@ passos claros para subir ambiente, validar fluxos e recolher evidências.
 5. Validar saúde:
    - `corepack yarn staging:check`
 
+## 1.1) Runtime Docker local/piloto
+
+Para validar a imagem aplicacional e bootstrap local:
+
+1. Validar configuração compose:
+   - `docker compose -f docker-compose.yml config`
+2. Subir DB, bootstrap, API e Web:
+   - `docker compose -f docker-compose.yml up --build`
+3. Validar endpoints:
+   - `GET /observability/health`
+   - `GET /observability/ready`
+
+As secrets embutidas no compose local são apenas de desenvolvimento. Em
+staging/piloto/produção, usar `.env.staging`/secret manager com valores reais.
+
 ## 2) Contas demo (seed)
 
 - Email: `admin@tchuno.local` | Password: `demo1234`
@@ -81,6 +96,7 @@ passos claros para subir ambiente, validar fluxos e recolher evidências.
 2. Registo de `x-request-id` para falhas observadas.
 3. Resultado da saúde:
    - `GET /observability/health`
+   - `GET /observability/ready`
    - `GET /observability/metrics`
 4. Nota curta dos cenários validados (pass/fail + timestamp).
 

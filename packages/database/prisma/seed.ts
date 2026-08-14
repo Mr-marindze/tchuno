@@ -209,6 +209,29 @@ async function main() {
     },
   });
 
+  const seededJobs = await prisma.job.findMany({
+    where: {
+      clientId: {
+        in: [users.clientA.id, users.clientB.id],
+      },
+    },
+    select: {
+      id: true,
+    },
+  });
+
+  const seededJobIds = seededJobs.map((job) => job.id);
+
+  if (seededJobIds.length > 0) {
+    await prisma.ledgerEntry.deleteMany({
+      where: {
+        jobId: {
+          in: seededJobIds,
+        },
+      },
+    });
+  }
+
   await prisma.job.deleteMany({
     where: {
       clientId: {
@@ -226,6 +249,7 @@ async function main() {
   });
 
   const now = Date.now();
+  const requestExpiryMs = 7 * 24 * 60 * 60 * 1000;
 
   async function createServiceRequestBackedJob(input: {
     customerId: string;
@@ -255,6 +279,7 @@ async function main() {
         description: input.description,
         location: input.location,
         status: 'OPEN',
+        expiresAt: new Date(now + requestExpiryMs),
       },
       select: {
         id: true,

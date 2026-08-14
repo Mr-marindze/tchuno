@@ -120,8 +120,9 @@ Examples:
 
 These are known gaps or hardening items, not automatically confirmed exploits:
 
-1. Default/fallback secrets exist for development and must be blocked or
-   strongly controlled outside development.
+1. Staging, pilot, and production now fail fast when required runtime secrets
+   are missing, placeholder-like, or too short. Development keeps local
+   fallbacks for convenience.
 2. Upload validation is incomplete; content type and size enforcement need
    hardening.
 3. Email verification is not implemented.

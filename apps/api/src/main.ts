@@ -4,8 +4,11 @@ import { NestExpressApplication } from '@nestjs/platform-express';
 import { DocumentBuilder, SwaggerModule } from '@nestjs/swagger';
 import helmet from 'helmet';
 import { AppModule } from './app.module';
+import { validateRuntimeEnvironment } from './config/runtime-env';
 
 async function bootstrap() {
+  validateRuntimeEnvironment();
+
   const app = await NestFactory.create<NestExpressApplication>(AppModule);
   app.set('trust proxy', 1);
 

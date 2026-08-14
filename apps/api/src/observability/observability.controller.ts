@@ -1,12 +1,21 @@
-import { Controller, Get, Res } from '@nestjs/common';
+import {
+  Controller,
+  Get,
+  Res,
+  ServiceUnavailableException,
+} from '@nestjs/common';
 import { ApiOkResponse, ApiOperation, ApiTags } from '@nestjs/swagger';
 import type { Response } from 'express';
+import { PrismaService } from '../prisma/prisma.service';
 import { MetricsService } from './metrics.service';
 
 @ApiTags('observability')
 @Controller('observability')
 export class ObservabilityController {
-  constructor(private readonly metricsService: MetricsService) {}
+  constructor(
+    private readonly metricsService: MetricsService,
+    private readonly prisma: PrismaService,
+  ) {}
 
   @Get('metrics')
   @ApiOperation({ summary: 'Prometheus metrics endpoint' })
@@ -21,5 +30,42 @@ export class ObservabilityController {
   @ApiOkResponse({ schema: { example: { status: 'ok' } } })
   health() {
     return { status: 'ok' };
+  }
+
+  @Get('ready')
+  @ApiOperation({
+    summary: 'Readiness endpoint with database dependency check',
+  })
+  @ApiOkResponse({
+    schema: {
+      example: {
+        status: 'ok',
+        checks: { database: 'ok' },
+        latencyMs: 3,
+      },
+    },
+  })
+  async ready() {
+    const startedAt = Date.now();
+
+    try {
+      await this.prisma.$queryRaw`SELECT 1`;
+
+      return {
+        status: 'ok',
+        checks: {
+          database: 'ok',
+        },
+        latencyMs: Date.now() - startedAt,
+      };
+    } catch {
+      throw new ServiceUnavailableException({
+        status: 'error',
+        checks: {
+          database: 'error',
+        },
+        latencyMs: Date.now() - startedAt,
+      });
+    }
   }
 }

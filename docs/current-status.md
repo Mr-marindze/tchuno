@@ -3,6 +3,11 @@
 This document is the current concise status baseline for Tchuno. It is based on
 repository inspection at commit `99c98fa` on branch `main`.
 
+V1.1 foundation hardening updates the baseline with demo seed compatibility,
+application Dockerfiles, local compose runtime, stricter non-development
+environment validation, and database-backed readiness checks. It does not make
+the project production-ready.
+
 ## Git Baseline
 
 - Branch audited: `main`
@@ -90,6 +95,14 @@ Observed validation results during repository audit:
 - `yarn test:smoke:web`: PASS.
 - Docker compose config checks for dev and staging DB: PASS.
 
+Additional V1.1 validation target:
+
+- demo seed repeatability on migrated schema: PASS.
+- API Docker image build: PASS.
+- Web Docker image build: PASS.
+- local compose config with DB/API/Web/bootstrap services: PASS.
+- API readiness endpoint with database query: PASS.
+
 ## Production Readiness
 
 - Local development: GO.
@@ -100,23 +113,21 @@ Observed validation results during repository audit:
 
 ## Known Gaps
 
-1. `packages/database/prisma/seed.ts` is probably incompatible with required
-   `ServiceRequest.expiresAt`.
-2. Root `Dockerfile` is a placeholder and does not build the application.
-3. External payment gateways are simulated/prepared, not live integrations.
-4. Environment secret fallback hardening is required before production.
-5. Upload validation and storage hardening are incomplete.
-6. Email verification is not implemented.
-7. Phone verification is not implemented.
-8. Self-service password reset is not implemented.
-9. Proximity/geodata is partial.
-10. Provider role model is derived from `WorkerProfile`, which may need a
+1. External payment gateways are simulated/prepared, not live integrations.
+2. Upload validation and storage hardening are incomplete.
+3. Email verification is not implemented.
+4. Phone verification is not implemented.
+5. Self-service password reset is not implemented.
+6. Proximity/geodata is partial.
+7. Provider role model is derived from `WorkerProfile`, which may need a
     future explicit model.
-11. Frontend integration test against the real API is still missing.
-12. Backup strategy is not implemented in repo.
-13. External observability and alerting are not implemented in repo.
-14. Security scanning is not configured in CI.
-15. Deploy/release automation is not implemented.
+8. Frontend integration test against the real API is still missing.
+9. Backup strategy is not implemented in repo.
+10. External observability and alerting are not implemented in repo.
+11. Security scanning is not configured in CI.
+12. Deploy/release automation is not implemented.
+13. The Docker runtime is suitable for local/pilot validation, not a complete
+    production platform.
 
 ## Documentation Baseline
 
