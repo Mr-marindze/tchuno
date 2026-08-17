@@ -69,6 +69,19 @@ jobs:
           path: apps/api/coverage
           if-no-files-found: error
 
+  docker-build:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Build API image
+        run: docker build -f apps/api/Dockerfile -t tchuno-api:ci .
+
+      - name: Build Web image
+        run: docker build -f apps/web/Dockerfile --build-arg NEXT_PUBLIC_API_URL=http://localhost:3001 -t tchuno-web:ci .
+
   e2e:
     runs-on: ubuntu-latest
 

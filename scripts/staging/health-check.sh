@@ -20,6 +20,10 @@ echo "Checking API health at ${API_BASE}/observability/health"
 curl --fail --silent --show-error "${API_BASE}/observability/health" >/dev/null
 echo "Health endpoint is responding."
 
+echo "Checking API readiness at ${API_BASE}/observability/ready"
+curl --fail --silent --show-error "${API_BASE}/observability/ready" >/dev/null
+echo "Readiness endpoint is responding."
+
 echo "Checking Swagger docs at ${API_BASE}/docs"
 curl --fail --silent --show-error "${API_BASE}/docs" >/dev/null
 echo "Docs endpoint is responding."

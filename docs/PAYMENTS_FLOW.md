@@ -19,6 +19,10 @@
 3. Transaction is recorded and intent transitions according to payment result.
 4. For deposit intents (`metadata.kind=deposit`) paid state becomes `PAID_PARTIAL`.
 
+For the V1 pilot, `PAYMENT_DEFAULT_PROVIDER=INTERNAL` is the expected mode.
+This is a backend simulation/manual pilot payment path, not an external payment
+confirmation from M-Pesa, e-Mola, or another live provider.
+
 ## 3) Charge Status
 
 - Internal gateway returns one of:

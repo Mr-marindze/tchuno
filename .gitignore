@@ -6,4 +6,5 @@ node_modules
 dist
 .next
 coverage
+backups/
 .DS_Store

@@ -41,7 +41,7 @@ export default async function ProviderDetailsPage({
           <div className="provider-identity-content">
             <h2>{publicName}</h2>
             <p className="subtitle">
-              {profile.categories[0]?.name ?? "Profissional verificado"}
+              {profile.categories[0]?.name ?? "Profissional Tchuno"}
             </p>
             <p className="subtitle">
               {profile.location ?? "Localização não indicada"}

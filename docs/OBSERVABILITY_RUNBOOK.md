@@ -30,6 +30,7 @@ Domains:
 - `auth`
 - `jobs`
 - `reviews`
+- `payments`
 
 Results:
 - `success`
@@ -94,6 +95,30 @@ Examples:
 5. Job funnel shows progression to `COMPLETED`.
 6. Review creation events are present after completed jobs.
 
+## Pilot Gate Questions
+
+An operator should be able to answer these without code changes:
+
+- Is the API process alive?
+  - Check `GET /observability/health`.
+- Is the API ready to serve traffic with database access?
+  - Check `GET /observability/ready`.
+- Which endpoint is failing?
+  - Inspect `tchuno_api_http_requests_total` by `route` and `status`.
+- Is there a spike in 5xx?
+  - Query metrics for `status` values beginning with `5`.
+- Which request id belongs to a user-reported failure?
+  - Capture the `x-request-id` response header or request log field.
+- Is the marketplace flow failing at request, proposal, selection, payment, or
+  contact unlock?
+  - Correlate HTTP route/status with business events and entity ids.
+- Is a payment stuck?
+  - Inspect payment intent status, transaction status, provider, and ledger
+  entries in the admin payments surface.
+- Is an upload failing?
+  - Confirm the presign request status, MIME, size, generated key, job
+  ownership, and contact unlock state.
+
 ## Incident Triage (Quick)
 
 1. Capture `x-request-id` from failing client request.
@@ -101,3 +126,31 @@ Examples:
 3. Check metrics for the same route/status window.
 4. Validate DB and API status.
 5. Open incident note with timestamp, scope, root cause, fix.
+
+Classify the incident as one of:
+
+- application;
+- database;
+- payment;
+- security;
+- abuse/trust-safety;
+- availability.
+
+Use `OperationalIncident` through the support ops surface when the issue affects
+pilot users, provider work, payment flow, or availability.
+
+## Log Security
+
+Logs may include operational identifiers such as `requestId`, `userId`, route,
+status, and entity ids. Logs must not be used as storage for sensitive personal
+data.
+
+Do not log:
+
+- passwords;
+- access JWTs;
+- refresh tokens;
+- raw `Authorization` headers;
+- secret keys;
+- storage credentials;
+- full payment provider credentials or webhook secrets.

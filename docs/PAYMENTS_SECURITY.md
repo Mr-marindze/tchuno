@@ -42,5 +42,8 @@
 
 - Track failed transactions and pending intents daily.
 - Investigate any mismatch between transaction status and ledger outcome.
+- In V1 pilot, operate with `PAYMENT_DEFAULT_PROVIDER=INTERNAL` unless a
+  separate approved decision changes the mode.
+- Do not describe `MPESA` or `EMOLA` simulated adapters as live integrations.
 - Restrict production webhook access to trusted provider origins when available.
 - Keep `PAYMENT_WEBHOOK_SECRET_*` and reconciliation envs configured per environment.

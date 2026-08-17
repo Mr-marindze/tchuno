@@ -22,6 +22,8 @@
     "staging:api": "bash scripts/staging/start-api.sh",
     "staging:web": "bash scripts/staging/start-web.sh",
     "staging:check": "bash scripts/staging/health-check.sh",
+    "ops:backup:postgres": "bash scripts/ops/postgres-backup.sh",
+    "ops:restore:postgres": "bash scripts/ops/postgres-restore.sh",
     "ops:reset-password": "yarn workspace @tchuno/database reset-password",
     "ops:sync-categories": "yarn workspace @tchuno/database sync-categories-catalog",
     "lint": "yarn workspaces foreach -Apt run lint",

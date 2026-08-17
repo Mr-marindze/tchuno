@@ -43,6 +43,7 @@ partial capabilities, future work, and undecided ideas.
 
 - [Pilot checklist](PILOT_CHECKLIST.md)
 - [Pilot runbook](PILOT_RUNBOOK.md)
+- [Backup and restore runbook](BACKUP_RESTORE_RUNBOOK.md)
 - [Pilot user test script](PILOT_USER_TEST_SCRIPT.md)
 - [Pilot feedback template](PILOT_FEEDBACK_TEMPLATE.md)
 - [Password reset runbook](PASSWORD_RESET_RUNBOOK.md)

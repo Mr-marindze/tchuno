@@ -103,7 +103,7 @@ export function resolveWorkerPublicName(profile: WorkerProfile): string | null {
 
 export function resolveWorkerDisplayName(
   profile: WorkerProfile,
-  fallback = "Profissional verificado",
+  fallback = "Profissional Tchuno",
 ): string {
   return resolveWorkerPublicName(profile) ?? fallback;
 }

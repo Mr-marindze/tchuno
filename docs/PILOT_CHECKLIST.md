@@ -1,88 +1,125 @@
-# Real Pilot Readiness Checklist
+# Pilot Operational Gate Checklist
 
-References:
+This checklist is the executable gate for a controlled Tchuno pilot. It does
+not approve production launch.
 
-- `docs/PRODUCT_FLOW.md`
-- `docs/PAYMENTS_FLOW.md`
-- `docs/CANCELLATION_REFUND_POLICY.md`
-- `docs/PAYOUT_SYSTEM.md`
-- `docs/ANTI_LEAKAGE_UX.md`
-- `docs/PILOT_RUNBOOK.md`
+Use `PASS`, `FAIL`, `BLOCKED`, or `NOT RUN` for each item during a pilot gate
+review.
 
-## 1. Flow Integrity (Mandatory)
+## 1. Pre-Deploy
 
-- Customer can only start by creating `ServiceRequest`.
-- Providers can submit multiple `Proposal` entries per request.
-- Customer can select exactly one proposal.
-- `Job` is created only from selected proposal (`requestId` + `proposalId` present).
-- `POST /jobs` direct creation remains disabled (`410 Gone`).
-- Contact remains locked until deposit payment confirmation.
-- Execution transitions are blocked if no paid `PaymentIntent`.
+- [ ] Branch is `main`.
+- [ ] Commit under review is the approved pilot candidate.
+- [ ] GitHub Actions is green for:
+  - `lint-and-test`
+  - `coverage`
+  - `e2e`
+  - `smoke-web`
+  - `integration-web-api`
+  - `docker-build`
+- [ ] `.yarn/install-state.gz` or other local-only files are not part of the
+  release candidate.
+- [ ] `.env.staging` or pilot env file is created from `.env.staging.example`.
+- [ ] `NODE_ENV` is `staging` or `pilot` for the pilot runtime.
+- [ ] `DATABASE_URL`, JWT secrets, webhook secrets, and `WEB_ORIGIN` are
+  configured with non-placeholder values.
+- [ ] Database endpoint is reachable from the API host.
+- [ ] Storage envs are configured if attachment uploads are enabled for the
+  pilot.
+- [ ] Payment mode is explicitly set to `PAYMENT_DEFAULT_PROVIDER=INTERNAL`
+  unless a separate approved decision changes it.
+- [ ] Admin user exists and can authenticate.
+- [ ] Backup directory is outside Git tracking.
 
-## 2. Financial Readiness (Mandatory)
+## 2. Startup
 
-- Commission is calculated only on backend.
-- `PaymentIntent` is created immediately after selection.
-- Deposit payment writes append-only ledger entries:
-  - `CUSTOMER_CHARGE`
-  - `PLATFORM_FEE_RESERVED`
-  - `PROVIDER_BALANCE_HELD`
-- Refund policy is enforced by phase with `cancelReason` required.
-- Release after `COMPLETED` + dispute window.
-- Payout lifecycle (`PENDING -> APPROVED -> PROCESSING -> PAID/FAILED`) is operational.
-- Daily reconciliation run exists and is tested.
+- [ ] Validate compose config:
+  `docker compose -f docker-compose.yml config`.
+- [ ] For staging DB only, validate:
+  `docker compose --env-file .env.staging -f docker-compose.staging.yml config`.
+- [ ] Start PostgreSQL.
+- [ ] Run migrations:
+  `corepack yarn workspace @tchuno/database prisma migrate deploy`.
+- [ ] Run seed only where demo/pilot baseline data is intended:
+  `corepack yarn workspace @tchuno/database prisma db seed`.
+- [ ] Start API.
+- [ ] Start Web.
+- [ ] `GET /observability/health` returns `200`.
+- [ ] `GET /observability/ready` returns `200` and database check `ok`.
+- [ ] `GET /observability/metrics` returns Prometheus text.
+- [ ] Swagger is reachable at `/docs`.
 
-## 3. Security and Fraud Controls (Mandatory)
+## 3. Functional Smoke
 
-- Idempotency is enforced for payment, refund, payout and webhook handling.
-- Admin financial actions use RBAC + re-auth.
-- Audit logs exist for intent, charge, refund, release and payout actions.
-- Duplicate/replay events are safely deduplicated.
-- Risk events for leakage attempts are logged and observable.
+- [ ] Customer can log in.
+- [ ] Provider can log in.
+- [ ] Admin can log in.
+- [ ] Customer creates a `ServiceRequest`.
+- [ ] Provider submits a `Proposal`.
+- [ ] Customer selects one proposal.
+- [ ] Backend creates `Job` from `ServiceRequest -> Proposal -> Selection`.
+- [ ] `POST /jobs` direct creation remains blocked with `410 Gone`.
+- [ ] Payment intent is created after selection.
+- [ ] Payment simulation succeeds using the configured pilot provider.
+- [ ] Contact unlock happens only after backend-confirmed payment state.
+- [ ] Customer and provider can access job conversation after unlock.
+- [ ] Message send works.
+- [ ] Attachment presign/upload path is tested when storage is configured.
+- [ ] Review is created only after a completed job, if the UI path is included
+  in the pilot script.
 
-## 4. UX and Behavioral Alignment (Mandatory)
+## 4. Pilot Payment Mode
 
-- No legacy direct-job CTA remains in customer or provider UI.
-- Contact lock/unlock states are explicit and understandable.
-- Proposal selection screen explains deposit and protection value.
-- Payment pending/failure/retry states are clear and actionable.
-- Refund and cancellation expectations are shown before confirmation.
+- [ ] Operator confirms `PAYMENT_DEFAULT_PROVIDER=INTERNAL` for the controlled
+  pilot, or records a separate approved decision.
+- [ ] UI and documentation do not present M-Pesa/e-Mola as live integrations.
+- [ ] Payment success is triggered only through backend payment endpoints or
+  admin/reconciliation flows.
+- [ ] Admin can identify `PaymentIntent`, transactions, and ledger entries.
+- [ ] Expected paid deposit status is `PAID_PARTIAL`.
+- [ ] Failed or pending payment behavior is documented for the selected
+  provider.
 
-## 5. Operational Readiness (Mandatory)
+## 5. Pilot Users And Providers
 
-- Health and metrics endpoints are reachable in staging/production.
-- Support playbook includes cancellation, refund and payout cases.
-- Finance owner is assigned for reconciliation and payout exceptions.
-- Incident response owner and escalation channel are defined.
-- SLA targets are agreed for refund and payout operations.
+- [ ] Pilot customers are created through registration, seed, or controlled
+  admin/support process.
+- [ ] Pilot providers have a `User` plus `WorkerProfile`.
+- [ ] Provider availability is checked before inviting/using the provider in
+  pilot scenarios.
+- [ ] Providers are known to the pilot team.
+- [ ] UI copy does not claim identity/KYC verification.
+- [ ] Password recovery path is operationally understood.
 
-## 6. Validation Commands (Release Gate)
+## 6. Operational
 
-- `corepack yarn lint`
-- `corepack yarn test`
-- `corepack yarn test:e2e`
-- `corepack yarn ci`
+- [ ] Logs include `requestId`, route, status, duration, and user id where
+  applicable.
+- [ ] Operators can inspect metrics for 5xx spikes and failing routes.
+- [ ] Backup completed with `corepack yarn ops:backup:postgres`.
+- [ ] Restore test completed into an isolated database/schema.
+- [ ] Incident owner and escalation contact are recorded.
+- [ ] Rollback target commit/image is recorded before pilot start.
+- [ ] Support knows how to record operational incidents.
+- [ ] Trust/safety interventions can be reviewed by authorized admins.
 
-All must pass before pilot start.
+## 7. Security
 
-## 7. Pilot Dry-Run Scenarios (Must Pass)
+- [ ] Default or placeholder secrets are refused in `staging`, `pilot`, and
+  `production`.
+- [ ] Admin-only routes reject customer/provider access.
+- [ ] Critical admin actions require reauth.
+- [ ] Audit log captures critical admin operations.
+- [ ] Upload presign policy enforces ownership, contact unlock, MIME, size,
+  expiry, and server-generated keys.
+- [ ] Logs do not expose passwords, JWTs, refresh tokens, raw auth headers,
+  storage secrets, or webhook secrets.
+- [ ] No live-payment claim appears for simulated/internal payment operation.
 
-- Request creation -> multi-proposal -> selection -> job creation.
-- Selection -> payment intent -> successful deposit -> contact unlock.
-- Duplicate payment callback does not duplicate ledger entries.
-- Cancel before payment.
-- Cancel after payment and before `IN_PROGRESS` (full refund path).
-- Cancel after `IN_PROGRESS` (partial/manual path).
-- `COMPLETED` -> release funds after window -> payout execution.
-- Unauthorized admin user blocked from refund/payout approval actions.
+## 8. Go / No-Go
 
-## 8. Go / No-Go Decision
+Pilot may be `GO` only if every mandatory startup, smoke, backup/restore,
+payment, security, and observability item is green or has an explicit accepted
+mitigation.
 
-Go only if:
-
-- all mandatory sections above are green
-- zero unresolved Sev1/Sev2 defects
-- finance reconciliation mismatch is zero or understood with mitigation
-- support and operations team sign-off is recorded
-
-Otherwise: No-Go and delay pilot.
+Production remains `NO-GO`.

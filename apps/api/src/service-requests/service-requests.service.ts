@@ -148,7 +148,12 @@ export class ServiceRequestsService implements OnModuleInit, OnModuleDestroy {
   ) {}
 
   onModuleInit() {
-    void this.expireStaleOpenRequests();
+    void this.expireStaleOpenRequests().catch((error) => {
+      this.logger.error(
+        'Failed to expire stale service requests during startup',
+        error instanceof Error ? error.stack : undefined,
+      );
+    });
 
     const sweepIntervalMs = this.resolveRequestExpirySweepIntervalMs();
     if (sweepIntervalMs <= 0) {

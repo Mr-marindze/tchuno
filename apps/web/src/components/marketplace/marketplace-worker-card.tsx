@@ -81,7 +81,7 @@ export function MarketplaceWorkerCard({
       ? avatarFallbackLabel
       : typeof title === "string"
         ? title
-        : "Profissional verificado";
+        : "Profissional Tchuno";
   const avatarInitials = fallbackSource
     .trim()
     .split(/\s+/)

@@ -27,6 +27,9 @@ The repository contains implemented and tested foundations for:
   database readiness checks;
 - V1.2 security and integration hardening for message attachment upload policy
   and real browser-to-API-to-PostgreSQL marketplace integration.
+- V1.3 pilot operational gate for executable pilot runbooks, backup/restore,
+  Docker build CI coverage, simulated payment-mode clarity, and operational
+  readiness evidence.
 
 ## CURRENT FOUNDATION
 
@@ -55,10 +58,10 @@ feature expansion:
 4. Decide payments path: live provider integration, manual pilot operation, or
    staged hybrid.
 5. Add malware/content scanning policy for uploads.
-6. Add Docker image builds to CI.
+6. Add Docker image publishing/scanning after a deployment target is selected.
 7. Clarify provider onboarding and whether provider role remains profile-based.
 8. Define staging/deploy/release automation.
-9. Add backup and external observability plan.
+9. Replace manual pilot backup with automated managed backup and restore drills.
 10. Add security scanning to CI.
 
 ## FUTURE / UNDECIDED

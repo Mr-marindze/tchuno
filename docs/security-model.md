@@ -158,9 +158,10 @@ These are known gaps or hardening items, not automatically confirmed exploits:
 5. Password recovery is assisted/operational, not full self-service reset.
 6. Production deployment security gates are incomplete.
 7. External payment providers are simulated, not live production integrations.
-8. External observability, alerting, backups, and security scanning are not
-   complete.
-9. CSRF posture should be reviewed before production, especially around cookie
+8. Pilot backup/restore is implemented as a manual PostgreSQL process, but
+   production-grade automated backups are not complete.
+9. External observability, alerting, and security scanning are not complete.
+10. CSRF posture should be reviewed before production, especially around cookie
    and cross-origin deployment choices.
 
 ## Related Documents

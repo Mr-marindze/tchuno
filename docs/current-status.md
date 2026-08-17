@@ -1,8 +1,8 @@
 # Current Status
 
 This document is the current concise status baseline for Tchuno. It is based on
-repository inspection at commit `94e5bb1` on branch `main`, plus V1.2 security
-and integration hardening changes in the working tree.
+repository inspection at commit `18953b4` on branch `main`, plus V1.3 pilot
+operational gate changes in the working tree.
 
 V1.1 foundation hardening updates the baseline with demo seed compatibility,
 application Dockerfiles, local compose runtime, stricter non-development
@@ -12,10 +12,15 @@ the project production-ready.
 V1.2 hardens backend message attachment upload policy and adds a real
 browser-to-API-to-PostgreSQL integration test for the core marketplace path.
 
+V1.3 adds the pilot operational gate: executable pilot checklist, pilot
+runbook, PostgreSQL backup/restore scripts and runbook, Docker image build
+coverage in CI, observability/operator guidance, and explicit simulated
+payment-mode guidance.
+
 ## Git Baseline
 
 - Branch audited: `main`
-- Commit audited: `94e5bb1`
+- Commit audited: `18953b4`
 - Latest tag observed: `v0.4.0-mvp-release`
 - Pre-documentation working tree at audit time: modified
   `.yarn/install-state.gz` only; exclude it from the documentation baseline.
@@ -113,6 +118,14 @@ Additional V1.2 validation target:
 - Real browser-to-API-to-PostgreSQL marketplace integration: covered by
   `yarn test:integration:web-api` and CI job `integration-web-api`.
 
+Additional V1.3 validation target:
+
+- PostgreSQL backup and restore: implemented with `pg_dump`/`pg_restore`
+  scripts and documented for isolated restore drills.
+- Docker API/Web image build coverage: added to CI as build-only, no registry
+  push.
+- Staging checks include database-backed readiness.
+
 ## Production Readiness
 
 - Local development: GO.
@@ -134,11 +147,11 @@ Additional V1.2 validation target:
 8. Frontend integration against the real API exists for the core
     request/proposal/selection/payment path; provider execution transitions and
     review are still not exposed as a complete browser flow.
-9. Backup strategy is not implemented in repo.
+9. Backup automation is minimal/manual for pilot and not production-grade.
 10. External observability and alerting are not implemented in repo.
 11. Security scanning is not configured in CI.
 12. Deploy/release automation is not implemented.
-13. CI does not build Docker images.
+13. CI builds Docker images but does not publish or scan them.
 14. The Docker runtime is suitable for local/pilot validation, not a complete
     production platform.
 

@@ -27,6 +27,34 @@ Introduce a safe internal payments domain before integrating real electronic-mon
 - `MKESH` and `BANK_TRANSFER` still fallback to internal adapter until dedicated adapters are implemented.
 - Default provider for new deposit intents can be set via `PAYMENT_DEFAULT_PROVIDER`.
 
+## Pilot Payment Mode
+
+The V1 controlled pilot uses:
+
+```text
+SIMULATED / INTERNAL / MANUAL PILOT PAYMENT MODE
+```
+
+Recommended pilot setting:
+
+```bash
+PAYMENT_DEFAULT_PROVIDER=INTERNAL
+```
+
+In this mode:
+
+- payment success is simulated by the backend gateway through
+  `POST /payments/intents/:id/pay`;
+- successful deposit intents become `PAID_PARTIAL`;
+- contact unlock is derived from backend payment state;
+- admins identify payment state through `PaymentIntent`,
+  `PaymentTransaction`, and ledger views;
+- no live M-Pesa/e-Mola charge is performed.
+
+`MPESA` and `EMOLA` labels in the current code represent simulated external
+adapters only. They must not be presented to pilot users as live payment
+integrations.
+
 ## Implemented API Surface
 
 ### Customer

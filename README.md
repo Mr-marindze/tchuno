@@ -178,6 +178,7 @@ Operations:
 - [Pilot checklist](docs/PILOT_CHECKLIST.md)
 - [Pilot runbook](docs/PILOT_RUNBOOK.md)
 - [Observability runbook](docs/OBSERVABILITY_RUNBOOK.md)
+- [Backup and restore runbook](docs/BACKUP_RESTORE_RUNBOOK.md)
 
 Decisions:
 
@@ -197,7 +198,8 @@ Decisions:
 - There is no Redis/queue worker process today; timer/runner work lives inside
   the API.
 - CI includes a real browser-to-API-to-PostgreSQL integration job for the core
-  marketplace path, but does not yet build Docker images.
+  marketplace path and Docker image build coverage, but does not publish
+  images.
 
 ## Out Of Scope
 

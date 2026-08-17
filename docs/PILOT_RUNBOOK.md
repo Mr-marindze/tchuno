@@ -1,117 +1,308 @@
-# Pilot Runbook (MVP)
+# Pilot Runbook
 
-## Objetivo
+This runbook describes how to operate a small controlled Tchuno pilot. It is
+for local, demo, staging, and pilot-like environments. It is not a production
+runbook.
 
-Garantir operação mínima consistente em staging para piloto controlado, com
-passos claros para subir ambiente, validar fluxos e recolher evidências.
+## 1. Runtime Modes
 
-## Pré-requisitos
+### Local Docker Runtime
 
-1. `.env.staging` preenchido e válido.
-2. Docker ativo.
-3. Dependências instaladas (`corepack yarn install`).
+Use this when validating the full local application stack:
 
-## 1) Subir staging
+```bash
+docker compose -f docker-compose.yml config
+docker compose -f docker-compose.yml up --build
+```
 
-1. Subir base de dados:
-   - `corepack yarn staging:db:up`
-2. Aplicar migrations + seed:
-   - `corepack yarn staging:bootstrap`
-3. Subir API (terminal 1):
-   - `corepack yarn staging:api`
-4. Subir Web (terminal 2):
-   - `corepack yarn staging:web`
-5. Validar saúde:
-   - `corepack yarn staging:check`
+The local compose file starts PostgreSQL, runs migrations and seed through
+`db-bootstrap`, then starts API and Web.
 
-## 1.1) Runtime Docker local/piloto
+Local compose secrets are development-only and must not be copied to staging,
+pilot, or production.
 
-Para validar a imagem aplicacional e bootstrap local:
+### Staging/Pilot Manual Runtime
 
-1. Validar configuração compose:
-   - `docker compose -f docker-compose.yml config`
-2. Subir DB, bootstrap, API e Web:
-   - `docker compose -f docker-compose.yml up --build`
-3. Validar endpoints:
-   - `GET /observability/health`
-   - `GET /observability/ready`
+The current staging compose file starts PostgreSQL only. API and Web are
+started by scripts from the checked-out codebase:
 
-As secrets embutidas no compose local são apenas de desenvolvimento. Em
-staging/piloto/produção, usar `.env.staging`/secret manager com valores reais.
+```bash
+corepack yarn staging:db:up
+corepack yarn staging:bootstrap
+corepack yarn staging:api
+corepack yarn staging:web
+corepack yarn staging:check
+```
 
-## 2) Contas demo (seed)
+Because `docker-compose.staging.yml` does not run API and Web containers,
+staging is `GO WITH CONDITIONS` until a complete deploy/runtime definition
+exists.
 
-- Email: `admin@tchuno.local` | Password: `demo1234`
-- Email: `client1@tchuno.local` | Password: `demo1234`
-- Email: `client2@tchuno.local` | Password: `demo1234`
-- Email: `worker1@tchuno.local` | Password: `demo1234`
-- Email: `worker2@tchuno.local` | Password: `demo1234`
+## 2. Environment
 
-## 3) Validação funcional rápida
+Create `.env.staging` from `.env.staging.example`.
 
-### Fluxo oficial Service Request
+Required pilot/staging values:
 
-1. Cliente cria `ServiceRequest`.
-2. Pelo menos 2 prestadores submetem `Proposal`.
-3. Cliente seleciona 1 proposta.
-4. Sistema cria `Job` + `PaymentIntent` de sinal.
-5. Cliente paga sinal.
-6. Confirmar desbloqueio de contacto apenas após pagamento.
-7. Prestador executa: `REQUESTED -> ACCEPTED -> IN_PROGRESS -> COMPLETED`.
-8. Cliente publica review.
+- `NODE_ENV=staging` or `NODE_ENV=pilot`
+- `DATABASE_URL`
+- `JWT_ACCESS_SECRET`
+- `JWT_REFRESH_SECRET`
+- `WEB_ORIGIN`
+- `NEXT_PUBLIC_API_URL`
+- `PAYMENT_DEFAULT_PROVIDER=INTERNAL`
+- `PAYMENT_WEBHOOK_SECRET`
+- `PAYMENT_WEBHOOK_SECRET_MPESA`
+- `PAYMENT_WEBHOOK_SECRET_EMOLA`
 
-### Fluxos financeiros críticos
+For `staging`, `pilot`, and `production`, placeholder and short sensitive
+values are refused at API startup.
 
-1. Cancelamento antes do pagamento.
-2. Cancelamento depois do pagamento e antes de `IN_PROGRESS` (refund total).
-3. Cancelamento após `IN_PROGRESS` (refund parcial/manual).
-4. `COMPLETED` -> janela de disputa -> release -> payout.
-5. Callback duplicado não pode duplicar ledger.
+## 3. Start
 
-### Regras operacionais críticas
+1. Confirm branch and commit.
+2. Confirm CI is green.
+3. Confirm `.env.staging` or pilot env file is populated.
+4. Start DB.
+5. Run migrations:
+   `corepack yarn workspace @tchuno/database prisma migrate deploy`.
+6. Run seed when using demo/pilot baseline accounts:
+   `corepack yarn workspace @tchuno/database prisma db seed`.
+7. Start API.
+8. Start Web.
+9. Run `corepack yarn staging:check` or equivalent endpoint checks.
 
-1. Cancelamento exige motivo.
-2. Review só pode ser criada após `COMPLETED`.
-3. CTA principal no dashboard deve estar único e coerente por estado/contexto.
+## 4. Stop
 
-## 4) Limpeza de dados de teste
+For local compose:
 
-### Opção A (rápida, não destrutiva)
+```bash
+docker compose -f docker-compose.yml down
+```
 
-1. Reaplicar seed para restaurar baseline demo:
-   - `set -a && source .env.staging && set +a && corepack yarn workspace @tchuno/database prisma db seed`
+For staging DB:
 
-### Opção B (reset total staging, destrutiva)
+```bash
+corepack yarn staging:db:down
+```
 
-1. Derrubar BD com volume:
-   - `docker compose --env-file .env.staging -f docker-compose.staging.yml down -v`
-2. Subir novamente:
-   - `corepack yarn staging:db:up`
-3. Recriar baseline:
-   - `corepack yarn staging:bootstrap`
+Do not use `down -v` unless intentionally deleting the database volume after a
+backup and approval.
 
-## 5) Evidências mínimas
+Stop manually started API/Web processes with `Ctrl+C` or the supervisor used by
+the pilot environment.
 
-1. Screenshots do dashboard (desktop e mobile) com timeline e CTA por estado.
-2. Registo de `x-request-id` para falhas observadas.
-3. Resultado da saúde:
-   - `GET /observability/health`
-   - `GET /observability/ready`
-   - `GET /observability/metrics`
-4. Nota curta dos cenários validados (pass/fail + timestamp).
+## 5. Validate
 
-## 6) Observações conhecidas de staging
+API:
 
-1. Se aparecer `Status: Failed to fetch`, validar API em execução na porta de
-   staging e `NEXT_PUBLIC_API_URL`.
-2. Confirmar `WEB_ORIGIN` com hosts usados (ex.: `localhost` e `127.0.0.1`).
-3. Após mudanças de schema, sempre correr bootstrap antes do smoke.
+- `GET /observability/health` confirms the API process is alive.
+- `GET /observability/ready` confirms API readiness and database access.
+- `GET /observability/metrics` exposes Prometheus metrics.
+- `GET /docs` exposes Swagger.
 
-## 7) Gate antes de demo/piloto
+Web:
 
-1. `corepack yarn ci` verde.
-2. Fluxo `ServiceRequest -> Proposal -> Selection -> Job` validado ponta a ponta.
-3. Sinal obrigatório e desbloqueio de contacto pós-pagamento validados.
-4. Cancelamento com motivo + refund por fase validados.
-5. Review pós-`COMPLETED` validada.
-6. Painel `Admin Ops` a responder no dashboard admin.
+- Open `/`.
+- Open customer `/app/pedidos`.
+- Open provider `/pro/pedidos`.
+- Open admin `/admin`.
+
+Core pilot flow:
+
+1. Customer logs in.
+2. Customer creates a service request.
+3. Provider logs in.
+4. Provider submits proposal.
+5. Customer selects proposal.
+6. Backend creates job and payment intent.
+7. Customer pays simulated deposit.
+8. Contact unlock appears.
+9. Customer/provider exchange message.
+10. Attachment flow is tested only when storage is configured.
+
+## 6. Pilot Payment Mode
+
+Live providers are outside V1.
+
+The controlled pilot payment mode is:
+
+```text
+SIMULATED / INTERNAL / MANUAL PILOT PAYMENT MODE
+```
+
+Default setting:
+
+```bash
+PAYMENT_DEFAULT_PROVIDER=INTERNAL
+```
+
+Behavior:
+
+- selection creates a deposit `PaymentIntent`;
+- `POST /payments/intents/:id/pay` simulates payment through the configured
+  backend gateway;
+- successful internal deposit transitions the intent to `PAID_PARTIAL`;
+- contact unlock is based on backend payment state, not a client claim;
+- admin can inspect intents, transactions, refunds, payouts, and ledger
+  entries in the admin payments surface.
+
+`MPESA` and `EMOLA` adapters are simulated external adapters. They must not be
+described as live integrations during the pilot.
+
+## 7. Pilot Users And Providers
+
+Seeded demo accounts:
+
+- `admin@tchuno.local` / `demo1234`
+- `client1@tchuno.local` / `demo1234`
+- `client2@tchuno.local` / `demo1234`
+- `worker1@tchuno.local` / `demo1234`
+- `worker2@tchuno.local` / `demo1234`
+
+Customer pilot process:
+
+1. Create account through registration or seed.
+2. Confirm login.
+3. Use assisted password recovery/admin support if access is lost.
+
+Provider pilot process:
+
+1. Create a user account.
+2. Create or update `WorkerProfile`.
+3. Assign controlled categories.
+4. Set availability and service areas.
+5. Use only known pilot providers.
+
+Tchuno does not currently implement formal KYC. UI and operator language must
+not claim that providers are identity verified.
+
+## 8. Diagnose
+
+API unavailable:
+
+- check API process logs;
+- check `API_PORT`;
+- check `WEB_ORIGIN`;
+- call `/observability/health`.
+
+Database unavailable:
+
+- call `/observability/ready`;
+- check PostgreSQL container/service;
+- verify `DATABASE_URL`;
+- run `pg_isready` from the API host where possible.
+
+Request/proposal/job issue:
+
+- capture `x-request-id`;
+- inspect structured logs by `requestId`;
+- check service request status, proposal status, job status, and ownership.
+
+Payment simulation issue:
+
+- confirm `PAYMENT_DEFAULT_PROVIDER`;
+- inspect `PaymentIntent`, `PaymentTransaction`, and ledger entries;
+- run admin pending reconciliation only for simulated external providers.
+
+Upload issue:
+
+- confirm storage envs;
+- confirm job participant ownership;
+- confirm contact unlock;
+- confirm MIME, file extension, size, and expiry policy.
+
+## 9. Recover
+
+Restart:
+
+1. Stop API/Web.
+2. Confirm DB is healthy.
+3. Start API.
+4. Start Web.
+5. Re-run health/readiness and smoke checks.
+
+Stuck operation:
+
+1. Record an operational incident.
+2. Preserve request ids and affected entity ids.
+3. Use admin/support surfaces where available.
+4. Avoid direct DB mutation unless reviewed and documented.
+
+Restore:
+
+- follow [Backup and restore runbook](BACKUP_RESTORE_RUNBOOK.md);
+- restore only into the intended target;
+- validate user, request, proposal, and job counts after restore.
+
+## 10. Rollback
+
+Application rollback:
+
+1. Identify last known-good commit/image.
+2. Stop current API/Web.
+3. Deploy or checkout last known-good application code/image.
+4. Keep the database at the current migrated state unless a reviewed database
+   recovery plan is approved.
+5. Run health/readiness and pilot smoke.
+
+Database rollback:
+
+- migrations are treated as forward-only by default;
+- do not promise automatic destructive migration rollback;
+- restore from backup into a clean target if data rollback is required;
+- reconcile application code with the restored schema before reopening pilot
+  access.
+
+## 11. Incident Handling
+
+Minimum incident lifecycle:
+
+```text
+Detect -> Record -> Classify -> Mitigate -> Resolve -> Review
+```
+
+Classify at least:
+
+- application;
+- database;
+- payment;
+- security;
+- abuse/trust-safety;
+- availability.
+
+Use existing `OperationalIncident`, support ops, trust/safety, audit logs, and
+payment admin surfaces. Do not create a parallel tracker unless the repository
+system is unavailable.
+
+## 12. Operational Roles
+
+Super/Admin:
+
+- environment configuration;
+- critical user/admin changes;
+- audit review;
+- final gate decision.
+
+Ops:
+
+- incidents;
+- stuck jobs/payments;
+- readiness and metrics;
+- backup/restore execution.
+
+Support:
+
+- user access issues;
+- pilot participant communication;
+- basic disputes;
+- incident intake.
+
+Finance/Admin:
+
+- payment intent review;
+- refunds;
+- payouts;
+- reconciliation.
+
+No new RBAC model is required for the pilot.

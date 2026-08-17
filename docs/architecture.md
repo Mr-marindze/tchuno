@@ -121,6 +121,11 @@ Current observability includes:
 - structured request logging;
 - business metrics for auth, jobs, reviews, payments, and related flows.
 
+The API does not eagerly connect Prisma during module initialization. Database
+availability is checked through readiness and through routes that need the
+database, allowing liveness and readiness to remain separate operational
+signals.
+
 External monitoring, alerting, and production dashboards are not implemented in
 this repository.
 
@@ -136,14 +141,16 @@ Current infrastructure files:
   Web stack.
 - `docker-compose.staging.yml`: staging PostgreSQL database.
 - `.github/workflows/ci.yml`: lint/unit, coverage, API e2e, mocked web smoke,
-  and real Web/API/PostgreSQL integration jobs.
+  real Web/API/PostgreSQL integration, and Docker image build jobs.
+- `scripts/ops/postgres-backup.sh` and `scripts/ops/postgres-restore.sh`:
+  manual PostgreSQL backup/restore helpers for pilot operations.
 
 Current limitations:
 
 - no complete production deployment platform or release pipeline;
 - no Redis or queue worker;
 - no reverse proxy config;
-- no backup automation;
+- no production-grade automated backup platform;
 - no deploy pipeline.
 
 ## Timers And Background Work
@@ -181,7 +188,7 @@ Current limitations:
 
 - the frontend does not expose attachment uploads yet;
 - malware/content scanning is not implemented;
-- CI does not build Docker images.
+- CI builds Docker images but does not publish or scan them.
 
 ## Integration Testing
 
