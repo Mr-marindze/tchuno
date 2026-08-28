@@ -1,0 +1,12 @@
+# Default repository ownership.
+* @Mr-marindze
+
+# Application areas.
+/apps/api/ @Mr-marindze
+/apps/web/ @Mr-marindze
+/packages/database/ @Mr-marindze
+
+# Product, architecture, security, and operations documentation.
+/docs/ @Mr-marindze
+/AGENTS.md @Mr-marindze
+/README.md @Mr-marindze
